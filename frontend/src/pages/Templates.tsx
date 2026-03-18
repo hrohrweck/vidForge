@@ -134,7 +134,6 @@ export default function Templates() {
   const queryClient = useQueryClient()
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [templateToUse, setTemplateToUse] = useState<Template | null>(null)
 
   const { data: templates, isLoading } = useQuery({
     queryKey: ['templates'],
@@ -148,8 +147,7 @@ export default function Templates() {
     },
   })
 
-  const handleUseTemplate = (template: Template) => {
-    setTemplateToUse(template)
+  const handleUseTemplate = (_template: Template) => {
     setShowCreateModal(true)
     setSelectedTemplate(null)
   }
@@ -244,7 +242,6 @@ export default function Templates() {
         <JobCreateModal
           onClose={() => {
             setShowCreateModal(false)
-            setTemplateToUse(null)
           }}
         />
       )}

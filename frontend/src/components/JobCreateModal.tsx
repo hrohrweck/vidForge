@@ -36,7 +36,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     (t: Template) => t.id === selectedTemplateId
   )
 
-  const templateInputs: TemplateInput[] = selectedTemplate?.config?.inputs || []
+  const templateInputs: TemplateInput[] = (selectedTemplate?.config?.inputs as TemplateInput[]) || []
 
   useEffect(() => {
     if (templateInputs.length > 0) {

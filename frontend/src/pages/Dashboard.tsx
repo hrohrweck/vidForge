@@ -119,7 +119,7 @@ export default function Dashboard() {
         <div>
           <h2 className="text-xl font-semibold mb-4">Templates</h2>
           <div className="border rounded-lg divide-y">
-            {templates?.slice(0, 5).map((template) => (
+            {templates?.data?.slice(0, 5).map((template) => (
               <div key={template.id} className="p-4">
                 <p className="font-medium">{template.name}</p>
                 <p className="text-sm text-muted-foreground">
@@ -127,7 +127,7 @@ export default function Dashboard() {
                 </p>
               </div>
             ))}
-            {(!templates || templates.length === 0) && (
+            {(!templates?.data || templates.data.length === 0) && (
               <p className="p-4 text-muted-foreground text-center">
                 No templates available
               </p>

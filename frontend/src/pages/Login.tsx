@@ -20,7 +20,7 @@ export default function Login() {
     onSuccess: async (response) => {
       const { access_token } = response.data
       const userResponse = await authApi.getMe()
-      setAuth(access_token, userResponse.data)
+      setAuth(access_token, { ...userResponse.data, is_superuser: false })
       navigate('/')
     },
     onError: () => {

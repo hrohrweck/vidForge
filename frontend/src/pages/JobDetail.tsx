@@ -5,8 +5,6 @@ import { ArrowLeft, Trash2, Download, Play, RefreshCw } from 'lucide-react'
 import { jobsApi, type Job } from '../api/client'
 import { Button } from '../components/ui/button'
 import VideoPlayer from '../components/VideoPlayer'
-import { useAuthStore } from '../stores/auth'
-
 interface WebSocketMessage {
   type: 'progress' | 'completed' | 'error' | 'failed'
   job_id: string
@@ -22,7 +20,6 @@ export default function JobDetail() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localJob, setLocalJob] = useState<Job | null>(null)
-  const token = useAuthStore((state) => state.token)
 
   const { data: serverJob, isLoading } = useQuery({
     queryKey: ['job', id],
@@ -30,7 +27,7 @@ export default function JobDetail() {
     enabled: !!id,
   })
 
-  const job = localJob || serverJob?.data
+  const job = localJob || serverJob
 
   const deleteMutation = useMutation({
     mutationFn: () => jobsApi.delete(id!),
