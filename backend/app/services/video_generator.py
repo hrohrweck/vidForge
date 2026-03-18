@@ -6,6 +6,12 @@ from uuid import UUID
 
 from app.config import get_settings
 from app.services import ComfyUIClient
+from app.services.audio_generation import (
+    MusicGenService,
+    TTSService,
+    generate_background_music,
+    generate_narration,
+)
 from app.services.llm_service import enhance_prompt_for_video, segment_script_for_video
 from app.services.template_loader import (
     TemplateLoader,
@@ -82,6 +88,9 @@ class VideoGenerator:
                 result = await self._generate_video(step, context, style_params)
                 context.update(result)
                 final_video = result.get("video")
+            elif step_name == "generate_narration":
+                result = await self._generate_narration(step, context)
+                context.update(result)
             elif step_name == "generate_audio":
                 result = await self._generate_audio(step, context)
                 context.update(result)
@@ -315,32 +324,124 @@ class VideoGenerator:
     async def _generate_audio(self, step: dict, context: dict) -> dict[str, Any]:
         prompt = context.get("prompt", "")
         duration = context.get("duration", 5)
+        audio_type = step.get("params", {}).get("type", "music")
 
         audio_path = self.output_dir / "audio.mp3"
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "python",
-                "-m",
-                "audiocraft",
-                "generate",
-                "--prompt",
-                prompt,
-                "--duration",
-                str(duration),
-                "--output",
-                str(audio_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.communicate()
+            if audio_type == "narration":
+                script = context.get("script", prompt)
+                voice = step.get("params", {}).get("voice", "en-US-AriaNeural")
+                tts_backend = step.get("params", {}).get("tts_backend", "edge")
 
-            if audio_path.exists():
-                return {"audio": str(audio_path)}
+                tts = TTSService(self.output_dir)
+                await tts.generate(
+                    text=script,
+                    output_path=str(audio_path),
+                    voice=voice,
+                    backend=tts_backend,
+                )
+
+                if audio_path.exists():
+                    return {"audio": str(audio_path)}
+
+            elif audio_type == "music":
+                music_service = MusicGenService(self.output_dir)
+                await music_service.generate(
+                    prompt=prompt,
+                    output_path=str(audio_path).replace(".mp3", ".wav"),
+                    duration=duration,
+                    model=step.get("params", {}).get("model", "facebook/musicgen-small"),
+                )
+
+                wav_path = Path(str(audio_path).replace(".mp3", ".wav"))
+                if wav_path.exists():
+                    proc = await asyncio.create_subprocess_exec(
+                        "ffmpeg",
+                        "-i",
+                        str(wav_path),
+                        "-y",
+                        str(audio_path),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await proc.communicate()
+                    wav_path.unlink()
+
+                    if audio_path.exists():
+                        return {"audio": str(audio_path)}
+
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    "python",
+                    "-m",
+                    "audiocraft",
+                    "generate",
+                    "--prompt",
+                    prompt,
+                    "--duration",
+                    str(duration),
+                    "--output",
+                    str(audio_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+
+                if audio_path.exists():
+                    return {"audio": str(audio_path)}
         except Exception:
             pass
 
         return {"audio": None}
+
+    async def _generate_narration(self, step: dict, context: dict) -> dict[str, Any]:
+        script = context.get("script", context.get("prompt", ""))
+        voice = step.get("params", {}).get("voice", "en-US-AriaNeural")
+        tts_backend = step.get("params", {}).get("backend", "edge")
+
+        narration_path = self.output_dir / "narration.mp3"
+
+        try:
+            tts = TTSService(self.output_dir)
+            await tts.generate(
+                text=script,
+                output_path=str(narration_path),
+                voice=voice,
+                backend=tts_backend,
+            )
+
+            if narration_path.exists():
+                duration = await self._get_audio_duration(str(narration_path))
+                return {
+                    "audio": str(narration_path),
+                    "narration_duration": duration,
+                }
+        except Exception:
+            pass
+
+        return {"audio": None, "narration_duration": 0}
+
+    async def _get_audio_duration(self, audio_path: str) -> float:
+        import json
+
+        cmd = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            audio_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        info = json.loads(stdout.decode())
+        return float(info.get("format", {}).get("duration", 0))
 
     async def _combine_av(self, step: dict, context: dict) -> dict[str, Any]:
         video_path = context.get("video")

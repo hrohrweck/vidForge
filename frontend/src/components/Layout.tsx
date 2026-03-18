@@ -1,17 +1,19 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Video, FileVideo, Settings, LogOut, Clapperboard } from 'lucide-react'
+import { Video, FileVideo, Settings, LogOut, Clapperboard, Shield } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import { cn } from '../lib/utils'
 
-const navItems = [
+const getNavItems = (isSuperuser: boolean) => [
   { to: '/', label: 'Dashboard', icon: Video },
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
   { to: '/settings', label: 'Settings', icon: Settings },
+  ...(isSuperuser ? [{ to: '/admin', label: 'Admin', icon: Shield }] : []),
 ]
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
+  const navItems = getNavItems(user?.is_superuser || false)
 
   return (
     <div className="min-h-screen bg-background">

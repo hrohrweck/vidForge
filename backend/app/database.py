@@ -35,12 +35,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
-    email: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, index=True
-    )
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -49,9 +45,7 @@ class User(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    jobs: Mapped[list["Job"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
+    jobs: Mapped[list["Job"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     templates: Mapped[list["Template"]] = relationship(
         back_populates="creator", cascade="all, delete-orphan"
     )
@@ -74,17 +68,13 @@ class UserSettings(Base):
     preferences: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="settings")
-    default_style: Mapped["Style | None"] = relationship(
-        back_populates="users_using_default"
-    )
+    default_style: Mapped["Style | None"] = relationship(back_populates="users_using_default")
 
 
 class Job(Base):
     __tablename__ = "jobs"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -96,6 +86,7 @@ class Job(Base):
     input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     output_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     preview_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -108,9 +99,7 @@ class Job(Base):
 class Template(Base):
     __tablename__ = "templates"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -130,9 +119,7 @@ class Template(Base):
 class Style(Base):
     __tablename__ = "styles"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
@@ -141,6 +128,4 @@ class Style(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    users_using_default: Mapped[list["UserSettings"]] = relationship(
-        back_populates="default_style"
-    )
+    users_using_default: Mapped[list["UserSettings"]] = relationship(back_populates="default_style")

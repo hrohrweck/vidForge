@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, jobs, styles, storage, templates, uploads, users
+from app.api import admin, auth, jobs, styles, storage, templates, uploads, users
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
 from app.database import create_tables
@@ -41,6 +41,7 @@ app.include_router(templates.router, prefix="/api/templates", tags=["templates"]
 app.include_router(styles.router, prefix="/api/styles", tags=["styles"])
 app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/health")

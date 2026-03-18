@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.database import User
+from app.services.video_processor import VideoProcessor
 from app.storage import get_storage_backend
 
 router = APIRouter()
@@ -180,3 +181,95 @@ async def stream_file(
             "Content-Length": str(len(content)),
         },
     )
+
+
+class ThumbnailResponse(BaseModel):
+    thumbnails: list[str]
+    count: int
+
+
+@router.get("/thumbnail/{path:path}", response_class=Response)
+async def get_video_thumbnail(
+    path: str,
+    timestamp: float = 0.0,
+    width: int = 320,
+    height: int = 180,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+) -> Response:
+    import tempfile
+    import uuid
+
+    storage = get_storage_backend()
+
+    try:
+        content = await storage.download(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    with tempfile.NamedTemporaryFile(suffix=Path(path).suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    thumb_path = tempfile.mktemp(suffix=".jpg")
+
+    try:
+        await VideoProcessor.generate_thumbnail(tmp_path, thumb_path, timestamp, width, height)
+
+        if not Path(thumb_path).exists():
+            raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
+
+        with open(thumb_path, "rb") as f:
+            thumb_content = f.read()
+
+        return Response(
+            content=thumb_content,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Content-Length": str(len(thumb_content)),
+            },
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+        Path(thumb_path).unlink(missing_ok=True)
+
+
+@router.get("/thumbnails/{path:path}", response_model=ThumbnailResponse)
+async def get_video_thumbnails(
+    path: str,
+    count: int = 5,
+    width: int = 320,
+    height: int = 180,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+) -> ThumbnailResponse:
+    import tempfile
+
+    storage = get_storage_backend()
+
+    try:
+        content = await storage.download(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    with tempfile.NamedTemporaryFile(suffix=Path(path).suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    thumb_dir = tempfile.mkdtemp()
+
+    try:
+        thumbnails = await VideoProcessor.generate_thumbnails(
+            tmp_path, thumb_dir, count, width, height
+        )
+
+        thumb_urls = []
+        for thumb in thumbnails:
+            thumb_name = Path(thumb).name
+            thumb_urls.append(f"/api/uploads/stream/{path}/../thumbnails/{thumb_name}")
+
+        return ThumbnailResponse(thumbnails=thumb_urls, count=len(thumb_urls))
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+        import shutil
+
+        shutil.rmtree(thumb_dir, ignore_errors=True)

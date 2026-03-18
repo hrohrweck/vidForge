@@ -6,6 +6,7 @@ import Jobs from './pages/Jobs'
 import JobDetail from './pages/JobDetail'
 import Templates from './pages/Templates'
 import Settings from './pages/Settings'
+import Admin from './pages/Admin'
 import Login from './pages/Login'
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
           <Route path="jobs/:id" element={<JobDetail />} />
           <Route path="templates" element={<Templates />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
