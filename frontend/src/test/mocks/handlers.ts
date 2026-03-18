@@ -1,16 +1,14 @@
 import { http, HttpResponse } from 'msw'
 
-const API_BASE = 'http://localhost:8000/api'
-
 export const handlers = [
-  http.post(`${API_BASE}/auth/login`, () => {
+  http.post('*/api/auth/login', () => {
     return HttpResponse.json({
       access_token: 'test-token',
       token_type: 'bearer'
     })
   }),
   
-  http.post(`${API_BASE}/auth/register`, () => {
+  http.post('*/api/auth/register', () => {
     return HttpResponse.json({
       id: '1',
       email: 'test@example.com',
@@ -19,7 +17,7 @@ export const handlers = [
     })
   }),
   
-  http.get(`${API_BASE}/auth/me`, ({ request }) => {
+  http.get('*/api/auth/me', ({ request }) => {
     const auth = request.headers.get('Authorization')
     if (!auth) {
       return new HttpResponse(null, { status: 401 })
@@ -42,7 +40,7 @@ export const handlers = [
     })
   }),
   
-  http.get(`${API_BASE}/jobs`, ({ request }) => {
+  http.get('*/api/jobs', ({ request }) => {
     const auth = request.headers.get('Authorization')
     if (!auth) {
       return new HttpResponse(null, { status: 401 })
@@ -65,7 +63,7 @@ export const handlers = [
     ])
   }),
   
-  http.post(`${API_BASE}/jobs`, () => {
+  http.post('*/api/jobs', () => {
     return HttpResponse.json({
       id: '2',
       status: 'pending',
@@ -75,21 +73,21 @@ export const handlers = [
     }, { status: 200 })
   }),
   
-  http.post(`${API_BASE}/jobs/batch`, () => {
+  http.post('*/api/jobs/batch', () => {
     return HttpResponse.json({
       created_count: 2,
       job_ids: ['3', '4']
     })
   }),
   
-  http.post(`${API_BASE}/jobs/batch/csv`, () => {
+  http.post('*/api/jobs/batch/csv', () => {
     return HttpResponse.json({
       created_count: 3,
       job_ids: ['5', '6', '7']
     })
   }),
   
-  http.get(`${API_BASE}/jobs/:id`, ({ params }) => {
+  http.get('*/api/jobs/:id', ({ params }) => {
     return HttpResponse.json({
       id: params.id,
       status: 'pending',
@@ -99,11 +97,11 @@ export const handlers = [
     })
   }),
   
-  http.delete(`${API_BASE}/jobs/:id`, () => {
+  http.delete('*/api/jobs/:id', () => {
     return HttpResponse.json({ status: 'deleted' })
   }),
   
-  http.get(`${API_BASE}/templates`, () => {
+  http.get('*/api/templates', () => {
     return HttpResponse.json([
       {
         id: '1',
@@ -121,7 +119,7 @@ export const handlers = [
     ])
   }),
   
-  http.get(`${API_BASE}/templates/:id`, ({ params }) => {
+  http.get('*/api/templates/:id', ({ params }) => {
     return HttpResponse.json({
       id: params.id,
       name: 'Test Template',
@@ -136,7 +134,7 @@ export const handlers = [
     })
   }),
   
-  http.post(`${API_BASE}/templates`, () => {
+  http.post('*/api/templates', () => {
     return HttpResponse.json({
       id: '2',
       name: 'Custom Template',
@@ -147,7 +145,7 @@ export const handlers = [
     })
   }),
   
-  http.get(`${API_BASE}/admin/users`, ({ request }) => {
+  http.get('*/api/admin/users', ({ request }) => {
     const auth = request.headers.get('Authorization')
     if (!auth || !auth.includes('superuser')) {
       return new HttpResponse(null, { status: 403 })
@@ -163,7 +161,27 @@ export const handlers = [
     ])
   }),
   
-  http.get(`${API_BASE}/admin/stats`, ({ request }) => {
+  http.get('*/api/admin/dashboard', ({ request }) => {
+    const auth = request.headers.get('Authorization')
+    if (!auth || !auth.includes('superuser')) {
+      return new HttpResponse(null, { status: 403 })
+    }
+    return HttpResponse.json({
+      stats: {
+        total_users: 10,
+        total_jobs: 50,
+        jobs_today: 5,
+        jobs_this_week: 25,
+        jobs_by_status: { completed: 30, pending: 10, processing: 5 },
+        jobs_by_template: {},
+        storage_backend: 'local',
+        uptime: '1 day'
+      },
+      recent_jobs: []
+    })
+  }),
+  
+  http.get('*/api/admin/stats', ({ request }) => {
     const auth = request.headers.get('Authorization')
     if (!auth || !auth.includes('superuser')) {
       return new HttpResponse(null, { status: 403 })
@@ -175,11 +193,11 @@ export const handlers = [
     })
   }),
   
-  http.post(`${API_BASE}/admin/users/:id/toggle-active`, () => {
+  http.post('*/api/admin/users/:id/toggle-active', () => {
     return HttpResponse.json({ status: 'success' })
   }),
   
-  http.get(`${API_BASE}/styles`, () => {
+  http.get('*/api/styles', () => {
     return HttpResponse.json([
       {
         id: '1',
@@ -191,14 +209,14 @@ export const handlers = [
     ])
   }),
   
-  http.get(`${API_BASE}/users/settings`, () => {
+  http.get('*/api/users/settings', () => {
     return HttpResponse.json({
       storage_backend: 'local',
       preferences: {}
     })
   }),
   
-  http.put(`${API_BASE}/users/settings`, () => {
+  http.put('*/api/users/settings', () => {
     return HttpResponse.json({ status: 'success' })
   })
 ]

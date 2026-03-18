@@ -109,19 +109,34 @@ export const authApi = {
 }
 
 export const jobsApi = {
-  list: (params?: { status?: string; limit?: number; offset?: number }) =>
-    api.get<Job[]>('/jobs', { params }),
-  get: (id: string) => api.get<Job>(`/jobs/${id}`),
-  create: (data: CreateJobRequest) => api.post<Job>('/jobs', data),
-  createBatch: (data: BatchJobRequest) => api.post<BatchJobResponse>('/jobs/batch', data),
-  createFromCsv: (templateId: string, file: File, autoStart: boolean = true) => {
+  list: async (params?: { status?: string; limit?: number; offset?: number }) => {
+    const response = await api.get<Job[]>('/jobs', { params })
+    return response.data
+  },
+  get: async (id: string) => {
+    const response = await api.get<Job>(`/jobs/${id}`)
+    return response.data
+  },
+  create: async (data: CreateJobRequest) => {
+    const response = await api.post<Job>('/jobs', data)
+    return response.data
+  },
+  createBatch: async (data: BatchJobRequest) => {
+    const response = await api.post<BatchJobResponse>('/jobs/batch', data)
+    return response.data
+  },
+  createFromCsv: async (templateId: string, file: File, autoStart: boolean = true) => {
     const formData = new FormData()
     formData.append('file', file)
-    return api.post<BatchJobResponse>(`/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`, formData, {
+    const response = await api.post<BatchJobResponse>(`/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
+    return response.data
   },
-  start: (id: string) => api.post<{ status: string; job_id: string }>(`/jobs/${id}/start`),
+  start: async (id: string) => {
+    const response = await api.post<{ status: string; job_id: string }>(`/jobs/${id}/start`)
+    return response.data
+  },
   delete: (id: string) => api.delete(`/jobs/${id}`),
 }
 
