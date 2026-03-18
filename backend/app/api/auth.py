@@ -75,7 +75,7 @@ async def get_current_user(
             settings.secret_key,
             algorithms=[settings.algorithm],
         )
-        user_id: str = payload.get("sub")
+        user_id: str | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception
         token_data = TokenData(user_id=user_id)

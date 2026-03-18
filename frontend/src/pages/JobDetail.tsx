@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Trash2, Download, Play, RefreshCw } from 'lucide-react'
 import { jobsApi, type Job } from '../api/client'
 import { Button } from '../components/ui/button'
+import VideoPlayer from '../components/VideoPlayer'
+import { useAuthStore } from '../stores/auth'
 
 interface WebSocketMessage {
   type: 'progress' | 'completed' | 'error' | 'failed'
@@ -20,6 +22,7 @@ export default function JobDetail() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [localJob, setLocalJob] = useState<Job | null>(null)
+  const token = useAuthStore((state) => state.token)
 
   const { data: serverJob, isLoading } = useQuery({
     queryKey: ['job', id],
@@ -174,18 +177,37 @@ export default function JobDetail() {
       {(job.output_path || job.preview_path) && (
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">Output</h2>
+          <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            <VideoPlayer
+              src={`/api/uploads/stream/${job.output_path}`}
+              previewSrc={job.preview_path ? `/api/uploads/stream/${job.preview_path}` : undefined}
+              showControls={true}
+              showDownload={true}
+              className="w-full h-full"
+            />
+          </div>
           <div className="flex gap-4">
             {job.preview_path && (
-              <Button variant="outline">
-                <Download className="h-4 w-4 mr-2" />
-                Download Preview
-              </Button>
+              <a
+                href={`/api/uploads/download/${job.preview_path}`}
+                download
+              >
+                <Button variant="outline">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Preview
+                </Button>
+              </a>
             )}
             {job.output_path && (
-              <Button>
-                <Download className="h-4 w-4 mr-2" />
-                Download Video
-              </Button>
+              <a
+                href={`/api/uploads/download/${job.output_path}`}
+                download
+              >
+                <Button>
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Video
+                </Button>
+              </a>
             )}
           </div>
         </div>

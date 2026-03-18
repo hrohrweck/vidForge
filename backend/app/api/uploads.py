@@ -1,9 +1,11 @@
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.api.auth import get_current_user
@@ -110,3 +112,71 @@ async def upload_any(
         category = "image"
 
     return await save_upload(file, category, str(current_user.id))
+
+
+@router.get("/download/{path:path}")
+async def download_file(
+    path: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    storage = get_storage_backend()
+
+    try:
+        content = await storage.download(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    content_type = "application/octet-stream"
+    ext = Path(path).suffix.lower()
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+    content_type = mime_types.get(ext, "application/octet-stream")
+
+    filename = Path(path).name
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(content)),
+        },
+    )
+
+
+@router.get("/stream/{path:path}")
+async def stream_file(
+    path: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    storage = get_storage_backend()
+
+    try:
+        content = await storage.download(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = Path(path).suffix.lower()
+    mime_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+    }
+    content_type = mime_types.get(ext, "application/octet-stream")
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(content)),
+        },
+    )

@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
 
     comfyui_url: str = "http://localhost:8188"
+    comfyui_workflows_path: str = "./app/comfyui/workflows"
     ollama_url: str = "http://localhost:11434"
+
+    templates_path: str = "./templates"
+    styles_path: str = "./styles"
 
     storage_backend: Literal["local", "s3", "ssh"] = "local"
     storage_path: str = "./storage"

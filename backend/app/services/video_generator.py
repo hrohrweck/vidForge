@@ -1,0 +1,249 @@
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+from app.config import get_settings
+from app.services import ComfyUIClient
+from app.services.template_loader import (
+    TemplateLoader,
+    StyleLoader,
+    load_comfyui_workflow,
+    merge_style_into_workflow,
+)
+from app.services.video_processor import VideoProcessor
+
+settings = get_settings()
+
+
+class VideoGenerationError(Exception):
+    pass
+
+
+class VideoGenerator:
+    def __init__(self, job_id: str, output_dir: Path):
+        self.job_id = job_id
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.comfyui = ComfyUIClient()
+        self.template_loader = TemplateLoader(settings.templates_path)
+        self.style_loader = StyleLoader(settings.styles_path)
+
+    async def close(self):
+        await self.comfyui.close()
+
+    async def generate(
+        self,
+        template_name: str,
+        input_data: dict[str, Any],
+        style_name: str | None = None,
+        progress_callback: callable = None,
+    ) -> tuple[str, str | None]:
+        template = self.template_loader.load_template(template_name)
+
+        style_params = {}
+        if style_name:
+            style = self.style_loader.load_style(style_name)
+            style_params = style.get("params", {})
+
+        if progress_callback:
+            await progress_callback(5, "Loading template")
+
+        context = {"job_id": self.job_id, "output_dir": str(self.output_dir)}
+        context.update(input_data)
+
+        final_video = None
+        preview_video = None
+
+        for i, step in enumerate(template.get("pipeline", [])):
+            step_name = step.get("step")
+            condition = step.get("condition")
+
+            if condition and not self._evaluate_condition(condition, context):
+                continue
+
+            if progress_callback:
+                progress = 10 + (i * 60 // len(template.get("pipeline", [])))
+                await progress_callback(progress, f"Processing: {step_name}")
+
+            if step_name == "enhance_prompt":
+                result = await self._enhance_prompt(step, context)
+                context.update(result)
+            elif step_name == "generate_video":
+                result = await self._generate_video(step, context, style_params)
+                context.update(result)
+                final_video = result.get("video")
+            elif step_name == "generate_audio":
+                result = await self._generate_audio(step, context)
+                context.update(result)
+            elif step_name == "combine":
+                result = await self._combine_av(step, context)
+                context.update(result)
+                final_video = result.get("final_video", final_video)
+            elif step_name == "generate_preview":
+                if final_video:
+                    preview_video = await self._generate_preview(final_video)
+                    context["preview"] = preview_video
+
+        if progress_callback:
+            await progress_callback(95, "Finalizing")
+
+        if not final_video:
+            raise VideoGenerationError("No video was generated")
+
+        return final_video, preview_video
+
+    def _evaluate_condition(self, condition: str, context: dict) -> bool:
+        try:
+            return bool(eval(condition, {"__builtins__": {}}, context))
+        except Exception:
+            return False
+
+    async def _enhance_prompt(self, step: dict, context: dict) -> dict[str, Any]:
+        prompt = context.get("prompt", "")
+        style = context.get("style", "realistic")
+
+        style_prompts = {
+            "realistic": "photorealistic, detailed, high quality, cinematic",
+            "anime": "anime style, vibrant colors, detailed animation",
+            "manga": "manga style, black and white, dramatic shading",
+        }
+
+        style_suffix = style_prompts.get(style, "")
+        enhanced = f"{prompt}, {style_suffix}" if style_suffix else prompt
+
+        return {"enhanced_prompt": enhanced}
+
+    async def _generate_video(
+        self, step: dict, context: dict, style_params: dict
+    ) -> dict[str, Any]:
+        workflow_name = step.get("model", "wan_t2v")
+        workflow_path = Path(settings.comfyui_workflows_path) / f"{workflow_name}.json"
+
+        if not workflow_path.exists():
+            workflow_path = Path(settings.comfyui_workflows_path) / "wan_t2v.json"
+
+        workflow = load_comfyui_workflow(str(workflow_path))
+        workflow = merge_style_into_workflow(workflow, style_params)
+
+        prompt = context.get("enhanced_prompt", context.get("prompt", ""))
+        duration = context.get("duration", 5)
+        fps = context.get("fps", 24)
+        aspect_ratio = context.get("aspect_ratio", "16:9")
+
+        width, height = self._get_dimensions(aspect_ratio)
+        video_length = int(duration * fps) + 1
+
+        for node_id, node in workflow.items():
+            if node.get("class_type") == "WanVideoSampler":
+                node["inputs"]["prompt"] = prompt
+                node["inputs"]["width"] = width
+                node["inputs"]["height"] = height
+                node["inputs"]["video_length"] = video_length
+                node["inputs"]["fps"] = fps
+            elif node.get("class_type") == "SaveVideo":
+                node["inputs"]["filename_prefix"] = f"job_{self.job_id}"
+
+        result = await self.comfyui.queue_prompt(workflow)
+        prompt_id = result.get("prompt_id")
+
+        if not prompt_id:
+            raise VideoGenerationError("Failed to queue ComfyUI prompt")
+
+        history = await self.comfyui.wait_for_completion(prompt_id, timeout=1800)
+
+        output_filename = None
+        for node_output in history.get("outputs", {}).values():
+            if "videos" in node_output:
+                videos = node_output["videos"]
+                if videos:
+                    output_filename = videos[0].get("filename")
+                    break
+
+        if not output_filename:
+            raise VideoGenerationError("No video output from ComfyUI")
+
+        video_data = await self.comfyui.get_output(output_filename, subfolder="output")
+        video_path = self.output_dir / "video.mp4"
+        video_path.write_bytes(video_data)
+
+        return {"video": str(video_path)}
+
+    async def _generate_audio(self, step: dict, context: dict) -> dict[str, Any]:
+        prompt = context.get("prompt", "")
+        duration = context.get("duration", 5)
+
+        audio_path = self.output_dir / "audio.mp3"
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "python",
+                "-m",
+                "audiocraft",
+                "generate",
+                "--prompt",
+                prompt,
+                "--duration",
+                str(duration),
+                "--output",
+                str(audio_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+
+            if audio_path.exists():
+                return {"audio": str(audio_path)}
+        except Exception:
+            pass
+
+        return {"audio": None}
+
+    async def _combine_av(self, step: dict, context: dict) -> dict[str, Any]:
+        video_path = context.get("video")
+        audio_path = context.get("audio")
+
+        if not video_path or not audio_path:
+            return {"final_video": video_path}
+
+        output_path = self.output_dir / "final.mp4"
+        await VideoProcessor.add_audio(video_path, audio_path, str(output_path))
+
+        return {"final_video": str(output_path)}
+
+    async def _generate_preview(self, video_path: str) -> str:
+        preview_path = self.output_dir / "preview.mp4"
+        await VideoProcessor.generate_preview(
+            video_path,
+            str(preview_path),
+            width=854,
+            height=480,
+            fps=15,
+        )
+        return str(preview_path)
+
+    def _get_dimensions(self, aspect_ratio: str) -> tuple[int, int]:
+        base_width = 1280
+        ratios = {
+            "16:9": (base_width, int(base_width * 9 / 16)),
+            "9:16": (int(base_width * 9 / 16), base_width),
+            "1:1": (base_width, base_width),
+        }
+        return ratios.get(aspect_ratio, ratios["16:9"])
+
+
+async def process_job_video(
+    job_id: str,
+    template_name: str,
+    input_data: dict[str, Any],
+    progress_callback: callable = None,
+) -> tuple[str, str | None]:
+    output_dir = Path(settings.storage_path) / "output" / job_id
+    generator = VideoGenerator(job_id, output_dir)
+
+    try:
+        style_name = input_data.get("style", "realistic")
+        return await generator.generate(template_name, input_data, style_name, progress_callback)
+    finally:
+        await generator.close()

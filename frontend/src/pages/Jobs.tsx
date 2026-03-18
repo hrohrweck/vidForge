@@ -2,34 +2,19 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, RefreshCw } from 'lucide-react'
-import { jobsApi, templatesApi, type CreateJobRequest } from '../api/client'
+import { jobsApi, type CreateJobRequest } from '../api/client'
 import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Label } from '../components/ui/label'
+import JobCreateModal from '../components/JobCreateModal'
 
 export default function Jobs() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
-  const [selectedTemplate, setSelectedTemplate] = useState('')
   const [status, setStatus] = useState('')
 
   const { data: jobs, isLoading } = useQuery({
     queryKey: ['jobs', status],
     queryFn: () => jobsApi.list({ status: status || undefined }),
-  })
-
-  const { data: templates } = useQuery({
-    queryKey: ['templates'],
-    queryFn: () => templatesApi.list(),
-  })
-
-  const createMutation = useMutation({
-    mutationFn: (data: CreateJobRequest) => jobsApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      setShowCreate(false)
-    },
   })
 
   const deleteMutation = useMutation({
@@ -38,13 +23,6 @@ export default function Jobs() {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     },
   })
-
-  const handleCreate = () => {
-    createMutation.mutate({
-      template_id: selectedTemplate || undefined,
-      input_data: {},
-    })
-  }
 
   const statusColors: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800',
@@ -60,41 +38,13 @@ export default function Jobs() {
           <h1 className="text-3xl font-bold">Jobs</h1>
           <p className="text-muted-foreground">Manage your video generation jobs</p>
         </div>
-        <Button onClick={() => setShowCreate(!showCreate)}>
+        <Button onClick={() => setShowCreate(true)}>
           <Plus className="h-4 w-4 mr-2" />
           New Job
         </Button>
       </div>
 
-      {showCreate && (
-        <div className="border rounded-lg p-6 space-y-4">
-          <h2 className="text-lg font-semibold">Create New Job</h2>
-          <div className="space-y-2">
-            <Label htmlFor="template">Template</Label>
-            <select
-              id="template"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={selectedTemplate}
-              onChange={(e) => setSelectedTemplate(e.target.value)}
-            >
-              <option value="">Select a template...</option>
-              {templates?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              {createMutation.isPending ? 'Creating...' : 'Create Job'}
-            </Button>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
+      {showCreate && <JobCreateModal onClose={() => setShowCreate(false)} />}
 
       <div className="flex gap-2">
         <Button
