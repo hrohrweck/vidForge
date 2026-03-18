@@ -1,11 +1,12 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from app.config import get_settings
 from app.services import ComfyUIClient
+from app.services.llm_service import enhance_prompt_for_video, segment_script_for_video
 from app.services.template_loader import (
     TemplateLoader,
     StyleLoader,
@@ -38,7 +39,7 @@ class VideoGenerator:
         template_name: str,
         input_data: dict[str, Any],
         style_name: str | None = None,
-        progress_callback: callable = None,
+        progress_callback: Callable[[int, str], Awaitable[None]] | None = None,
     ) -> tuple[str, str | None]:
         template = self.template_loader.load_template(template_name)
 
@@ -70,6 +71,13 @@ class VideoGenerator:
             if step_name == "enhance_prompt":
                 result = await self._enhance_prompt(step, context)
                 context.update(result)
+            elif step_name == "segment_script":
+                result = await self._segment_script(step, context)
+                context.update(result)
+            elif step_name == "generate_segments":
+                result = await self._generate_segments(step, context, style_params)
+                context.update(result)
+                final_video = result.get("merged_video")
             elif step_name == "generate_video":
                 result = await self._generate_video(step, context, style_params)
                 context.update(result)
@@ -104,16 +112,150 @@ class VideoGenerator:
         prompt = context.get("prompt", "")
         style = context.get("style", "realistic")
 
-        style_prompts = {
-            "realistic": "photorealistic, detailed, high quality, cinematic",
-            "anime": "anime style, vibrant colors, detailed animation",
-            "manga": "manga style, black and white, dramatic shading",
-        }
+        use_llm = step.get("params", {}).get("use_llm", True)
 
-        style_suffix = style_prompts.get(style, "")
-        enhanced = f"{prompt}, {style_suffix}" if style_suffix else prompt
+        if use_llm:
+            try:
+                enhanced = await enhance_prompt_for_video(prompt, style, context)
+            except Exception:
+                style_prompts = {
+                    "realistic": "photorealistic, detailed, high quality, cinematic",
+                    "anime": "anime style, vibrant colors, detailed animation",
+                    "manga": "manga style, black and white, dramatic shading",
+                }
+                style_suffix = style_prompts.get(style, "")
+                enhanced = f"{prompt}, {style_suffix}" if style_suffix else prompt
+        else:
+            style_prompts = {
+                "realistic": "photorealistic, detailed, high quality, cinematic",
+                "anime": "anime style, vibrant colors, detailed animation",
+                "manga": "manga style, black and white, dramatic shading",
+            }
+            style_suffix = style_prompts.get(style, "")
+            enhanced = f"{prompt}, {style_suffix}" if style_suffix else prompt
 
         return {"enhanced_prompt": enhanced}
+
+    async def _segment_script(self, step: dict, context: dict) -> dict[str, Any]:
+        script = context.get("script", context.get("prompt", ""))
+        style = context.get("style", "realistic")
+        total_duration = context.get("duration", 30)
+
+        use_llm = step.get("params", {}).get("use_llm", True)
+
+        if use_llm:
+            try:
+                segments = await segment_script_for_video(script, style, total_duration)
+            except Exception:
+                segments = self._fallback_segment_script(script, total_duration)
+        else:
+            segments = self._fallback_segment_script(script, total_duration)
+
+        return {"segments": segments, "segment_count": len(segments)}
+
+    def _fallback_segment_script(self, script: str, total_duration: float) -> list[dict[str, Any]]:
+        import re
+
+        annotations = re.findall(r"\[([^\]]+)\]", script)
+        clean_script = re.sub(r"\[[^\]]+\]", "", script).strip()
+        sentences = re.split(r"[.!?]+", clean_script)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        if annotations:
+            num_segments = len(annotations)
+        else:
+            num_segments = max(1, min(len(sentences), int(total_duration / 3)))
+
+        segment_duration = total_duration / num_segments
+        segments = []
+
+        for i in range(num_segments):
+            if i < len(annotations):
+                visual = annotations[i]
+            elif i < len(sentences):
+                visual = f"Visual representation of: {sentences[i]}"
+            else:
+                visual = "Abstract visual sequence"
+
+            narration = sentences[i] if i < len(sentences) else ""
+
+            segments.append(
+                {
+                    "duration": segment_duration,
+                    "visual": visual,
+                    "narration": narration,
+                }
+            )
+
+        return segments
+
+    async def _generate_segments(
+        self, step: dict, context: dict, style_params: dict
+    ) -> dict[str, Any]:
+        segments = context.get("segments", [])
+        if not segments:
+            return {"segment_videos": [], "merged_video": None}
+
+        segment_videos = []
+        fps = context.get("fps", 24)
+        aspect_ratio = context.get("aspect_ratio", "16:9")
+        width, height = self._get_dimensions(aspect_ratio)
+
+        segments_dir = self.output_dir / "segments"
+        segments_dir.mkdir(parents=True, exist_ok=True)
+
+        for i, segment in enumerate(segments):
+            segment_duration = segment.get("duration", 3)
+            segment_prompt = segment.get("visual", "")
+
+            workflow_path = Path(settings.comfyui_workflows_path) / "wan_t2v.json"
+            workflow = load_comfyui_workflow(str(workflow_path))
+            workflow = merge_style_into_workflow(workflow, style_params)
+
+            video_length = int(segment_duration * fps) + 1
+
+            for node_id, node in workflow.items():
+                if node.get("class_type") == "WanVideoSampler":
+                    node["inputs"]["prompt"] = segment_prompt
+                    node["inputs"]["width"] = width
+                    node["inputs"]["height"] = height
+                    node["inputs"]["video_length"] = video_length
+                    node["inputs"]["fps"] = fps
+                elif node.get("class_type") == "SaveVideo":
+                    node["inputs"]["filename_prefix"] = f"segment_{i:03d}"
+
+            result = await self.comfyui.queue_prompt(workflow)
+            prompt_id = result.get("prompt_id")
+
+            if not prompt_id:
+                continue
+
+            history = await self.comfyui.wait_for_completion(prompt_id, timeout=600)
+
+            output_filename = None
+            for node_output in history.get("outputs", {}).values():
+                if "videos" in node_output:
+                    videos = node_output["videos"]
+                    if videos:
+                        output_filename = videos[0].get("filename")
+                        break
+
+            if output_filename:
+                video_data = await self.comfyui.get_output(output_filename, subfolder="output")
+                segment_path = segments_dir / f"segment_{i:03d}.mp4"
+                segment_path.write_bytes(video_data)
+                segment_videos.append(str(segment_path))
+
+        if len(segment_videos) == 0:
+            return {"segment_videos": [], "merged_video": None}
+
+        if len(segment_videos) == 1:
+            return {"segment_videos": segment_videos, "merged_video": segment_videos[0]}
+
+        merged_path = self.output_dir / "merged.mp4"
+        await VideoProcessor.merge_videos(segment_videos, str(merged_path))
+
+        return {"segment_videos": segment_videos, "merged_video": str(merged_path)}
 
     async def _generate_video(
         self, step: dict, context: dict, style_params: dict
@@ -237,7 +379,7 @@ async def process_job_video(
     job_id: str,
     template_name: str,
     input_data: dict[str, Any],
-    progress_callback: callable = None,
+    progress_callback: Callable[[int, str], Awaitable[None]] | None = None,
 ) -> tuple[str, str | None]:
     output_dir = Path(settings.storage_path) / "output" / job_id
     generator = VideoGenerator(job_id, output_dir)

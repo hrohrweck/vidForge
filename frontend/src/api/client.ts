@@ -118,3 +118,14 @@ export const stylesApi = {
     api.get<Style[]>('/styles', { params: { category } }),
   get: (id: string) => api.get<Style>(`/styles/${id}`),
 }
+
+export const storageApi = {
+  getConfig: () => api.get('/storage/config'),
+  listFiles: (prefix: string = '') => api.get('/storage/files', { params: { prefix } }),
+  deleteFile: (path: string) => api.delete(`/storage/files/${path}`),
+}
+
+export const usersApi = {
+  getSettings: () => api.get('/users/settings'),
+  updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
+}
