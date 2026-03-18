@@ -1,0 +1,99 @@
+services:
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vidforge:vidforge@postgres:5432/vidforge
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-me-in-production
+      - COMFYUI_URL=http://comfyui:8188
+      - STORAGE_BACKEND=local
+      - STORAGE_PATH=/app/storage
+    volumes:
+      - ../backend/app:/app/app
+      - vidforge-storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    command: celery -A app.workers worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vidforge:vidforge@postgres:5432/vidforge
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=change-me-in-production
+      - COMFYUI_URL=http://comfyui:8188
+      - STORAGE_BACKEND=local
+      - STORAGE_PATH=/app/storage
+    volumes:
+      - ../backend/app:/app/app
+      - vidforge-storage:/app/storage
+    depends_on:
+      - postgres
+      - redis
+      - backend
+
+  comfyui:
+    image: comfyanonymous/comfyui:latest
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui-models:/app/models
+      - comfyui-output:/app/output
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=11.0.0
+    profiles:
+      - rocm
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=vidforge
+      - POSTGRES_PASSWORD=vidforge
+      - POSTGRES_DB=vidforge
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vidforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  postgres-data:
+  redis-data:
+  vidforge-storage:
+  comfyui-models:
+  comfyui-output:

@@ -1,0 +1,14 @@
+extends:
+  file: docker-compose.yml
+services:
+  backend:
+    environment:
+      - DEBUG=true
+    volumes:
+      - ../backend/app:/app/app
+
+  worker:
+    environment:
+      - DEBUG=true
+    volumes:
+      - ../backend/app:/app/app

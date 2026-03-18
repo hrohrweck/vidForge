@@ -1,0 +1,105 @@
+name: "Script to Video"
+description: "Generate a video from a script with revid.ai-compatible annotations"
+inputs:
+  - name: script
+    type: textarea
+    required: true
+    description: |
+      Script with [bracketed annotations] for visual directions.
+      Example: "Welcome to our channel. [Show a beautiful sunset] Today we'll explore..."
+  - name: style
+    type: select
+    options: [realistic, anime, manga]
+    default: realistic
+    required: true
+    description: "Visual style for the generated video"
+  - name: voice
+    type: select
+    options: [default, male, female, deep]
+    default: default
+    required: false
+    description: "Voice for narration"
+  - name: aspect_ratio
+    type: select
+    options: ["16:9", "9:16", "1:1"]
+    default: "16:9"
+    required: false
+    description: "Output video aspect ratio"
+  - name: background_music
+    type: boolean
+    default: true
+    required: false
+    description: "Add background music"
+pipeline:
+  - step: parse_script
+    description: "Parse script and extract annotations"
+    inputs:
+      - script
+    outputs:
+      - narration_segments
+      - visual_cues
+  - step: generate_narration
+    model: tts
+    description: "Generate narration audio"
+    inputs:
+      - narration_segments
+      - voice
+    outputs:
+      - narration_audio
+      - timings
+  - step: generate_visual_prompts
+    model: llm
+    description: "Convert visual cues to detailed prompts"
+    inputs:
+      - visual_cues
+      - style
+    outputs:
+      - scene_prompts
+  - step: generate_scenes
+    model: wan2.2_t2v
+    description: "Generate video for each scene"
+    inputs:
+      - scene_prompts
+      - timings
+    outputs:
+      - video_segments
+  - step: merge_video
+    tool: ffmpeg
+    description: "Merge video segments"
+    inputs:
+      - video_segments
+    outputs:
+      - merged_video
+  - step: generate_music
+    model: musicgen
+    description: "Generate background music"
+    condition: ${background_music}
+    inputs:
+      - narration_segments
+    params:
+      duration: ${total_duration}
+    outputs:
+      - music_audio
+  - step: combine_audio
+    tool: ffmpeg
+    description: "Mix narration and background music"
+    inputs:
+      - narration_audio
+      - music_audio
+    params:
+      narration_volume: 1.0
+      music_volume: 0.3
+    outputs:
+      - final_audio
+  - step: final_composition
+    tool: ffmpeg
+    description: "Combine video and audio"
+    inputs:
+      - merged_video
+      - final_audio
+    outputs:
+      - final_video
+  - step: generate_preview
+    description: "Generate low-res preview"
+    outputs:
+      - preview

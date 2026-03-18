@@ -1,0 +1,10 @@
+name: "Manga"
+category: video
+params:
+  guidance_scale: 8.0
+  num_inference_steps: 40
+  fps: 24
+  width: 1920
+  height: 1080
+  prompt_prefix: "manga style, black and white, ink drawing, screentone, Japanese comic art, dramatic shading"
+  negative_prompt: "color, photorealistic, realistic, photograph, painting, watercolor"

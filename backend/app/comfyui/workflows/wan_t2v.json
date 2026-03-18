@@ -1,0 +1,31 @@
+{
+  "1": {
+    "class_type": "WanVideoSampler",
+    "inputs": {
+      "prompt": "",
+      "negative_prompt": "",
+      "width": 1280,
+      "height": 720,
+      "video_length": 49,
+      "fps": 24,
+      "guidance_scale": 7.5,
+      "num_inference_steps": 50,
+      "seed": -1
+    }
+  },
+  "2": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["1", 0],
+      "vae": "wan_vae.safetensors"
+    }
+  },
+  "3": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "vidforge_output",
+      "fps": 24,
+      "frames": ["2", 0]
+    }
+  }
+}

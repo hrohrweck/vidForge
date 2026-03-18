@@ -1,0 +1,182 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Trash2, RefreshCw } from 'lucide-react'
+import { jobsApi, templatesApi, type CreateJobRequest } from '../api/client'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Label } from '../components/ui/label'
+
+export default function Jobs() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [showCreate, setShowCreate] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [status, setStatus] = useState('')
+
+  const { data: jobs, isLoading } = useQuery({
+    queryKey: ['jobs', status],
+    queryFn: () => jobsApi.list({ status: status || undefined }),
+  })
+
+  const { data: templates } = useQuery({
+    queryKey: ['templates'],
+    queryFn: () => templatesApi.list(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: CreateJobRequest) => jobsApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setShowCreate(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => jobsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+
+  const handleCreate = () => {
+    createMutation.mutate({
+      template_id: selectedTemplate || undefined,
+      input_data: {},
+    })
+  }
+
+  const statusColors: Record<string, string> = {
+    pending: 'bg-yellow-100 text-yellow-800',
+    processing: 'bg-blue-100 text-blue-800',
+    completed: 'bg-green-100 text-green-800',
+    failed: 'bg-red-100 text-red-800',
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Jobs</h1>
+          <p className="text-muted-foreground">Manage your video generation jobs</p>
+        </div>
+        <Button onClick={() => setShowCreate(!showCreate)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Job
+        </Button>
+      </div>
+
+      {showCreate && (
+        <div className="border rounded-lg p-6 space-y-4">
+          <h2 className="text-lg font-semibold">Create New Job</h2>
+          <div className="space-y-2">
+            <Label htmlFor="template">Template</Label>
+            <select
+              id="template"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={selectedTemplate}
+              onChange={(e) => setSelectedTemplate(e.target.value)}
+            >
+              <option value="">Select a template...</option>
+              {templates?.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleCreate} disabled={createMutation.isPending}>
+              {createMutation.isPending ? 'Creating...' : 'Create Job'}
+            </Button>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          variant={status === '' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setStatus('')}
+        >
+          All
+        </Button>
+        {['pending', 'processing', 'completed', 'failed'].map((s) => (
+          <Button
+            key={s}
+            variant={status === s ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setStatus(s)}
+          >
+            {s.charAt(0).toUpperCase() + s.slice(1)}
+          </Button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="border rounded-lg divide-y">
+          {jobs?.map((job) => (
+            <div
+              key={job.id}
+              className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+              onClick={() => navigate(`/jobs/${job.id}`)}
+            >
+              <div className="flex items-center gap-4">
+                <div>
+                  <p className="font-medium">{job.id}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {new Date(job.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <span
+                  className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    statusColors[job.status]
+                  }`}
+                >
+                  {job.status}
+                </span>
+                {job.status === 'processing' && (
+                  <span className="text-sm text-muted-foreground">
+                    {job.progress}%
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {job.output_path && (
+                  <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
+                    Download
+                  </Button>
+                )}
+                {job.preview_path && (
+                  <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
+                    Preview
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteMutation.mutate(job.id)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+          {(!jobs || jobs.length === 0) && (
+            <p className="p-8 text-center text-muted-foreground">No jobs found</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

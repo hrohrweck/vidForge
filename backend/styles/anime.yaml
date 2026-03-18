@@ -1,0 +1,10 @@
+name: "Anime"
+category: video
+params:
+  guidance_scale: 8.0
+  num_inference_steps: 40
+  fps: 24
+  width: 1920
+  height: 1080
+  prompt_prefix: "anime style, vibrant colors, clean lines, Studio Ghibli inspired, Japanese animation"
+  negative_prompt: "photorealistic, realistic, photograph, 3d render, western cartoon, rough lines, sketch"

@@ -1,0 +1,71 @@
+name: "Music Video"
+description: "Create a video from a music file with AI-generated visuals"
+inputs:
+  - name: audio_file
+    type: file
+    accept: [".mp3", ".wav", ".ogg", ".flac"]
+    required: true
+    description: "Audio file to create video for"
+  - name: style
+    type: select
+    options: [realistic, anime, manga]
+    default: realistic
+    required: true
+    description: "Visual style for the generated video"
+  - name: duration
+    type: number
+    default: 30
+    min: 5
+    max: 300
+    required: false
+    description: "Target duration in seconds (0 for full audio length)"
+  - name: aspect_ratio
+    type: select
+    options: ["16:9", "9:16", "1:1"]
+    default: "16:9"
+    required: false
+    description: "Output video aspect ratio"
+pipeline:
+  - step: analyze_audio
+    description: "Analyze audio for beats and mood"
+    outputs:
+      - beats
+      - duration
+      - mood
+  - step: generate_prompts
+    model: llm
+    description: "Generate visual prompts based on audio analysis"
+    inputs:
+      - mood
+      - style
+      - duration
+    outputs:
+      - scene_prompts
+  - step: generate_video_segments
+    model: wan2.2_s2v
+    description: "Generate video segments audio-driven"
+    params:
+      audio_driven: true
+      audio_file: ${audio_file}
+    outputs:
+      - video_segments
+  - step: merge_segments
+    description: "Merge video segments"
+    outputs:
+      - merged_video
+  - step: add_audio
+    tool: ffmpeg
+    description: "Add original audio to video"
+    inputs:
+      - merged_video
+      - audio_file
+    outputs:
+      - final_video
+  - step: generate_preview
+    description: "Generate low-res preview"
+    params:
+      width: 854
+      height: 480
+      fps: 15
+    outputs:
+      - preview

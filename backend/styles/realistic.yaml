@@ -1,0 +1,10 @@
+name: "Realistic"
+category: video
+params:
+  guidance_scale: 7.5
+  num_inference_steps: 50
+  fps: 24
+  width: 1920
+  height: 1080
+  prompt_prefix: "photorealistic, 4k, highly detailed, sharp focus, natural lighting"
+  negative_prompt: "anime, cartoon, illustration, painting, drawing, artificial, distorted, blurry, low quality, oversaturated"
