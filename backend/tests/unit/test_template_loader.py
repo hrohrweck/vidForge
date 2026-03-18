@@ -135,7 +135,7 @@ class TestTemplateLoaderOperations:
         assert "Template 2" in names
 
     def test_load_builtin_templates(self):
-        loader = TemplateLoader("backend/templates")
+        loader = TemplateLoader("templates")
 
         try:
             templates = loader.load_all_templates()
