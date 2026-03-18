@@ -12,7 +12,6 @@ class TestHealthCheck:
         assert response.json() == {"status": "healthy"}
 
 
-@pytest.mark.skip(reason="UUID serialization issue with SQLite - covered by unit/test_api tests")
 class TestAuthAPI:
     """Authentication API tests - skipped due to SQLite UUID serialization."""
 

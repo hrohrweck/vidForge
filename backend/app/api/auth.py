@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,12 +37,10 @@ class TokenData(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
     email: str
     is_active: bool
-
-    class Config:
-        from_attributes = True
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -1,17 +1,29 @@
 import { http, HttpResponse } from 'msw'
 
 export const handlers = [
-  http.post('*/api/auth/login', () => {
+  http.post('*/api/auth/login', async ({ request }) => {
+    const body = await request.json() as { email?: string; password?: string }
+    
+    if (body?.password?.includes('wrong')) {
+      return new HttpResponse(null, { status: 401 })
+    }
+    
     return HttpResponse.json({
       access_token: 'test-token',
       token_type: 'bearer'
     })
   }),
   
-  http.post('*/api/auth/register', () => {
+  http.post('*/api/auth/register', async ({ request }) => {
+    const body = await request.json() as { email?: string; password?: string }
+    
+    if (body?.email?.includes('duplicate') || body?.password?.includes('wrong')) {
+      return new HttpResponse(null, { status: 400 })
+    }
+    
     return HttpResponse.json({
       id: '1',
-      email: 'test@example.com',
+      email: body?.email || 'test@example.com',
       is_active: true,
       is_superuser: false
     })
