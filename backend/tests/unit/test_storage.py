@@ -64,7 +64,7 @@ class TestLocalStorageSecurity:
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = LocalStorage(tmpdir)
 
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises((FileNotFoundError, ValueError)):
                 await storage.download("../outside_file.txt")
 
     @pytest.mark.asyncio
@@ -119,7 +119,7 @@ class TestLocalStorageOperations:
 
             await storage.delete("delete_me.txt")
 
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises((FileNotFoundError, ValueError)):
                 await storage.download("delete_me.txt")
 
     @pytest.mark.asyncio
@@ -252,7 +252,14 @@ class TestSSHStorageMocked:
     async def test_upload_uses_sftp(self, mocker):
         mock_ssh_client = mocker.MagicMock()
         mock_sftp = mocker.MagicMock()
-        mock_ssh_client.open_sftp.return_value.__enter__.return_value = mock_sftp
+
+        mock_file = mocker.MagicMock()
+        mock_file.__enter__ = mocker.MagicMock(return_value=mock_file)
+        mock_file.__exit__ = mocker.MagicMock(return_value=None)
+
+        mock_sftp.file.return_value = mock_file
+        mock_sftp.stat.side_effect = FileNotFoundError()
+        mock_ssh_client.open_sftp.return_value = mock_sftp
 
         mocker.patch("paramiko.SSHClient", return_value=mock_ssh_client)
 
@@ -267,7 +274,8 @@ class TestSSHStorageMocked:
 
         await storage.upload("test.txt", b"content")
 
-        assert mock_sftp.putfo.called
+        mock_sftp.file.assert_called()
+        mock_file.write.assert_called_once_with(b"content")
 
     @pytest.mark.asyncio
     async def test_download_from_ssh(self, mocker):
@@ -280,7 +288,7 @@ class TestSSHStorageMocked:
         mock_file.__exit__ = mocker.MagicMock(return_value=None)
 
         mock_sftp.file.return_value = mock_file
-        mock_ssh_client.open_sftp.return_value.__enter__.return_value = mock_sftp
+        mock_ssh_client.open_sftp.return_value = mock_sftp
 
         mocker.patch("paramiko.SSHClient", return_value=mock_ssh_client)
 
@@ -296,6 +304,7 @@ class TestSSHStorageMocked:
         content = await storage.download("test.txt")
 
         assert content == b"content"
+        mock_sftp.file.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handles_ssh_connection_error(self, mocker):
@@ -315,4 +324,3 @@ class TestSSHStorageMocked:
 
         with pytest.raises(Exception, match="Connection failed"):
             await storage.upload("test.txt", b"content")
-

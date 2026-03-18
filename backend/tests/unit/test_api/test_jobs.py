@@ -1,9 +1,12 @@
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 from uuid import uuid4
 import io
+
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.main import app
 from app.database import Base, get_db, User, Job, Template
@@ -28,8 +31,22 @@ async def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 
 
+def patch_jsonb_for_sqlite():
+    """Replace JSONB with JSON for SQLite compatibility."""
+    from sqlalchemy import JSON
+    from app.database import Base
+    
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            if hasattr(column.type, '__class__') and column.type.__class__.__name__ == 'JSONB':
+                column.type = JSON()
+
+
+
+
 @pytest.fixture(scope="function")
 async def db_session():
+    patch_jsonb_for_sqlite()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -42,7 +59,7 @@ async def db_session():
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 
 
