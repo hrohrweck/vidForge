@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Layers } from 'lucide-react'
 import { jobsApi, type CreateJobRequest } from '../api/client'
 import { Button } from '../components/ui/button'
 import JobCreateModal from '../components/JobCreateModal'
+import { BatchJobModal } from '../components/BatchJobModal'
 
 export default function Jobs() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+  const [showBatch, setShowBatch] = useState(false)
   const [status, setStatus] = useState('')
 
   const { data: jobs, isLoading } = useQuery({
@@ -38,13 +40,20 @@ export default function Jobs() {
           <h1 className="text-3xl font-bold">Jobs</h1>
           <p className="text-muted-foreground">Manage your video generation jobs</p>
         </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Job
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowBatch(true)}>
+            <Layers className="h-4 w-4 mr-2" />
+            Batch Create
+          </Button>
+          <Button onClick={() => setShowCreate(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Job
+          </Button>
+        </div>
       </div>
 
       {showCreate && <JobCreateModal onClose={() => setShowCreate(false)} />}
+      {showBatch && <BatchJobModal isOpen={showBatch} onClose={() => setShowBatch(false)} />}
 
       <div className="flex gap-2">
         <Button
@@ -79,6 +88,17 @@ export default function Jobs() {
               onClick={() => navigate(`/jobs/${job.id}`)}
             >
               <div className="flex items-center gap-4">
+                {job.thumbnail_path ? (
+                  <img
+                    src={`/api/uploads/${job.thumbnail_path}`}
+                    alt="Job thumbnail"
+                    className="w-20 h-14 object-cover rounded"
+                  />
+                ) : (
+                  <div className="w-20 h-14 bg-gray-200 rounded flex items-center justify-center">
+                    <RefreshCw className="h-4 w-4 text-gray-400" />
+                  </div>
+                )}
                 <div>
                   <p className="font-medium">{job.id}</p>
                   <p className="text-sm text-muted-foreground">

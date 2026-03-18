@@ -56,6 +56,7 @@ export interface Job {
   input_data: Record<string, unknown> | null
   output_path: string | null
   preview_path: string | null
+  thumbnail_path: string | null
   error_message: string | null
   created_at: string
   started_at: string | null
@@ -65,6 +66,17 @@ export interface Job {
 export interface CreateJobRequest {
   template_id?: string
   input_data?: Record<string, unknown>
+}
+
+export interface BatchJobRequest {
+  template_id: string
+  jobs: Record<string, unknown>[]
+  auto_start?: boolean
+}
+
+export interface BatchJobResponse {
+  created_count: number
+  job_ids: string[]
 }
 
 export interface Template {
@@ -101,6 +113,15 @@ export const jobsApi = {
     api.get<Job[]>('/jobs', { params }),
   get: (id: string) => api.get<Job>(`/jobs/${id}`),
   create: (data: CreateJobRequest) => api.post<Job>('/jobs', data),
+  createBatch: (data: BatchJobRequest) => api.post<BatchJobResponse>('/jobs/batch', data),
+  createFromCsv: (templateId: string, file: File, autoStart: boolean = true) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<BatchJobResponse>(`/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  start: (id: string) => api.post<{ status: string; job_id: string }>(`/jobs/${id}/start`),
   delete: (id: string) => api.delete(`/jobs/${id}`),
 }
 

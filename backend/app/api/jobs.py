@@ -1,8 +1,10 @@
+import csv
+import io
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,17 @@ class JobCreate(BaseModel):
     auto_start: bool = True
 
 
+class BatchJobCreate(BaseModel):
+    template_id: UUID
+    jobs: list[dict[str, Any]]
+    auto_start: bool = True
+
+
+class BatchJobResponse(BaseModel):
+    created_count: int
+    job_ids: list[UUID]
+
+
 class JobResponse(BaseModel):
     id: UUID
     status: str
@@ -27,6 +40,7 @@ class JobResponse(BaseModel):
     input_data: dict[str, Any] | None
     output_path: str | None
     preview_path: str | None
+    thumbnail_path: str | None
     error_message: str | None
     created_at: datetime
     started_at: datetime | None
@@ -119,3 +133,84 @@ async def delete_job(
     await db.delete(job)
     await db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/batch", response_model=BatchJobResponse)
+async def create_batch_jobs(
+    batch_data: BatchJobCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Template).where(Template.id == batch_data.template_id))
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    jobs = []
+    job_ids = []
+    for job_input in batch_data.jobs:
+        job = Job(
+            user_id=current_user.id,
+            template_id=batch_data.template_id,
+            input_data=job_input,
+        )
+        jobs.append(job)
+        db.add(job)
+        await db.flush()
+        job_ids.append(job.id)
+
+    await db.commit()
+
+    if batch_data.auto_start:
+        for job_id in job_ids:
+            process_video_job.delay(str(job_id))
+
+    return {"created_count": len(jobs), "job_ids": job_ids}
+
+
+@router.post("/batch/csv", response_model=BatchJobResponse)
+async def create_jobs_from_csv(
+    template_id: UUID,
+    file: UploadFile = File(...),
+    auto_start: bool = True,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Template).where(Template.id == template_id))
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+
+    content = await file.read()
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = content.decode("utf-8-sig")
+
+    reader = csv.DictReader(io.StringIO(decoded))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file is empty or has no headers")
+
+    jobs = []
+    job_ids = []
+    for row in reader:
+        job = Job(
+            user_id=current_user.id,
+            template_id=template_id,
+            input_data=dict(row),
+        )
+        jobs.append(job)
+        db.add(job)
+        await db.flush()
+        job_ids.append(job.id)
+
+    await db.commit()
+
+    if auto_start:
+        for job_id in job_ids:
+            process_video_job.delay(str(job_id))
+
+    return {"created_count": len(jobs), "job_ids": job_ids}
