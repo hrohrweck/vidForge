@@ -37,11 +37,19 @@ docker-compose up -d
 docker-compose exec backend alembic upgrade head
 ```
 
-5. Access the application
+5. Create your first admin user
+
+```bash
+docker-compose exec backend python -m app.cli createsuperuser
+```
+
+6. Access the application
 
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
+
+Login with the admin user you created in step 5.
 
 ### Without Docker
 
@@ -52,6 +60,8 @@ cd backend
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
+python -m app.cli createsuperuser
 uvicorn app.main:app --reload
 ```
 
