@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import AsyncGenerator
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, String, Text, Boolean, Integer, ForeignKey
+from sqlalchemy import DateTime, String, Text, Boolean, Integer, ForeignKey, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -129,3 +129,64 @@ class Style(Base):
     )
 
     users_using_default: Mapped[list["UserSettings"]] = relationship(back_populates="default_style")
+
+
+async def seed_builtin_data() -> None:
+    """Load built-in templates and styles from YAML files into the database."""
+    from app.services.template_loader import TemplateLoader, StyleLoader
+    from app.config import get_settings
+    
+    settings = get_settings()
+    
+    async with async_session() as db:
+        # Load templates
+        template_loader = TemplateLoader(settings.templates_path)
+        try:
+            templates = template_loader.load_all_templates()
+            for template_data in templates:
+                # Check if template already exists by name
+                result = await db.execute(
+                    select(Template).where(Template.name == template_data["name"])
+                )
+                existing = result.scalar_one_or_none()
+                
+                if not existing:
+                    template = Template(
+                        name=template_data["name"],
+                        description=template_data.get("description"),
+                        config={
+                            "template_file": template_data.get("_source_file", ""),
+                            "inputs": template_data.get("inputs", []),
+                            "pipeline": template_data.get("pipeline", []),
+                        },
+                        is_builtin=True,
+                        created_by=None,
+                    )
+                    db.add(template)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning: Could not seed templates: {e}")
+        
+        # Load styles
+        style_loader = StyleLoader(settings.styles_path)
+        try:
+            styles = style_loader.load_all_styles()
+            for style_data in styles:
+                # Check if style already exists by name
+                result = await db.execute(
+                    select(Style).where(Style.name == style_data["name"])
+                )
+                existing = result.scalar_one_or_none()
+                
+                if not existing:
+                    style = Style(
+                        name=style_data["name"],
+                        category=style_data.get("category", "video"),
+                        params=style_data.get("params", {}),
+                    )
+                    db.add(style)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning: Could not seed styles: {e}")

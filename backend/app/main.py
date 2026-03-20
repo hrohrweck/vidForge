@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import admin, auth, jobs, styles, storage, templates, uploads, users
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
-from app.database import create_tables
+from app.database import create_tables, seed_builtin_data
 
 
 @asynccontextmanager
@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     if settings.debug:
         await create_tables()
+    await seed_builtin_data()
     yield
 
 
