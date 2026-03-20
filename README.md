@@ -28,19 +28,19 @@ cp frontend/.env.example frontend/.env
 
 ```bash
 cd docker
-docker-compose up -d
+docker-compose up --build -d
 ```
 
 4. Run database migrations
 
 ```bash
-docker-compose exec backend alembic upgrade head
+docker exec -it docker-backend-1 alembic upgrade head
 ```
 
 5. Create your first admin user
 
 ```bash
-docker-compose exec backend python -m app.cli createsuperuser
+docker exec -it docker-backend-1 python -m app.cli createsuperuser
 ```
 
 6. Access the application
