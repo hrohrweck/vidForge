@@ -16,7 +16,7 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://vidforge:vidforge@postgres:5432/vidforge
       - REDIS_URL=redis://redis:6379/0
