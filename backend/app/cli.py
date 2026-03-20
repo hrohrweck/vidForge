@@ -55,15 +55,18 @@ async def create_superuser() -> None:
 
 async def reset_password(email: str) -> None:
     """Reset a user's password."""
-    password = getpass("New password: ")
+    import os
+
+    password = os.environ.get("NEW_PASSWORD") or getpass("New password: ")
     if not password:
-        print("Error: Password is required")
+        print("Error: Password is required (or set NEW_PASSWORD env var)")
         sys.exit(1)
 
-    password_confirm = getpass("Confirm password: ")
-    if password != password_confirm:
-        print("Error: Passwords do not match")
-        sys.exit(1)
+    if not os.environ.get("NEW_PASSWORD"):
+        password_confirm = getpass("Confirm password: ")
+        if password != password_confirm:
+            print("Error: Passwords do not match")
+            sys.exit(1)
 
     async with async_session() as session:
         result = await session.execute(select(User).where(User.email == email))

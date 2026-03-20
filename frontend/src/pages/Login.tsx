@@ -17,10 +17,9 @@ export default function Login() {
 
   const loginMutation = useMutation({
     mutationFn: () => authApi.login({ email, password }),
-    onSuccess: async (response) => {
+    onSuccess: (response) => {
       const { access_token } = response.data
-      const userResponse = await authApi.getMe()
-      setAuth(access_token, { ...userResponse.data, is_superuser: false })
+      setAuth(access_token, { id: '', email, is_active: true, is_superuser: false })
       navigate('/')
     },
     onError: () => {
