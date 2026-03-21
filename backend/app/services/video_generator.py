@@ -12,7 +12,12 @@ from app.services.audio_generation import (
     generate_background_music,
     generate_narration,
 )
-from app.services.llm_service import enhance_prompt_for_video, segment_script_for_video
+from app.services.audio_analyzer import AudioAnalyzer
+from app.services.llm_service import (
+    PromptEnhancer,
+    enhance_prompt_for_video,
+    segment_script_for_video,
+)
 from app.services.template_loader import (
     TemplateLoader,
     StyleLoader,
@@ -74,7 +79,25 @@ class VideoGenerator:
                 progress = 10 + (i * 60 // len(template.get("pipeline", [])))
                 await progress_callback(progress, f"Processing: {step_name}")
 
-            if step_name == "enhance_prompt":
+            if step_name == "analyze_audio":
+                result = await self._analyze_audio(step, context)
+                context.update(result)
+            elif step_name == "generate_prompts":
+                result = await self._generate_prompts(step, context)
+                context.update(result)
+            elif step_name == "generate_video_segments":
+                result = await self._generate_video_segments(step, context, style_params)
+                context.update(result)
+                final_video = result.get("merged_video")
+            elif step_name == "merge_segments":
+                result = await self._merge_segments(step, context)
+                context.update(result)
+                final_video = result.get("merged_video")
+            elif step_name == "add_audio":
+                result = await self._add_audio(step, context)
+                context.update(result)
+                final_video = result.get("final_video", final_video)
+            elif step_name == "enhance_prompt":
                 result = await self._enhance_prompt(step, context)
                 context.update(result)
             elif step_name == "segment_script":
@@ -452,6 +475,208 @@ class VideoGenerator:
 
         output_path = self.output_dir / "final.mp4"
         await VideoProcessor.add_audio(video_path, audio_path, str(output_path))
+
+        return {"final_video": str(output_path)}
+
+    async def _analyze_audio(self, step: dict, context: dict) -> dict[str, Any]:
+        audio_file = context.get("audio_file")
+        if not audio_file:
+            return {"beats": [], "duration": 0, "mood": "moderate"}
+
+        try:
+            analysis = await AudioAnalyzer.analyze_for_video(audio_file, target_fps=24)
+            return {
+                "beats": analysis.get("beats", []),
+                "duration": analysis.get("duration", 0),
+                "mood": analysis.get("mood", "moderate"),
+                "tempo": analysis.get("tempo", 120),
+            }
+        except Exception:
+            return {"beats": [], "duration": 0, "mood": "moderate"}
+
+    async def _generate_prompts(self, step: dict, context: dict) -> dict[str, Any]:
+        mood = context.get("mood", "moderate")
+        style = context.get("style", "realistic")
+        duration = context.get("duration", 30)
+        beats = context.get("beats", [])
+
+        enhancer = PromptEnhancer()
+        try:
+            num_segments = min(len(beats) + 1, 10) if beats else max(1, int(duration / 5))
+            segment_duration = duration / num_segments if num_segments > 0 else 5
+
+            mood_descriptions = {
+                "energetic": "dynamic, energetic, fast-paced visuals with vibrant motion",
+                "upbeat": "cheerful, positive, moderate movement and bright colors",
+                "moderate": "balanced, steady, smooth transitions and calm visuals",
+                "calm": "peaceful, serene, slow gentle movements and soft colors",
+            }
+            mood_desc = mood_descriptions.get(mood, mood_descriptions["moderate"])
+
+            prompt = f"Generate {num_segments} visual scene descriptions for a music video. "
+            prompt += f"Style: {style}. Mood: {mood_desc}. "
+            prompt += f"Each segment should be approximately {segment_duration:.0f} seconds. "
+            prompt += "Focus on abstract, artistic visuals that complement music."
+
+            try:
+                response = await enhancer.llm.generate(
+                    prompt=prompt,
+                    system="You are a creative visual artist for music videos. Generate concise scene descriptions (1-2 sentences each) that would look good as AI-generated visuals.",
+                    max_tokens=512,
+                    temperature=0.8,
+                )
+
+                scenes = [s.strip() for s in response.split("\n") if s.strip()]
+                scene_prompts = []
+                for i, scene in enumerate(scenes[:num_segments]):
+                    scene_prompts.append(
+                        {
+                            "segment_index": i,
+                            "prompt": scene,
+                            "duration": segment_duration,
+                        }
+                    )
+            except Exception:
+                scene_prompts = self._fallback_scene_prompts(
+                    style, mood, num_segments, segment_duration
+                )
+
+            return {"scene_prompts": scene_prompts, "segment_count": len(scene_prompts)}
+        finally:
+            await enhancer.close()
+
+    def _fallback_scene_prompts(
+        self, style: str, mood: str, num_segments: int, segment_duration: float
+    ) -> list[dict[str, Any]]:
+        style_suffixes = {
+            "realistic": "photorealistic, cinematic lighting, detailed textures",
+            "anime": "anime style, vibrant colors, dynamic animation",
+            "manga": "manga style, dramatic shading, bold contrasts",
+        }
+        suffix = style_suffixes.get(style, style_suffixes["realistic"])
+
+        mood_visuals = {
+            "energetic": ["particles", "color bursts", "waves", "abstract shapes"],
+            "upbeat": ["nature scenes", "warm colors", "floating elements"],
+            "moderate": ["gentle flows", "soft gradients", "subtle movements"],
+            "calm": ["peaceful landscapes", "soft light", "minimalist patterns"],
+        }
+        visuals = mood_visuals.get(mood, mood_visuals["moderate"])
+
+        prompts = []
+        for i in range(num_segments):
+            visual = visuals[i % len(visuals)]
+            prompts.append(
+                {
+                    "segment_index": i,
+                    "prompt": f"Abstract {visual} visualization, {suffix}",
+                    "duration": segment_duration,
+                }
+            )
+        return prompts
+
+    async def _generate_video_segments(
+        self, step: dict, context: dict, style_params: dict
+    ) -> dict[str, Any]:
+        scene_prompts = context.get("scene_prompts", [])
+        if not scene_prompts:
+            return {"video_segments": [], "merged_video": None}
+
+        fps = context.get("fps", 24)
+        aspect_ratio = context.get("aspect_ratio", "16:9")
+        width, height = self._get_dimensions(aspect_ratio)
+
+        workflow_name = step.get("model", "wan_s2v")
+        workflow_path = Path(settings.comfyui_workflows_path) / f"{workflow_name}.json"
+        if not workflow_path.exists():
+            workflow_path = Path(settings.comfyui_workflows_path) / "wan_s2v.json"
+
+        workflow = load_comfyui_workflow(str(workflow_path))
+        workflow = merge_style_into_workflow(workflow, style_params)
+
+        audio_file = context.get("audio_file", "")
+
+        segments_dir = self.output_dir / "segments"
+        segments_dir.mkdir(parents=True, exist_ok=True)
+        video_segments = []
+
+        for i, scene in enumerate(scene_prompts):
+            segment_duration = scene.get("duration", 5)
+            segment_prompt = scene.get("prompt", "abstract visualization")
+
+            segment_workflow = load_comfyui_workflow(str(workflow_path))
+            segment_workflow = merge_style_into_workflow(segment_workflow, style_params)
+
+            video_length = int(segment_duration * fps) + 1
+
+            for node_id, node in segment_workflow.items():
+                if node.get("class_type") == "LoadAudio":
+                    node["inputs"]["audio_file"] = audio_file
+                elif node.get("class_type") == "WanVideoSampler":
+                    node["inputs"]["prompt"] = segment_prompt
+                    node["inputs"]["width"] = width
+                    node["inputs"]["height"] = height
+                    node["inputs"]["video_length"] = video_length
+                    node["inputs"]["fps"] = fps
+                elif node.get("class_type") == "SaveVideo":
+                    node["inputs"]["filename_prefix"] = f"music_segment_{i:03d}"
+
+            result = await self.comfyui.queue_prompt(segment_workflow)
+            prompt_id = result.get("prompt_id")
+
+            if not prompt_id:
+                continue
+
+            history = await self.comfyui.wait_for_completion(prompt_id, timeout=600)
+
+            output_filename = None
+            for node_output in history.get("outputs", {}).values():
+                if "videos" in node_output:
+                    videos = node_output["videos"]
+                    if videos:
+                        output_filename = videos[0].get("filename")
+                        break
+
+            if output_filename:
+                video_data = await self.comfyui.get_output(output_filename, subfolder="output")
+                segment_path = segments_dir / f"segment_{i:03d}.mp4"
+                segment_path.write_bytes(video_data)
+                video_segments.append(str(segment_path))
+
+        if len(video_segments) == 0:
+            return {"video_segments": [], "merged_video": None}
+
+        if len(video_segments) == 1:
+            return {"video_segments": video_segments, "merged_video": video_segments[0]}
+
+        merged_path = self.output_dir / "merged.mp4"
+        await VideoProcessor.merge_videos(video_segments, str(merged_path))
+
+        return {"video_segments": video_segments, "merged_video": str(merged_path)}
+
+    async def _merge_segments(self, step: dict, context: dict) -> dict[str, Any]:
+        video_segments = context.get("video_segments", [])
+        if not video_segments:
+            merged = context.get("merged_video")
+            return {"merged_video": merged}
+
+        if len(video_segments) == 1:
+            return {"merged_video": video_segments[0]}
+
+        merged_path = self.output_dir / "merged.mp4"
+        await VideoProcessor.merge_videos(video_segments, str(merged_path))
+
+        return {"merged_video": str(merged_path)}
+
+    async def _add_audio(self, step: dict, context: dict) -> dict[str, Any]:
+        merged_video = context.get("merged_video")
+        audio_file = context.get("audio_file")
+
+        if not merged_video or not audio_file:
+            return {"final_video": merged_video}
+
+        output_path = self.output_dir / "final.mp4"
+        await VideoProcessor.add_audio(merged_video, audio_file, str(output_path))
 
         return {"final_video": str(output_path)}
 
