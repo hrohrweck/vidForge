@@ -54,7 +54,7 @@ services:
       - backend
 
   comfyui:
-    image: comfyanonymous/comfyui:latest
+    image: hardandheavy/comfyui-rocm:latest
     ports:
       - "8188:8188"
     volumes:
