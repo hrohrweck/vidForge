@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -7,13 +8,19 @@ from uuid import UUID
 import redis
 from celery import shared_task
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
-from app.database import Job, Template, async_session
+from app.database import Job, Template
 from app.services.video_generator import process_job_video
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
+
+
+def get_db_session_factory():
+    engine = create_async_engine(settings.database_url, echo=settings.debug)
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 def get_redis() -> redis.Redis:
@@ -33,7 +40,8 @@ async def update_job_status(
     output_path: str | None = None,
     preview_path: str | None = None,
 ) -> None:
-    async with async_session() as db:
+    async_session_maker = get_db_session_factory()
+    async with async_session_maker() as db:
         result = await db.execute(select(Job).where(Job.id == job_id))
         job = result.scalar_one_or_none()
         if job:
@@ -68,7 +76,8 @@ async def update_job_status(
 async def get_template_name(template_id: UUID | None) -> str:
     if not template_id:
         return "prompt_to_video"
-    async with async_session() as db:
+    async_session_maker = get_db_session_factory()
+    async with async_session_maker() as db:
         result = await db.execute(select(Template).where(Template.id == template_id))
         template = result.scalar_one_or_none()
         if template:
@@ -89,7 +98,8 @@ def process_video_job(self, job_id: str) -> dict:
     async def run():
         await update_job_status(job_uuid, "processing", 0)
 
-        async with async_session() as db:
+        async_session_maker = get_db_session_factory()
+        async with async_session_maker() as db:
             result = await db.execute(select(Job).where(Job.id == job_uuid))
             job = result.scalar_one_or_none()
             if not job:

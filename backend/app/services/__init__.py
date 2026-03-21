@@ -20,11 +20,26 @@ class ComfyUIClient:
     async def close(self) -> None:
         await self.client.aclose()
 
+    async def get_system_info(self) -> dict:
+        """Get ComfyUI system info to check version and available nodes."""
+        try:
+            response = await self.client.get(f"{self.base_url}/system_stats")
+            return response.json()
+        except Exception:
+            return {}
+
     async def queue_prompt(self, workflow: dict[str, Any]) -> dict:
         response = await self.client.post(
             f"{self.base_url}/prompt",
             json={"prompt": workflow},
         )
+        if response.status_code >= 400:
+            error_detail = response.text
+            raise httpx.HTTPStatusError(
+                f"ComfyUI error {response.status_code}: {error_detail}",
+                request=response.request,
+                response=response,
+            )
         response.raise_for_status()
         return response.json()
 

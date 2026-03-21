@@ -247,13 +247,14 @@ class VideoGenerator:
             video_length = int(segment_duration * fps) + 1
 
             for node_id, node in workflow.items():
-                if node.get("class_type") == "WanVideoSampler":
-                    node["inputs"]["prompt"] = segment_prompt
+                if node.get("class_type") == "WanImageToVideo":
                     node["inputs"]["width"] = width
                     node["inputs"]["height"] = height
-                    node["inputs"]["video_length"] = video_length
-                    node["inputs"]["fps"] = fps
+                    node["inputs"]["length"] = video_length
+                elif node.get("class_type") == "CLIPTextEncode":
+                    node["inputs"]["text"] = segment_prompt
                 elif node.get("class_type") == "SaveVideo":
+                    node["inputs"]["fps"] = fps
                     node["inputs"]["filename_prefix"] = f"segment_{i:03d}"
 
             result = await self.comfyui.queue_prompt(workflow)
@@ -266,10 +267,10 @@ class VideoGenerator:
 
             output_filename = None
             for node_output in history.get("outputs", {}).values():
-                if "videos" in node_output:
-                    videos = node_output["videos"]
-                    if videos:
-                        output_filename = videos[0].get("filename")
+                if isinstance(node_output, dict) and "images" in node_output:
+                    images = node_output["images"]
+                    if images:
+                        output_filename = images[0].get("filename")
                         break
 
             if output_filename:
@@ -302,6 +303,7 @@ class VideoGenerator:
         workflow = merge_style_into_workflow(workflow, style_params)
 
         prompt = context.get("enhanced_prompt", context.get("prompt", ""))
+        negative_prompt = context.get("negative_prompt", "blurry, low quality, distorted, deformed")
         duration = context.get("duration", 5)
         fps = context.get("fps", 24)
         aspect_ratio = context.get("aspect_ratio", "16:9")
@@ -310,13 +312,18 @@ class VideoGenerator:
         video_length = int(duration * fps) + 1
 
         for node_id, node in workflow.items():
-            if node.get("class_type") == "WanVideoSampler":
-                node["inputs"]["prompt"] = prompt
+            if node.get("class_type") == "WanImageToVideo":
                 node["inputs"]["width"] = width
                 node["inputs"]["height"] = height
-                node["inputs"]["video_length"] = video_length
-                node["inputs"]["fps"] = fps
+                node["inputs"]["length"] = video_length
+            elif node.get("class_type") == "CLIPTextEncode":
+                text_input = node["inputs"].get("text", "")
+                if "negative" not in text_input.lower() and text_input == "":
+                    node["inputs"]["text"] = prompt
+                elif "negative" in text_input.lower():
+                    node["inputs"]["text"] = negative_prompt
             elif node.get("class_type") == "SaveVideo":
+                node["inputs"]["fps"] = fps
                 node["inputs"]["filename_prefix"] = f"job_{self.job_id}"
 
         result = await self.comfyui.queue_prompt(workflow)
@@ -329,10 +336,10 @@ class VideoGenerator:
 
         output_filename = None
         for node_output in history.get("outputs", {}).values():
-            if "videos" in node_output:
-                videos = node_output["videos"]
-                if videos:
-                    output_filename = videos[0].get("filename")
+            if isinstance(node_output, dict) and "images" in node_output:
+                images = node_output["images"]
+                if images:
+                    output_filename = images[0].get("filename")
                     break
 
         if not output_filename:
@@ -610,38 +617,56 @@ class VideoGenerator:
             video_length = int(segment_duration * fps) + 1
 
             for node_id, node in segment_workflow.items():
-                if node.get("class_type") == "LoadAudio":
-                    node["inputs"]["audio_file"] = audio_file
-                elif node.get("class_type") == "WanVideoSampler":
-                    node["inputs"]["prompt"] = segment_prompt
+                if node.get("class_type") == "WanImageToVideo":
                     node["inputs"]["width"] = width
                     node["inputs"]["height"] = height
-                    node["inputs"]["video_length"] = video_length
-                    node["inputs"]["fps"] = fps
+                    node["inputs"]["length"] = video_length
+                elif node.get("class_type") == "CLIPTextEncode":
+                    node["inputs"]["text"] = segment_prompt
                 elif node.get("class_type") == "SaveVideo":
+                    node["inputs"]["fps"] = fps
                     node["inputs"]["filename_prefix"] = f"music_segment_{i:03d}"
 
-            result = await self.comfyui.queue_prompt(segment_workflow)
-            prompt_id = result.get("prompt_id")
+            try:
+                result = await self.comfyui.queue_prompt(segment_workflow)
+                prompt_id = result.get("prompt_id")
+            except Exception as e:
+                raise VideoGenerationError(
+                    f"Failed to connect to ComfyUI at {settings.comfyui_url}: {e}"
+                ) from e
 
             if not prompt_id:
                 continue
 
-            history = await self.comfyui.wait_for_completion(prompt_id, timeout=600)
+            try:
+                history = await self.comfyui.wait_for_completion(prompt_id, timeout=600)
+            except TimeoutError:
+                continue
+            except Exception as e:
+                raise VideoGenerationError(f"ComfyUI generation failed: {e}") from e
 
             output_filename = None
             for node_output in history.get("outputs", {}).values():
-                if "videos" in node_output:
-                    videos = node_output["videos"]
-                    if videos:
-                        output_filename = videos[0].get("filename")
-                        break
+                if isinstance(node_output, dict):
+                    if "images" in node_output:
+                        images = node_output["images"]
+                        if images:
+                            output_filename = images[0].get("filename")
+                            break
+                    elif "videos" in node_output:
+                        videos = node_output["videos"]
+                        if videos:
+                            output_filename = videos[0].get("filename")
+                            break
 
             if output_filename:
-                video_data = await self.comfyui.get_output(output_filename, subfolder="output")
-                segment_path = segments_dir / f"segment_{i:03d}.mp4"
-                segment_path.write_bytes(video_data)
-                video_segments.append(str(segment_path))
+                try:
+                    video_data = await self.comfyui.get_output(output_filename, subfolder="output")
+                    segment_path = segments_dir / f"segment_{i:03d}.mp4"
+                    segment_path.write_bytes(video_data)
+                    video_segments.append(str(segment_path))
+                except Exception:
+                    continue
 
         if len(video_segments) == 0:
             return {"video_segments": [], "merged_video": None}

@@ -2,43 +2,54 @@
   "1": {
     "class_type": "LoadAudio",
     "inputs": {
-      "audio_file": ""
+      "audio": ""
     }
   },
   "2": {
-    "class_type": "AudioAnalyze",
+    "class_type": "CLIPTextEncode",
     "inputs": {
-      "audio": ["1", 0]
+      "text": "",
+      "clip": ["5", 0]
     }
   },
   "3": {
-    "class_type": "WanVideoSampler",
+    "class_type": "CLIPTextEncode",
     "inputs": {
-      "prompt": "",
-      "negative_prompt": "",
-      "width": 1280,
-      "height": 720,
-      "video_length": 49,
-      "fps": 24,
-      "guidance_scale": 7.5,
-      "num_inference_steps": 50,
-      "seed": -1,
-      "audio_features": ["2", 0]
+      "text": "",
+      "clip": ["5", 0]
     }
   },
   "4": {
-    "class_type": "VAEDecode",
+    "class_type": "WanImageToVideo",
     "inputs": {
-      "samples": ["3", 0],
-      "vae": "wan_vae.safetensors"
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "vae": "Wan2.2_vae_bf16.safetensors",
+      "width": 1280,
+      "height": 720,
+      "length": 49,
+      "batch_size": 1
     }
   },
   "5": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["4", 0],
+      "vae": "Wan2.2_vae_bf16.safetensors"
+    }
+  },
+  "6": {
+    "class_type": "CheckpointLoader",
+    "inputs": {
+      "ckpt_name": ""
+    }
+  },
+  "7": {
     "class_type": "SaveVideo",
     "inputs": {
       "filename_prefix": "vidforge_audio_output",
       "fps": 24,
-      "frames": ["4", 0]
+      "frames": ["5", 0]
     }
   }
 }
