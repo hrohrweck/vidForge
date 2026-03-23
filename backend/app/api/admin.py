@@ -1,14 +1,25 @@
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.config import get_settings
-from app.database import Job, User, get_db
+from app.database import (
+    Job,
+    User,
+    Group,
+    Permission,
+    UserGroup,
+    GroupPermission,
+    Template,
+    get_db,
+)
+from app.services.permissions import has_permission, get_user_permissions, require_permission
 
 router = APIRouter()
 settings = get_settings()
@@ -245,3 +256,345 @@ async def retry_job(
     process_video_job.delay(str(job.id))
 
     return {"status": "restarted", "job_id": job_id}
+
+
+# === User Management ===
+
+
+class UserUpdateRequest(BaseModel):
+    is_active: bool | None = None
+    is_superuser: bool | None = None
+    group_ids: list[UUID] | None = None
+
+
+class UserDetailResponse(BaseModel):
+    id: UUID
+    email: str
+    is_active: bool
+    is_superuser: bool
+    groups: list[dict[str, Any]]
+    permissions: list[str]
+    jobs_count: int
+    created_at: datetime
+
+
+class DeletePreviewResponse(BaseModel):
+    user_id: UUID
+    email: str
+    items_to_delete: dict[str, int]
+    total_items: int
+    warning: str
+
+
+@router.get("/users/{user_id}", response_model=UserDetailResponse)
+async def get_user_details(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    permissions = await get_user_permissions(user, db)
+    groups = user.groups if hasattr(user, "groups") else []
+
+    jobs_count_result = await db.execute(select(func.count(Job.id)).where(Job.user_id == user.id))
+    jobs_count = jobs_count_result.scalar() or 0
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "is_active": user.is_active,
+        "is_superuser": user.is_superuser,
+        "groups": [{"id": g.id, "name": g.name, "description": g.description} for g in groups],
+        "permissions": permissions,
+        "jobs_count": jobs_count,
+        "created_at": user.created_at,
+    }
+
+
+@router.get("/users/{user_id}/preview-delete", response_model=DeletePreviewResponse)
+async def preview_user_deletion(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    jobs_count = await db.scalar(select(func.count(Job.id)).where(Job.user_id == user_id)) or 0
+    templates_count = (
+        await db.scalar(select(func.count(Template.id)).where(Template.created_by == user_id)) or 0
+    )
+
+    return {
+        "user_id": user_id,
+        "email": user.email,
+        "items_to_delete": {
+            "jobs": jobs_count,
+            "templates": templates_count,
+        },
+        "total_items": jobs_count + templates_count,
+        "warning": "This action cannot be undone. All user data will be permanently deleted.",
+    }
+
+
+@router.patch("/users/{user_id}", response_model=UserDetailResponse)
+async def update_user(
+    user_id: UUID,
+    update_data: UserUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user_id == admin.id and update_data.is_superuser is False:
+        raise HTTPException(status_code=400, detail="Cannot remove your own admin status")
+
+    if update_data.is_active is not None:
+        user.is_active = update_data.is_active
+    if update_data.is_superuser is not None:
+        user.is_superuser = update_data.is_superuser
+
+    if update_data.group_ids is not None:
+        await db.execute(sql_delete(UserGroup).where(UserGroup.user_id == user_id))
+        for group_id in update_data.group_ids:
+            result = await db.execute(select(Group).where(Group.id == group_id))
+            group = result.scalar_one_or_none()
+            if group:
+                user_group = UserGroup(user_id=user_id, group_id=group_id)
+                db.add(user_group)
+
+    await db.commit()
+    await db.refresh(user)
+
+    return await get_user_details(user_id, db, admin)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, str]:
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await db.execute(sql_delete(UserGroup).where(UserGroup.user_id == user_id))
+    await db.execute(sql_delete(Job).where(Job.user_id == user_id))
+    await db.execute(sql_delete(Template).where(Template.created_by == user_id))
+    await db.delete(user)
+    await db.commit()
+
+    return {"status": "deleted", "user_id": str(user_id)}
+
+
+# === Group Management ===
+
+
+class GroupCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    permission_ids: list[UUID] | None = None
+
+
+class GroupUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    permission_ids: list[UUID] | None = None
+
+
+class GroupResponse(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    permissions: list[dict[str, Any]]
+    users_count: int
+
+
+class PermissionResponse(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    category: str
+
+
+@router.get("/groups", response_model=list[GroupResponse])
+async def list_groups(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    result = await db.execute(select(Group))
+    groups = result.scalars().all()
+
+    group_list = []
+    for group in groups:
+        users_count_result = await db.execute(
+            select(func.count(UserGroup.user_id)).where(UserGroup.group_id == group.id)
+        )
+        users_count = users_count_result.scalar() or 0
+
+        permissions = group.permissions if hasattr(group, "permissions") else []
+
+        group_list.append(
+            {
+                "id": group.id,
+                "name": group.name,
+                "description": group.description,
+                "permissions": [
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "description": p.description,
+                        "category": p.category,
+                    }
+                    for p in permissions
+                ],
+                "users_count": users_count,
+            }
+        )
+
+    return group_list
+
+
+@router.post("/groups", response_model=GroupResponse)
+async def create_group(
+    group_data: GroupCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    result = await db.execute(select(Group).where(Group.name == group_data.name))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Group with this name already exists")
+
+    group = Group(name=group_data.name, description=group_data.description)
+    db.add(group)
+    await db.flush()
+
+    if group_data.permission_ids:
+        for perm_id in group_data.permission_ids:
+            result = await db.execute(select(Permission).where(Permission.id == perm_id))
+            perm = result.scalar_one_or_none()
+            if perm:
+                gp = GroupPermission(group_id=group.id, permission_id=perm_id)
+                db.add(gp)
+
+    await db.commit()
+    await db.refresh(group)
+
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "permissions": [],
+        "users_count": 0,
+    }
+
+
+@router.patch("/groups/{group_id}", response_model=GroupResponse)
+async def update_group(
+    group_id: UUID,
+    group_data: GroupUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, Any]:
+    result = await db.execute(select(Group).where(Group.id == group_id))
+    group = result.scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if group_data.name is not None:
+        existing = await db.execute(
+            select(Group).where(Group.name == group_data.name, Group.id != group_id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Group with this name already exists")
+        group.name = group_data.name
+
+    if group_data.description is not None:
+        group.description = group_data.description
+
+    if group_data.permission_ids is not None:
+        await db.execute(sql_delete(GroupPermission).where(GroupPermission.group_id == group_id))
+        for perm_id in group_data.permission_ids:
+            result = await db.execute(select(Permission).where(Permission.id == perm_id))
+            perm = result.scalar_one_or_none()
+            if perm:
+                gp = GroupPermission(group_id=group_id, permission_id=perm_id)
+                db.add(gp)
+
+    await db.commit()
+    await db.refresh(group)
+
+    users_count_result = await db.execute(
+        select(func.count(UserGroup.user_id)).where(UserGroup.group_id == group.id)
+    )
+    users_count = users_count_result.scalar() or 0
+    permissions = group.permissions if hasattr(group, "permissions") else []
+
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "permissions": [
+            {"id": p.id, "name": p.name, "description": p.description, "category": p.category}
+            for p in permissions
+        ],
+        "users_count": users_count,
+    }
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(
+    group_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> dict[str, str]:
+    result = await db.execute(select(Group).where(Group.id == group_id))
+    group = result.scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if group.name in ("users", "admins"):
+        raise HTTPException(status_code=400, detail=f"Cannot delete system group '{group.name}'")
+
+    await db.execute(sql_delete(UserGroup).where(UserGroup.group_id == group_id))
+    await db.execute(sql_delete(GroupPermission).where(GroupPermission.group_id == group_id))
+    await db.delete(group)
+    await db.commit()
+
+    return {"status": "deleted", "group_id": str(group_id)}
+
+
+@router.get("/permissions", response_model=list[PermissionResponse])
+async def list_permissions(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    result = await db.execute(select(Permission).order_by(Permission.category, Permission.name))
+    permissions = result.scalars().all()
+
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "category": p.category,
+        }
+        for p in permissions
+    ]

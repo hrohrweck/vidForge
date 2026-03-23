@@ -5,11 +5,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import User, get_db
+from app.database import User, Group, UserGroup, get_db
+from app.services.permissions import get_user_permissions
 
 router = APIRouter()
 security = HTTPBearer()
@@ -36,11 +37,20 @@ class TokenData(BaseModel):
     user_id: str | None = None
 
 
+class GroupInfo(BaseModel):
+    id: UUID
+    name: str
+    description: str | None = None
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     email: str
     is_active: bool
+    is_superuser: bool
+    groups: list[GroupInfo] = []
+    permissions: list[str] = []
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -100,11 +110,25 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) ->
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    result = await db.execute(select(func.count(User.id)))
+    user_count = result.scalar() or 0
+    is_first_user = user_count == 0
+
     user = User(
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
+        is_superuser=is_first_user,
     )
     db.add(user)
+    await db.flush()
+
+    group_name = "admins" if is_first_user else "users"
+    result = await db.execute(select(Group).where(Group.name == group_name))
+    group = result.scalar_one_or_none()
+    if group:
+        user_group = UserGroup(user_id=user.id, group_id=group.id)
+        db.add(user_group)
+
     await db.commit()
     await db.refresh(user)
     return user
@@ -126,5 +150,18 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)) -> dic
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)) -> User:
-    return current_user
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    permissions = await get_user_permissions(current_user, db)
+    groups = current_user.groups if hasattr(current_user, "groups") else []
+
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "is_active": current_user.is_active,
+        "is_superuser": current_user.is_superuser,
+        "groups": [{"id": g.id, "name": g.name, "description": g.description} for g in groups],
+        "permissions": permissions,
+    }

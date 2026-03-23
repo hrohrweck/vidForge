@@ -2,7 +2,16 @@ from datetime import datetime
 from typing import AsyncGenerator
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, String, Text, Boolean, Integer, ForeignKey, select
+from sqlalchemy import (
+    DateTime,
+    String,
+    Text,
+    Boolean,
+    Integer,
+    ForeignKey,
+    select,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -12,6 +21,59 @@ from app.config import get_settings
 
 class Base(DeclarativeBase):
     pass
+
+
+class UserGroup(Base):
+    __tablename__ = "user_groups"
+    __table_args__ = (UniqueConstraint("user_id", "group_id", name="uq_user_group"),)
+
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    group_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class GroupPermission(Base):
+    __tablename__ = "group_permissions"
+    __table_args__ = (UniqueConstraint("group_id", "permission_id", name="uq_group_permission"),)
+
+    group_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    permission_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    groups: Mapped[list["Group"]] = relationship(
+        secondary="group_permissions", back_populates="permissions", lazy="selectin"
+    )
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    users: Mapped[list["User"]] = relationship(
+        secondary="user_groups", back_populates="groups", lazy="selectin"
+    )
+    permissions: Mapped[list["Permission"]] = relationship(
+        secondary="group_permissions", back_populates="groups", lazy="selectin"
+    )
 
 
 engine = create_async_engine(
@@ -51,6 +113,9 @@ class User(Base):
     )
     settings: Mapped["UserSettings"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    groups: Mapped[list["Group"]] = relationship(
+        secondary="user_groups", back_populates="users", lazy="selectin"
     )
 
 
@@ -135,9 +200,9 @@ async def seed_builtin_data() -> None:
     """Load built-in templates and styles from YAML files into the database."""
     from app.services.template_loader import TemplateLoader, StyleLoader
     from app.config import get_settings
-    
+
     settings = get_settings()
-    
+
     async with async_session() as db:
         # Load templates
         template_loader = TemplateLoader(settings.templates_path)
@@ -149,7 +214,7 @@ async def seed_builtin_data() -> None:
                     select(Template).where(Template.name == template_data["name"])
                 )
                 existing = result.scalar_one_or_none()
-                
+
                 if not existing:
                     template = Template(
                         name=template_data["name"],
@@ -167,18 +232,16 @@ async def seed_builtin_data() -> None:
         except Exception as e:
             await db.rollback()
             print(f"Warning: Could not seed templates: {e}")
-        
+
         # Load styles
         style_loader = StyleLoader(settings.styles_path)
         try:
             styles = style_loader.load_all_styles()
             for style_data in styles:
                 # Check if style already exists by name
-                result = await db.execute(
-                    select(Style).where(Style.name == style_data["name"])
-                )
+                result = await db.execute(select(Style).where(Style.name == style_data["name"]))
                 existing = result.scalar_one_or_none()
-                
+
                 if not existing:
                     style = Style(
                         name=style_data["name"],
@@ -190,3 +253,99 @@ async def seed_builtin_data() -> None:
         except Exception as e:
             await db.rollback()
             print(f"Warning: Could not seed styles: {e}")
+
+
+DEFAULT_PERMISSIONS = [
+    ("jobs:create", "Create new video generation jobs", "jobs"),
+    ("jobs:view", "View own jobs", "jobs"),
+    ("jobs:view:all", "View all users' jobs", "jobs"),
+    ("templates:create", "Create custom templates", "templates"),
+    ("templates:view", "View templates", "templates"),
+    ("styles:create", "Create custom styles", "styles"),
+    ("admin:dashboard", "View admin dashboard", "admin"),
+    ("admin:users:read", "View user list and details", "admin"),
+    ("admin:users:write", "Modify users (roles, status, groups)", "admin"),
+    ("admin:users:delete", "Delete users", "admin"),
+    ("admin:jobs:manage", "Cancel/retry any job", "admin"),
+    ("admin:groups:manage", "Create and manage groups", "admin"),
+]
+
+DEFAULT_GROUPS = {
+    "users": {
+        "description": "Default group for regular users",
+        "permissions": ["jobs:create", "jobs:view", "templates:view", "styles:create"],
+    },
+    "editors": {
+        "description": "Users with elevated content creation privileges",
+        "permissions": [
+            "jobs:create",
+            "jobs:view",
+            "jobs:view:all",
+            "templates:create",
+            "templates:view",
+            "styles:create",
+        ],
+    },
+    "admins": {
+        "description": "Administrators with full access",
+        "permissions": [p[0] for p in DEFAULT_PERMISSIONS],
+    },
+}
+
+
+async def seed_rbac_data() -> None:
+    """Seed permissions, groups, and group-permission assignments."""
+    async with async_session() as db:
+        try:
+            for name, description, category in DEFAULT_PERMISSIONS:
+                result = await db.execute(select(Permission).where(Permission.name == name))
+                if not result.scalar_one_or_none():
+                    permission = Permission(
+                        name=name,
+                        description=description,
+                        category=category,
+                    )
+                    db.add(permission)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning: Could not seed permissions: {e}")
+
+        permission_cache: dict[str, Permission] = {}
+        for name, _, _ in DEFAULT_PERMISSIONS:
+            result = await db.execute(select(Permission).where(Permission.name == name))
+            perm = result.scalar_one_or_none()
+            if perm:
+                permission_cache[name] = perm
+
+        try:
+            for group_name, group_config in DEFAULT_GROUPS.items():
+                result = await db.execute(select(Group).where(Group.name == group_name))
+                group = result.scalar_one_or_none()
+
+                if not group:
+                    group = Group(
+                        name=group_name,
+                        description=group_config["description"],
+                    )
+                    db.add(group)
+                    await db.flush()
+
+                for perm_name in group_config["permissions"]:
+                    if perm_name in permission_cache:
+                        existing = await db.execute(
+                            select(GroupPermission).where(
+                                GroupPermission.group_id == group.id,
+                                GroupPermission.permission_id == permission_cache[perm_name].id,
+                            )
+                        )
+                        if not existing.scalar_one_or_none():
+                            gp = GroupPermission(
+                                group_id=group.id,
+                                permission_id=permission_cache[perm_name].id,
+                            )
+                            db.add(gp)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning: Could not seed groups: {e}")

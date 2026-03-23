@@ -43,10 +43,65 @@ export interface TokenResponse {
   token_type: string
 }
 
+export interface Group {
+  id: string
+  name: string
+  description?: string
+  permissions?: Permission[]
+  users_count?: number
+}
+
+export interface Permission {
+  id: string
+  name: string
+  description?: string
+  category: string
+}
+
 export interface User {
   id: string
   email: string
   is_active: boolean
+  is_superuser: boolean
+  groups: Group[]
+  permissions: string[]
+}
+
+export interface UserDetail {
+  id: string
+  email: string
+  is_active: boolean
+  is_superuser: boolean
+  groups: Group[]
+  permissions: string[]
+  jobs_count: number
+  created_at: string
+}
+
+export interface DeletePreview {
+  user_id: string
+  email: string
+  items_to_delete: Record<string, number>
+  total_items: number
+  warning: string
+}
+
+export interface UserUpdateRequest {
+  is_active?: boolean
+  is_superuser?: boolean
+  group_ids?: string[]
+}
+
+export interface GroupCreateRequest {
+  name: string
+  description?: string
+  permission_ids?: string[]
+}
+
+export interface GroupUpdateRequest {
+  name?: string
+  description?: string
+  permission_ids?: string[]
 }
 
 export interface Job {
@@ -128,9 +183,11 @@ export const jobsApi = {
   createFromCsv: async (templateId: string, file: File, autoStart: boolean = true) => {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await api.post<BatchJobResponse>(`/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    const response = await api.post<BatchJobResponse>(
+      `/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    )
     return response.data
   },
   start: async (id: string) => {
@@ -168,4 +225,59 @@ export const storageApi = {
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
+}
+
+export const adminApi = {
+  getDashboard: async () => {
+    const response = await api.get('/admin/dashboard')
+    return response.data
+  },
+
+  getUsers: async () => {
+    const response = await api.get<UserDetail[]>('/admin/users')
+    return response.data
+  },
+
+  getUser: async (id: string) => {
+    const response = await api.get<UserDetail>(`/admin/users/${id}`)
+    return response.data
+  },
+
+  previewUserDeletion: async (id: string) => {
+    const response = await api.get<DeletePreview>(`/admin/users/${id}/preview-delete`)
+    return response.data
+  },
+
+  updateUser: async (id: string, data: UserUpdateRequest) => {
+    const response = await api.patch<UserDetail>(`/admin/users/${id}`, data)
+    return response.data
+  },
+
+  deleteUser: async (id: string) => {
+    await api.delete(`/admin/users/${id}`)
+  },
+
+  getGroups: async () => {
+    const response = await api.get<Group[]>('/admin/groups')
+    return response.data
+  },
+
+  createGroup: async (data: GroupCreateRequest) => {
+    const response = await api.post<Group>('/admin/groups', data)
+    return response.data
+  },
+
+  updateGroup: async (id: string, data: GroupUpdateRequest) => {
+    const response = await api.patch<Group>(`/admin/groups/${id}`, data)
+    return response.data
+  },
+
+  deleteGroup: async (id: string) => {
+    await api.delete(`/admin/groups/${id}`)
+  },
+
+  getPermissions: async () => {
+    const response = await api.get<Permission[]>('/admin/permissions')
+    return response.data
+  },
 }

@@ -71,7 +71,7 @@ class ComfyUIClient:
         return response.content
 
     async def wait_for_completion(
-        self, prompt_id: str, poll_interval: float = 2.0, timeout: float = 600.0
+        self, prompt_id: str, poll_interval: float = 2.0, timeout: float = 172800.0
     ) -> dict:
         elapsed = 0.0
         while elapsed < timeout:

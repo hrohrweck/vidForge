@@ -29,7 +29,10 @@ export function renderWithProviders(
         email: superuser ? 'admin@example.com' : 'test@example.com',
         is_active: true,
         is_superuser: superuser,
-      }
+        groups: [],
+        permissions: [],
+      },
+      isAuthenticated: true,
     })
   } else {
     useAuthStore.setState({

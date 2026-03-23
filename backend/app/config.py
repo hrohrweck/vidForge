@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     comfyui_url: str = "http://localhost:8188"
     comfyui_workflows_path: str = "./app/comfyui/workflows"
+    comfyui_max_concurrent: int = 1
     ollama_url: str = "http://localhost:11434"
 
     templates_path: str = "./templates"
@@ -43,6 +44,8 @@ class Settings(BaseSettings):
     preview_height: int = 480
     preview_fps: int = 15
     preview_quality: int = 28
+
+    task_time_limit: int = 172800
 
 
 @lru_cache

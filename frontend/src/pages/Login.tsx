@@ -16,10 +16,21 @@ export default function Login() {
   const [error, setError] = useState('')
 
   const loginMutation = useMutation({
-    mutationFn: () => authApi.login({ email, password }),
-    onSuccess: (response) => {
-      const { access_token } = response.data
-      setAuth(access_token, { id: '', email, is_active: true, is_superuser: false })
+    mutationFn: async ({ email, password }: { email: string; password: string }) => {
+      const response = await authApi.login({ email, password })
+      return response.data
+    },
+    onSuccess: async (data) => {
+      setAuth(data.access_token, {
+        id: '',
+        email,
+        is_active: true,
+        is_superuser: false,
+        groups: [],
+        permissions: [],
+      })
+      const meResponse = await authApi.getMe()
+      setAuth(data.access_token, meResponse.data)
       navigate('/')
     },
     onError: () => {
@@ -30,7 +41,7 @@ export default function Login() {
   const registerMutation = useMutation({
     mutationFn: () => authApi.register({ email, password }),
     onSuccess: () => {
-      loginMutation.mutate()
+      loginMutation.mutate({ email, password })
     },
     onError: () => {
       setError('Registration failed. Email may already be in use.')
@@ -41,7 +52,7 @@ export default function Login() {
     e.preventDefault()
     setError('')
     if (isLogin) {
-      loginMutation.mutate()
+      loginMutation.mutate({ email, password })
     } else {
       registerMutation.mutate()
     }

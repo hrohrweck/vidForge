@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Save, RefreshCw, Trash2, Folder, File } from 'lucide-react'
+import { Save, RefreshCw, Trash2, Folder, File, Sun, Moon, Monitor } from 'lucide-react'
 import { storageApi, stylesApi } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useThemeStore } from '../stores/theme'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 
 export default function Settings() {
   const { user } = useAuthStore()
+  const { theme, setTheme } = useThemeStore()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'account' | 'storage' | 'styles'>('account')
+  const [activeTab, setActiveTab] = useState<'account' | 'appearance' | 'storage' | 'styles'>('account')
   
   const [storageSettings, setStorageSettings] = useState({
     default_style: '',
@@ -85,7 +87,7 @@ export default function Settings() {
       </div>
 
       <div className="flex gap-2 border-b">
-        {(['account', 'storage', 'styles'] as const).map((tab) => (
+        {(['account', 'appearance', 'storage', 'styles'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -150,6 +152,40 @@ export default function Settings() {
                 </select>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'appearance' && (
+        <div className="border rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">Appearance</h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Choose how VidForge looks to you.
+          </p>
+          <div className="space-y-2">
+            {(['light', 'dark', 'system'] as const).map((option) => (
+              <label
+                key={option}
+                className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition ${
+                  theme === option ? 'bg-secondary' : 'hover:bg-gray-50'
+                }`}
+                onClick={() => setTheme(option)}
+              >
+                <div className="flex items-center gap-3">
+                  {option === 'light' && <Sun className="h-5 w-5 text-yellow-500" />}
+                  {option === 'dark' && <Moon className="h-5 w-5 text-blue-400" />}
+                  {option === 'system' && <Monitor className="h-5 w-5 text-gray-500" />}
+                  <div>
+                    <p className="font-medium">{option.charAt(0).toUpperCase() + option.slice(1)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {option === 'light' && 'Always use light mode'}
+                      {option === 'dark' && 'Always use dark mode'}
+                      {option === 'system' && 'Follow your system preference'}
+                    </p>
+                  </div>
+                </div>
+              </label>
+            ))}
           </div>
         </div>
       )}

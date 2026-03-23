@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Video, FileVideo, Settings, LogOut, Clapperboard, Shield } from 'lucide-react'
+import { Video, FileVideo, Settings, LogOut, Clapperboard, Shield, Users } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
+import { ThemeToggle } from './ThemeToggle'
 import { cn } from '../lib/utils'
 
 const getNavItems = (isSuperuser: boolean) => [
@@ -8,7 +9,12 @@ const getNavItems = (isSuperuser: boolean) => [
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
   { to: '/settings', label: 'Settings', icon: Settings },
-  ...(isSuperuser ? [{ to: '/admin', label: 'Admin', icon: Shield }] : []),
+  ...(isSuperuser
+    ? [
+        { to: '/admin', label: 'Admin', icon: Shield },
+        { to: '/admin/groups', label: 'Groups', icon: Users },
+      ]
+    : []),
 ]
 
 export default function Layout() {
@@ -24,6 +30,7 @@ export default function Layout() {
             <span className="font-bold text-lg">VidForge</span>
           </div>
           <div className="flex items-center gap-4">
+            <ThemeToggle />
             <span className="text-sm text-muted-foreground">{user?.email}</span>
             <button
               onClick={logout}
