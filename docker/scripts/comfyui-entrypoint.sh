@@ -8,12 +8,10 @@ CHECKPOINT_DIR="$MODELS_DIR/checkpoints"
 echo "[VidForge] Checking for Wan2.2 models..."
 
 # Check if VAE exists
-if [ ! -f "$VAE_DIR/wan_vae.safetensors" ]; then
-    echo "[VidForge] Downloading Wan2.2 VAE..."
-    wget -q --show-progress -P "$VAE_DIR/" \
-        "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_vae.safetensors" \
-        || curl -# -o "$VAE_DIR/wan_vae.safetensors" \
-            "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_vae.safetensors"
+if [ ! -f "$VAE_DIR/wan_2.1_vae.safetensors" ]; then
+    echo "[VidForge] Downloading Wan2.1 VAE..."
+    curl -# -L -o "$VAE_DIR/wan_2.1_vae.safetensors" \
+        "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors"
     echo "[VidForge] VAE downloaded successfully"
 else
     echo "[VidForge] VAE already present"
@@ -34,16 +32,12 @@ else
 fi
 
 # Also download CLIP if missing
-if [ ! -d "$MODELS_DIR/clip" ] || [ -z "$(ls -A $MODELS_DIR/clip 2>/dev/null)" ]; then
-    echo "[VidForge] Downloading CLIP model..."
+CLIP_MODEL="$MODELS_DIR/clip/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+if [ ! -f "$CLIP_MODEL" ]; then
+    echo "[VidForge] Downloading Wan2.2 CLIP model..."
     mkdir -p "$MODELS_DIR/clip"
-    wget -q --show-progress -P "$MODELS_DIR/clip/" \
-        "https://huggingface.co/comfyanonymous/clip_vit_l_patch14_336/resolve/main/convert_bf16.py" \
-        || true
-    # Download the actual CLIP model
-    wget -q --show-progress -P "$MODELS_DIR/clip/" \
-        "https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/model.safetensors" \
-        || true
+    curl -# -L -o "$CLIP_MODEL" \
+        "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
     echo "[VidForge] CLIP downloaded"
 else
     echo "[VidForge] CLIP already present"

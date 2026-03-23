@@ -1,4 +1,6 @@
 import asyncio
+import logging
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +12,7 @@ from app.config import get_settings
 from app.database import Job, Template
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 class ComfyUIClient:
@@ -56,11 +59,12 @@ class ComfyUIClient:
         response.raise_for_status()
         return response.json().get("name", file_path)
 
-    async def get_output(self, filename: str, subfolder: str = "") -> bytes:
-        params = {"filename": filename}
+    async def get_output(
+        self, filename: str, subfolder: str = "", output_type: str = "output"
+    ) -> bytes:
+        params = {"filename": filename, "type": output_type}
         if subfolder:
             params["subfolder"] = subfolder
-            params["type"] = "output"
 
         response = await self.client.get(f"{self.base_url}/view", params=params)
         response.raise_for_status()
@@ -72,11 +76,38 @@ class ComfyUIClient:
         elapsed = 0.0
         while elapsed < timeout:
             history = await self.get_history(prompt_id)
+            print(f"[ComfyUI] History response keys: {list(history.keys())}")
             if prompt_id in history:
-                return history[prompt_id]
+                entry = history[prompt_id]
+                status = entry.get("status", {})
+                print(f"[ComfyUI] Status: {status}")
+                if status.get("completed", False):
+                    outputs = entry.get("outputs", {})
+                    print(f"[ComfyUI] Completed! Output nodes: {list(outputs.keys())}")
+                    return entry
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
         raise TimeoutError(f"Prompt {prompt_id} did not complete within {timeout}s")
+
+    async def get_video_output(self, history_entry: dict) -> bytes | None:
+        outputs = history_entry.get("outputs", {})
+        print(f"[ComfyUI] get_video_output: nodes = {list(outputs.keys())}")
+        for node_id, node_output in outputs.items():
+            print(f"[ComfyUI]   Node {node_id}: keys = {list(node_output.keys())}")
+            for key in ["videos", "images", "video"]:
+                if key in node_output:
+                    items = node_output[key]
+                    print(f"[ComfyUI]     Found {key}: {items}")
+                    if isinstance(items, list):
+                        for item in items:
+                            filename = item.get("filename")
+                            subfolder = item.get("subfolder", "")
+                            output_type = item.get("type", "output")
+                            if filename:
+                                print(f"[ComfyUI]     Downloading: {filename}, type={output_type}")
+                                return await self.get_output(filename, subfolder, output_type)
+        print("[ComfyUI] No video output found!")
+        return None
 
 
 class JobService:

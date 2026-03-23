@@ -135,6 +135,36 @@ async def delete_job(
     return {"status": "deleted"}
 
 
+@router.post("/{job_id}/retry", response_model=JobResponse)
+async def retry_job(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Job:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status not in ("failed", "completed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry job with status: {job.status}. Only failed or completed jobs can be retried.",
+        )
+
+    job.status = "pending"
+    job.progress = 0
+    job.error_message = None
+    job.started_at = None
+    job.completed_at = None
+    await db.commit()
+    await db.refresh(job)
+
+    process_video_job.delay(str(job.id))
+
+    return job
+
+
 @router.post("/batch", response_model=BatchJobResponse)
 async def create_batch_jobs(
     batch_data: BatchJobCreate,

@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -81,7 +82,7 @@ class VideoProcessor:
             raise ValueError("No videos to merge")
 
         if len(video_paths) == 1:
-            Path(video_paths[0]).rename(output_path)
+            shutil.copy(video_paths[0], output_path)
             return output_path
 
         list_file = Path(output_path).parent / "concat_list.txt"

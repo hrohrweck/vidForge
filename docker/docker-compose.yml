@@ -65,15 +65,13 @@ services:
     ports:
       - "8188:8188"
     volumes:
-      - comfyui-models:/workspace/ComfyUI/models
-      - comfyui-output:/workspace/ComfyUI/output
+      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
+      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
     devices:
       - /dev/kfd
       - /dev/dri
     group_add:
       - video
-    environment:
-      - HSA_OVERRIDE_GFX_VERSION=12.0.1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
       interval: 30s
@@ -90,7 +88,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama-data:/root/.ollama
+      - ${OLLAMA_MODELS_PATH}:/root/.ollama
     devices:
       - /dev/kfd
       - /dev/dri
@@ -133,6 +131,3 @@ volumes:
   postgres-data:
   redis-data:
   vidforge-storage:
-  comfyui-models:
-  comfyui-output:
-  ollama-data:

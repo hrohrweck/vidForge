@@ -17,7 +17,7 @@
     "class_type": "VAEDecode",
     "inputs": {
       "samples": ["1", 0],
-      "vae": "wan_vae.safetensors"
+      "vae": "wan_2.1_vae.safetensors"
     }
   },
   "3": {

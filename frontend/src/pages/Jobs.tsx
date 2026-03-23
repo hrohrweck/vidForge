@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, RefreshCw, Layers } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Layers, RotateCcw } from 'lucide-react'
 import { jobsApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import JobCreateModal from '../components/JobCreateModal'
@@ -21,6 +21,13 @@ export default function Jobs() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => jobsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+
+  const retryMutation = useMutation({
+    mutationFn: (id: string) => jobsApi.retry(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
     },
@@ -119,6 +126,19 @@ export default function Jobs() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {(job.status === 'failed' || job.status === 'completed') && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      retryMutation.mutate(job.id)
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4 mr-1" />
+                    Retry
+                  </Button>
+                )}
                 {job.output_path && (
                   <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
                     Download

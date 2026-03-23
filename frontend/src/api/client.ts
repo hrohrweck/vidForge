@@ -137,6 +137,10 @@ export const jobsApi = {
     const response = await api.post<{ status: string; job_id: string }>(`/jobs/${id}/start`)
     return response.data
   },
+  retry: async (id: string) => {
+    const response = await api.post<Job>(`/jobs/${id}/retry`)
+    return response.data
+  },
   delete: (id: string) => api.delete(`/jobs/${id}`),
 }
 
