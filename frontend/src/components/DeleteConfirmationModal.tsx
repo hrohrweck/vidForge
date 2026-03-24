@@ -31,9 +31,9 @@ export function DeleteConfirmationModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+      <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 border shadow-xl">
         <div className="flex items-center gap-3 mb-4">
-          <AlertTriangle className="h-6 w-6 text-red-500" />
+          <AlertTriangle className="h-6 w-6 text-destructive" />
           <h3 className="text-lg font-semibold">{title}</h3>
         </div>
 
@@ -52,8 +52,8 @@ export function DeleteConfirmationModal({
           <p className="text-sm font-medium mt-2 pt-2 border-t">Total: {totalItems}</p>
         </div>
 
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-          <p className="text-sm text-red-700">{warning}</p>
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mb-4">
+          <p className="text-sm text-destructive">{warning}</p>
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer mb-4">

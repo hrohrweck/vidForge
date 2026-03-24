@@ -189,10 +189,10 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border">
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-xl font-semibold">Create New Job</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -244,7 +244,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
           )}
         </div>
 
-        <div className="flex justify-end gap-3 p-6 border-t bg-gray-50">
+        <div className="flex justify-end gap-3 p-6 border-t bg-secondary/50">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>

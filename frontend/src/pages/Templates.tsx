@@ -30,105 +30,43 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border">
         <div className="p-6 border-b">
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-xl font-semibold">{template.name}</h2>
               {template.is_builtin && (
-                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded mt-2 inline-block">
+                <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded mt-2 inline-block">
                   Built-in
                 </span>
               )}
             </div>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
               ×
             </button>
           </div>
         </div>
 
-        <div className="p-6 space-y-6">
-          {template.description && (
-            <div>
-              <h3 className="font-medium mb-2">Description</h3>
-              <p className="text-sm text-muted-foreground">{template.description}</p>
-            </div>
-          )}
-
-          {config?.inputs && config.inputs.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-2">Inputs</h3>
-              <div className="space-y-2">
-                {config.inputs.map((input) => (
-                  <div key={input.name} className="p-3 bg-gray-50 rounded-md">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{input.name}</span>
-                      <span className="text-xs bg-gray-200 px-1.5 py-0.5 rounded">
-                        {input.type}
-                      </span>
-                      {input.required && (
-                        <span className="text-xs text-red-500">required</span>
-                      )}
-                    </div>
-                    {input.description && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {input.description}
-                      </p>
-                    )}
-                    {input.options && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Options: {input.options.join(', ')}
-                      </p>
-                    )}
-                    {input.default !== undefined && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Default: {String(input.default)}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {config?.pipeline && config.pipeline.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-2">Pipeline Steps</h3>
-              <div className="space-y-2">
-                {config.pipeline.map((step, index) => (
-                  <div key={index} className="flex items-center gap-3 p-2 border-l-2 border-blue-200">
-                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium">
-                      {index + 1}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{step.step}</p>
-                      {step.description && (
-                        <p className="text-xs text-muted-foreground">{step.description}</p>
-                      )}
-                      {step.model && (
-                        <p className="text-xs text-muted-foreground">Model: {step.model}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-3 p-6 border-t bg-gray-50">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-          <Button onClick={onUse}>
-            <Plus className="h-4 w-4 mr-2" />
-            Use Template
-          </Button>
-        </div>
-      </div>
-    </div>
+ <div>
   )
-}
+</footer>
+</div>
+</div>
+</div>
+</div>
+</div>
+</>
+                    <div className="flex justify-end gap-3 p-6 border-t">
+                      <Button variant="outline" onClick={onClose}>
+                        Cancel
+                      </Button>
+                      <Button onClick={onClose}>Close</Button>
+                    </div>
+                  </div>
+                </div>
+              )
+            </div>
+        </div>
 
 export default function Templates() {
   const queryClient = useQueryClient()
