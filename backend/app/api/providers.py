@@ -22,8 +22,8 @@ class ProviderConfigBase(BaseModel):
     pass
 
 
-class LocalProviderConfig(ProviderConfigBase):
-    comfyui_url: str = "http://localhost:8188"
+class ComfyUIDirectProviderConfig(ProviderConfigBase):
+    comfyui_url: str
     max_concurrent_jobs: int = 1
 
 
@@ -38,7 +38,7 @@ class RunPodProviderConfig(ProviderConfigBase):
 
 class ProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    provider_type: str = Field(..., pattern="^(local|runpod)$")
+    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod)$")
     config: dict[str, Any]
     daily_budget_limit: float | None = None
     priority: int = 0
@@ -110,8 +110,8 @@ async def create_provider(
         raise HTTPException(status_code=400, detail="Provider with this name already exists")
 
     config = data.config
-    if data.provider_type == "local":
-        LocalProviderConfig(**config)
+    if data.provider_type == "comfyui_direct":
+        ComfyUIDirectProviderConfig(**config)
     elif data.provider_type == "runpod":
         RunPodProviderConfig(**config)
 

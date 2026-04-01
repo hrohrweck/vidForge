@@ -244,16 +244,16 @@ class TestJobsAPIFunctionality:
             "/api/jobs",
             json={
                 "template_id": str(template.id),
-                "input_data": {"prompt": "provider local test"},
+                "input_data": {"prompt": "provider comfyui_direct test"},
                 "auto_start": False,
-                "provider_preference": "local",
+                "provider_preference": "comfyui_direct",
             },
             headers={"Authorization": f"Bearer {regular_user_token}"},
         )
         assert response.status_code == 200
         data = response.json()
 
-        assert data["provider_preference"] == "local"
+        assert data["provider_preference"] == "comfyui_direct"
         assert data["estimated_cost"] is None
         assert data["actual_cost"] is None
 
@@ -369,7 +369,7 @@ class TestJobsAPIFunctionality:
 
         job_for_user.status = "failed"
         job_for_user.actual_cost = 7
-        job_for_user.provider_preference = "local"
+        job_for_user.provider_preference = "comfyui_direct"
         await db_session.commit()
 
         response = await client.post(
@@ -381,9 +381,9 @@ class TestJobsAPIFunctionality:
         body = response.json()
         assert body["actual_cost"] is None
         assert body["status"] == "pending"
-        assert body["provider_preference"] == "local"
+        assert body["provider_preference"] == "comfyui_direct"
         assert fake_task.calls
-        assert fake_task.calls[0][1]["provider_preference"] == "local"
+        assert fake_task.calls[0][1]["provider_preference"] == "comfyui_direct"
 
     @pytest.mark.asyncio
     async def test_cannot_access_other_user_job(

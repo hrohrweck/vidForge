@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Provider, Job, Worker
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
-from app.services.providers.local import LocalComfyUIProvider
+from app.services.providers.comfyui_direct import ComfyUIDirectProvider
 from app.services.providers.runpod import RunPodProvider
 from app.services.worker_registry import WorkerRegistry
 from app.services.budget_tracker import BudgetTracker
@@ -41,8 +41,8 @@ class JobRouter:
         return instance
 
     async def _create_provider_instance(self, provider: Provider) -> ComfyUIProvider:
-        if provider.provider_type == "local":
-            instance = LocalComfyUIProvider(provider.id, provider.config)
+        if provider.provider_type == "comfyui_direct":
+            instance = ComfyUIDirectProvider(provider.id, provider.config)
         elif provider.provider_type == "runpod":
             instance = RunPodProvider(provider.id, provider.config)
         else:
@@ -68,12 +68,12 @@ class JobRouter:
         if not providers:
             raise JobRouterError("No providers configured")
 
-        if preference == "local":
+        if preference == "comfyui_direct":
             for p in providers:
-                if p.provider_type == "local":
+                if p.provider_type == "comfyui_direct":
                     instance = await self.get_provider_instance(p.id)
-                    return p, instance, "Local provider selected"
-            raise JobRouterError("No local provider configured")
+                    return p, instance, "ComfyUI Direct provider selected"
+            raise JobRouterError("No ComfyUI Direct provider configured")
 
         if preference == "runpod":
             for p in providers:
@@ -86,14 +86,14 @@ class JobRouter:
                     raise JobRouterError(f"RunPod not available: {reason}")
             raise JobRouterError("No RunPod provider configured")
 
-        local_available = False
+        comfyui_direct_available = False
         for p in providers:
-            if p.provider_type == "local" and p.is_active:
-                workers = await self.worker_registry.get_available_workers("local", p.id)
+            if p.provider_type == "comfyui_direct" and p.is_active:
+                workers = await self.worker_registry.get_available_workers("comfyui_direct", p.id)
                 if workers:
                     instance = await self.get_provider_instance(p.id)
-                    return p, instance, "Local provider available (free)"
-                local_available = True
+                    return p, instance, "ComfyUI Direct provider available (free)"
+                comfyui_direct_available = True
 
         for p in providers:
             if p.provider_type == "runpod" and p.is_active:
@@ -101,12 +101,12 @@ class JobRouter:
                 estimated_cost = Decimal(str(await instance.estimate_cost(workflow or {})))
                 allowed, reason = await self.budget_tracker.check_budget(p.id, estimated_cost)
                 if allowed:
-                    if local_available:
-                        return p, instance, "RunPod selected (local workers busy)"
+                    if comfyui_direct_available:
+                        return p, instance, "RunPod selected (comfyui_direct workers busy)"
                     return p, instance, "RunPod selected"
 
-        if local_available:
-            raise JobRouterError("Local provider busy and no cloud providers available")
+        if comfyui_direct_available:
+            raise JobRouterError("ComfyUI Direct provider busy and no cloud providers available")
 
         raise JobRouterError("No available providers")
 

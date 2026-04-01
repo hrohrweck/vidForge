@@ -16,7 +16,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [jobInputs, setJobInputs] = useState<string>('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
-  const [providerPreference, setProviderPreference] = useState<'auto' | 'local' | 'runpod'>('auto')
+  const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
   
   const queryClient = useQueryClient()
   
@@ -33,7 +33,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
       template_id: string
       jobs: Record<string, unknown>[]
       auto_start: boolean
-      provider_preference: 'auto' | 'local' | 'runpod'
+      provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
     }) => {
       return jobsApi.createBatch(data)
     },
@@ -130,18 +130,18 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
             </select>
           </div>
 
-          <div>
+            <div>
             <Label htmlFor="batch-provider">Provider Preference</Label>
             <select
               id="batch-provider"
               className="w-full mt-1 border rounded px-3 py-2"
               value={providerPreference}
               onChange={(e) =>
-                setProviderPreference(e.target.value as 'auto' | 'local' | 'runpod')
+                setProviderPreference(e.target.value as 'auto' | 'comfyui_direct' | 'runpod')
               }
             >
               <option value="auto">Auto</option>
-              <option value="local">Local</option>
+              <option value="comfyui_direct">ComfyUI Direct</option>
               <option value="runpod">RunPod</option>
             </select>
           </div>

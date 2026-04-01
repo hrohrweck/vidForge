@@ -1,0 +1,28 @@
+services:
+  comfyui:
+    build:
+      context: ./comfyui
+      dockerfile: Dockerfile
+    ports:
+      - "8188:8188"
+    volumes:
+      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
+      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: on-failure
+
+volumes:
+  comfyui-models:
+  comfyui-output:

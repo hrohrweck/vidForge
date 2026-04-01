@@ -6,7 +6,7 @@ from app.services import ComfyUIClient
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 
 
-class LocalComfyUIProvider(ComfyUIProvider):
+class ComfyUIDirectProvider(ComfyUIProvider):
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
         self.config = config
@@ -15,8 +15,9 @@ class LocalComfyUIProvider(ComfyUIProvider):
         self._current_jobs = 0
 
     async def initialize(self, config: dict) -> None:
-        comfyui_url = config.get("comfyui_url", "http://localhost:8188")
-        self.client = ComfyUIClient(base_url=comfyui_url)
+        if not config.get("comfyui_url"):
+            raise ValueError("comfyui_url is required for comfyui_direct provider")
+        self.client = ComfyUIClient(base_url=config["comfyui_url"])
 
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         if not self.client:
@@ -75,8 +76,8 @@ class LocalComfyUIProvider(ComfyUIProvider):
     async def get_status(self) -> ProviderInfo:
         if not self.client:
             return ProviderInfo(
-                name="local",
-                provider_type="local",
+                name="comfyui_direct",
+                provider_type="comfyui_direct",
                 is_available=False,
                 estimated_wait_seconds=0,
                 cost_per_job=0.0,
@@ -86,8 +87,8 @@ class LocalComfyUIProvider(ComfyUIProvider):
         try:
             info = await self.client.get_system_info()
             return ProviderInfo(
-                name="local",
-                provider_type="local",
+                name="comfyui_direct",
+                provider_type="comfyui_direct",
                 is_available=True,
                 estimated_wait_seconds=0,
                 cost_per_job=0.0,
@@ -95,8 +96,8 @@ class LocalComfyUIProvider(ComfyUIProvider):
             )
         except Exception as e:
             return ProviderInfo(
-                name="local",
-                provider_type="local",
+                name="comfyui_direct",
+                provider_type="comfyui_direct",
                 is_available=False,
                 estimated_wait_seconds=0,
                 cost_per_job=0.0,

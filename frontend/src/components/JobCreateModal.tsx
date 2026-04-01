@@ -26,7 +26,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
-  const [providerPreference, setProviderPreference] = useState<'auto' | 'local' | 'runpod'>('auto')
+  const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
@@ -234,11 +234,11 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={providerPreference}
               onChange={(e) =>
-                setProviderPreference(e.target.value as 'auto' | 'local' | 'runpod')
+                setProviderPreference(e.target.value as 'auto' | 'comfyui_direct' | 'runpod')
               }
             >
               <option value="auto">Auto</option>
-              <option value="local">Local</option>
+              <option value="comfyui_direct">ComfyUI Direct</option>
               <option value="runpod">RunPod</option>
             </select>
           </div>

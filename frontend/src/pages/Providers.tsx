@@ -16,7 +16,7 @@ import {
 interface ProviderFormState {
   id: string | null
   name: string
-  providerType: 'local' | 'runpod'
+  providerType: 'comfyui_direct' | 'runpod'
   comfyuiUrl: string
   maxConcurrentJobs: string
   endpointId: string
@@ -54,8 +54,8 @@ const getErrorMessage = (error: unknown): string => {
 const defaultFormState: ProviderFormState = {
   id: null,
   name: '',
-  providerType: 'local',
-  comfyuiUrl: 'http://localhost:8188',
+  providerType: 'comfyui_direct',
+  comfyuiUrl: '',
   maxConcurrentJobs: '1',
   endpointId: '',
   apiKey: '',
@@ -220,8 +220,8 @@ export default function Providers() {
       id: provider.id,
       name: provider.name,
       providerType,
-      comfyuiUrl:
-        (typeof config.comfyui_url === 'string' && config.comfyui_url) || 'http://localhost:8188',
+          comfyuiUrl:
+            (typeof config.comfyui_url === 'string' && config.comfyui_url) || '',
       maxConcurrentJobs:
         (typeof config.max_concurrent_jobs === 'number' && String(config.max_concurrent_jobs)) ||
         '1',
@@ -254,12 +254,16 @@ export default function Providers() {
       priority: Number.parseInt(formState.priority, 10) || 0,
     }
 
-    if (formState.providerType === 'local') {
+    if (formState.providerType === 'comfyui_direct') {
+      if (!formState.comfyuiUrl.trim()) {
+        setFormError('ComfyUI URL is required for ComfyUI Direct provider')
+        return
+      }
       const payload: ProviderCreateRequest | ProviderUpdateRequest = {
         ...payloadBase,
-        provider_type: 'local',
+        provider_type: 'comfyui_direct',
         config: {
-          comfyui_url: formState.comfyuiUrl || 'http://localhost:8188',
+          comfyui_url: formState.comfyuiUrl.trim(),
           max_concurrent_jobs:
             Number.parseInt(formState.maxConcurrentJobs, 10) > 0
               ? Number.parseInt(formState.maxConcurrentJobs, 10)
@@ -378,7 +382,7 @@ export default function Providers() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Provider Management</h1>
-          <p className="text-muted-foreground">Create and manage local or RunPod providers.</p>
+          <p className="text-muted-foreground">Create and manage ComfyUI Direct or RunPod providers.</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -543,16 +547,16 @@ export default function Providers() {
                   <label className="inline-flex items-center gap-2">
                     <input
                       type="radio"
-                      checked={formState.providerType === 'local'}
+                      checked={formState.providerType === 'comfyui_direct'}
                       onChange={() =>
                         setFormState((prev) => ({
                           ...prev,
-                          providerType: 'local',
+                          providerType: 'comfyui_direct',
                           apiKey: '',
                         }))
                       }
                     />
-                    Local
+                    ComfyUI Direct
                   </label>
                   <label className="inline-flex items-center gap-2">
                     <input
@@ -570,7 +574,7 @@ export default function Providers() {
                 </div>
               </div>
 
-              {formState.providerType === 'local' ? (
+              {formState.providerType === 'comfyui_direct' ? (
                 <>
                   <div className="space-y-2">
                     <label htmlFor="comfyui-url" className="text-sm font-medium">

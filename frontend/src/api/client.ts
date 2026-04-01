@@ -95,7 +95,7 @@ export interface UserUpdateRequest {
 export interface Provider {
   id: string
   name: string
-  provider_type: 'local' | 'runpod'
+  provider_type: 'comfyui_direct' | 'runpod'
   config: Record<string, unknown>
   is_active: boolean
   daily_budget_limit: number | null
@@ -106,7 +106,7 @@ export interface Provider {
 
 export interface ProviderCreateRequest {
   name: string
-  provider_type: 'local' | 'runpod'
+  provider_type: 'comfyui_direct' | 'runpod'
   config: Record<string, unknown>
   daily_budget_limit?: number | null
   priority?: number
@@ -123,7 +123,7 @@ export interface ProviderUpdateRequest {
 export interface ProviderStatus {
   id: string
   name: string
-  type: 'local' | 'runpod'
+  type: 'comfyui_direct' | 'runpod'
   is_available: boolean
   estimated_wait_seconds: number
   message: string
@@ -160,7 +160,7 @@ export interface Job {
   error_message: string | null
   provider_id: string | null
   provider_type: string | null
-  provider_preference: 'auto' | 'local' | 'runpod'
+  provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
   estimated_cost: number | null
   actual_cost: number | null
   created_at: string
@@ -172,14 +172,14 @@ export interface CreateJobRequest {
   template_id?: string
   input_data?: Record<string, unknown>
   auto_start?: boolean
-  provider_preference?: 'auto' | 'local' | 'runpod'
+  provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
 }
 
 export interface BatchJobRequest {
   template_id: string
   jobs: Record<string, unknown>[]
   auto_start?: boolean
-  provider_preference?: 'auto' | 'local' | 'runpod'
+  provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
 }
 
 export interface BatchJobResponse {
@@ -237,7 +237,7 @@ export const jobsApi = {
     templateId: string,
     file: File,
     autoStart: boolean = true,
-    providerPreference: 'auto' | 'local' | 'runpod' = 'auto'
+    providerPreference: 'auto' | 'comfyui_direct' | 'runpod' = 'auto'
   ) => {
     const formData = new FormData()
     formData.append('file', file)

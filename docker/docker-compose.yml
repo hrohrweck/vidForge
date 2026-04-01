@@ -17,8 +17,6 @@ services:
       - "8001:8000"
     env_file:
       - ../backend/.env
-    environment:
-      - COMFYUI_URL=${COMFYUI_URL:-http://localhost:8188}
     volumes:
       - ../backend/app:/app/app
       - vidforge-storage:/app/storage
@@ -36,8 +34,6 @@ services:
     command: celery -A app.workers worker --loglevel=info --beat
     env_file:
       - ../backend/.env
-    environment:
-      - COMFYUI_URL=${COMFYUI_URL:-http://localhost:8188}
     volumes:
       - ../backend/app:/app/app
       - vidforge-storage:/app/storage
@@ -47,29 +43,6 @@ services:
       - backend
       - ollama
     restart: on-failure
-
-  comfyui:
-    build:
-      context: ./comfyui
-      dockerfile: Dockerfile
-    ports:
-      - "8188:8188"
-    volumes:
-      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
-      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      - video
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    profiles:
-      - rocm
 
   ollama:
     build:

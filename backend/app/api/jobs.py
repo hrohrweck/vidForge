@@ -35,7 +35,7 @@ class BatchJobResponse(BaseModel):
     job_ids: list[str]
 
 
-PROVIDER_PREFERENCES = {"auto", "local", "runpod"}
+PROVIDER_PREFERENCES = {"auto", "comfyui_direct", "runpod"}
 
 
 def _normalize_provider_preference(value: str) -> str:

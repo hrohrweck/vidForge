@@ -282,7 +282,7 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
 
                 started_at = datetime.utcnow()
 
-                if provider_record.provider_type == "local":
+                if provider_record.provider_type == "comfyui_direct":
                     semaphore = ComfyUISemaphore(
                         key=f"{COMFYUI_SEMAPHORE_KEY}:{provider_record.id}",
                         max_concurrent=provider_record.config.get(
@@ -381,7 +381,7 @@ def send_heartbeat() -> dict:
 
             result = await db.execute(
                 select(Provider).where(
-                    Provider.provider_type == "local", Provider.is_active == True
+                    Provider.provider_type == "comfyui_direct", Provider.is_active == True
                 )
             )
             provider = result.scalar_one_or_none()

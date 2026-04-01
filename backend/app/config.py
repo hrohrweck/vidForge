@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
-    comfyui_url: str = "http://localhost:8188"
     comfyui_workflows_path: str = "./app/comfyui/workflows"
     comfyui_max_concurrent: int = 1
     ollama_url: str = "http://localhost:11434"
@@ -52,7 +51,7 @@ class Settings(BaseSettings):
     worker_name: str = "Local GPU Worker"
     worker_heartbeat_interval: int = 30
 
-    default_provider_preference: Literal["local", "runpod", "auto"] = "auto"
+    default_provider_preference: Literal["comfyui_direct", "runpod", "auto"] = "auto"
 
     runpod_api_key: str = ""
     runpod_endpoint_id: str = ""
