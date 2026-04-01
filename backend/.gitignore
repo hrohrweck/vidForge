@@ -25,6 +25,5 @@ wheels/
 .mypy_cache/
 .ruff_cache/
 .coverage
-htmlcov/
-*.log
 storage/
+!app/storage/
