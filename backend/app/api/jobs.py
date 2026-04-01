@@ -51,6 +51,7 @@ def _normalize_provider_preference(value: str) -> str:
 class JobResponse(BaseModel):
     id: UUID
     status: str
+    stage: str
     progress: int
     input_data: dict[str, Any] | None
     output_path: str | None

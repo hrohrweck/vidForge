@@ -149,6 +149,7 @@ class Job(Base):
         PG_UUID(as_uuid=True), ForeignKey("templates.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    stage: Mapped[str] = mapped_column(String(50), default="planning", index=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     input_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     output_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -174,6 +175,9 @@ class Job(Base):
     template: Mapped["Template | None"] = relationship(back_populates="jobs")
     provider: Mapped["Provider | None"] = relationship(back_populates="jobs")
     worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
+    scenes: Mapped[list["VideoScene"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
 
 
 class Template(Base):
@@ -270,6 +274,33 @@ class CostLog(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gpu_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VideoScene(Base):
+    __tablename__ = "video_scenes"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    job_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    scene_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_time: Mapped[float] = mapped_column(nullable=False)
+    end_time: Mapped[float] = mapped_column(nullable=False)
+    lyrics_segment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visual_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mood: Mapped[str] = mapped_column(String(50), default="neutral")
+    camera_movement: Mapped[str] = mapped_column(String(50), default="static")
+    reference_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    generated_video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    job: Mapped["Job"] = relationship(back_populates="scenes")
 
 
 async def seed_builtin_data() -> None:

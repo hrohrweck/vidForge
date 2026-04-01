@@ -152,6 +152,7 @@ export interface GroupUpdateRequest {
 export interface Job {
   id: string
   status: string
+  stage: string
   progress: number
   input_data: Record<string, unknown> | null
   output_path: string | null
