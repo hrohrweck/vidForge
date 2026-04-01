@@ -6,7 +6,7 @@ from typing import Literal
 class VideoModel:
     id: str
     name: str
-    provider: Literal["wan", "ltx"]
+    provider: Literal["wan", "ltx", "poe"]
     workflow: str
     capabilities: list[str] = field(default_factory=list)
     max_duration: int = 30
@@ -14,6 +14,7 @@ class VideoModel:
     default_steps: int = 30
     description: str = ""
     distilled: bool = False
+    Poe_model_id: str = ""
 
 
 MODELS: dict[str, VideoModel] = {
@@ -72,6 +73,90 @@ MODELS: dict[str, VideoModel] = {
         max_resolution=(1920, 1080),
         default_steps=30,
         description="LTX 2.3 for image animation with audio support.",
+    ),
+    "poe_veo3": VideoModel(
+        id="poe_veo3",
+        name="Veo 3 (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["text-to-video"],
+        max_duration=20,
+        max_resolution=(1920, 1080),
+        default_steps=30,
+        description="Google's Veo 3 model via Poe API. High quality video generation.",
+        Poe_model_id="Veo-3",
+    ),
+    "poe_veo31": VideoModel(
+        id="poe_veo31",
+        name="Veo 3.1 (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["text-to-video", "image-to-video"],
+        max_duration=20,
+        max_resolution=(1920, 1080),
+        default_steps=30,
+        description="Google's Veo 3.1 model via Poe API. Latest version with improved quality.",
+        Poe_model_id="Veo-3.1",
+    ),
+    "poe_sora2_pro": VideoModel(
+        id="poe_sora2_pro",
+        name="Sora 2 Pro (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["text-to-video"],
+        max_duration=20,
+        max_resolution=(1920, 1080),
+        default_steps=30,
+        description="OpenAI's Sora 2 Pro model via Poe API.",
+        Poe_model_id="Sora-2-Pro",
+    ),
+    "poe_nano_banana": VideoModel(
+        id="poe_nano_banana",
+        name="Nano-Banana (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["image-generation"],
+        max_duration=0,
+        max_resolution=(1024, 1024),
+        default_steps=30,
+        description="Amazon's Nano-Banana image generation model via Poe API.",
+        Poe_model_id="Nano-Banana",
+    ),
+    "poe_nano_banana2": VideoModel(
+        id="poe_nano_banana2",
+        name="Nano-Banana 2 (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["image-generation"],
+        max_duration=0,
+        max_resolution=(1024, 1024),
+        default_steps=30,
+        description="Amazon's Nano-Banana 2 image generation model via Poe API.",
+        Poe_model_id="Nano-Banana-2",
+    ),
+    "poe_nano_banana_pro": VideoModel(
+        id="poe_nano_banana_pro",
+        name="Nano-Banana Pro (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["image-generation"],
+        max_duration=0,
+        max_resolution=(1024, 1024),
+        default_steps=30,
+        description="Amazon's Nano-Banana Pro image generation model via Poe API.",
+        Poe_model_id="Nano-Banana-Pro",
+    ),
+    "poe_gpt_image": VideoModel(
+        id="poe_gpt_image",
+        name="GPT Image 1 (Poe)",
+        provider="poe",
+        workflow="",
+        capabilities=["image-generation"],
+        max_duration=0,
+        max_resolution=(1024, 1024),
+        default_steps=30,
+        description="OpenAI's GPT Image 1 model via Poe API.",
+        Poe_model_id="GPT-Image-1",
     ),
 }
 

@@ -16,7 +16,7 @@ import {
 interface ProviderFormState {
   id: string | null
   name: string
-  providerType: 'comfyui_direct' | 'runpod'
+  providerType: 'comfyui_direct' | 'runpod' | 'poe'
   comfyuiUrl: string
   maxConcurrentJobs: string
   endpointId: string
@@ -273,38 +273,64 @@ export default function Providers() {
       return payload
     }
 
-    const config: Record<string, unknown> = {
-      endpoint_id: formState.endpointId,
-      cost_per_gpu_hour:
-        Number.parseFloat(formState.costPerGpuHour) > 0
-          ? Number.parseFloat(formState.costPerGpuHour)
-          : 0.69,
-      idle_timeout_seconds:
-        Number.parseInt(formState.idleTimeout, 10) > 0
-          ? Number.parseInt(formState.idleTimeout, 10)
-          : 30,
-      flashboot_enabled: formState.flashbootEnabled,
-      max_workers: Number.parseInt(formState.maxWorkers, 10) > 0
-          ? Number.parseInt(formState.maxWorkers, 10)
-          : 3,
-    }
-
-    const runpodPayload: ProviderCreateRequest | ProviderUpdateRequest = {
-      ...payloadBase,
-      provider_type: 'runpod',
-      config: {
-        ...config,
-      },
-    }
-
-    if (formState.apiKey.trim()) {
-      ;(runpodPayload as ProviderCreateRequest | ProviderUpdateRequest).config = {
-        ...(runpodPayload.config as Record<string, unknown>),
-        api_key: formState.apiKey.trim(),
+    if (formState.providerType === 'runpod') {
+      const config: Record<string, unknown> = {
+        endpoint_id: formState.endpointId,
+        cost_per_gpu_hour:
+          Number.parseFloat(formState.costPerGpuHour) > 0
+            ? Number.parseFloat(formState.costPerGpuHour)
+            : 0.69,
+        idle_timeout_seconds:
+          Number.parseInt(formState.idleTimeout, 10) > 0
+            ? Number.parseInt(formState.idleTimeout, 10)
+            : 30,
+        flashboot_enabled: formState.flashbootEnabled,
+        max_workers: Number.parseInt(formState.maxWorkers, 10) > 0
+            ? Number.parseInt(formState.maxWorkers, 10)
+            : 3,
       }
+
+      const runpodPayload: ProviderCreateRequest | ProviderUpdateRequest = {
+        ...payloadBase,
+        provider_type: 'runpod',
+        config: {
+          ...config,
+        },
+      }
+
+      if (formState.apiKey.trim()) {
+        ;(runpodPayload as ProviderCreateRequest | ProviderUpdateRequest).config = {
+          ...(runpodPayload.config as Record<string, unknown>),
+          api_key: formState.apiKey.trim(),
+        }
+      }
+
+      return runpodPayload
     }
 
-    return runpodPayload
+    if (formState.providerType === 'poe') {
+      const poePayload: ProviderCreateRequest | ProviderUpdateRequest = {
+        ...payloadBase,
+        provider_type: 'poe',
+        config: {
+          max_concurrent_jobs:
+            Number.parseInt(formState.maxConcurrentJobs, 10) > 0
+              ? Number.parseInt(formState.maxConcurrentJobs, 10)
+              : 1,
+        },
+      }
+
+      if (formState.apiKey.trim()) {
+        poePayload.config = {
+          ...poePayload.config,
+          api_key: formState.apiKey.trim(),
+        }
+      }
+
+      return poePayload
+    }
+
+    return null
   }
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -571,6 +597,20 @@ export default function Providers() {
                     />
                     RunPod
                   </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={formState.providerType === 'poe'}
+                      onChange={() =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          providerType: 'poe',
+                          apiKey: '',
+                        }))
+                      }
+                    />
+                    Poe
+                  </label>
                 </div>
               </div>
 
@@ -724,7 +764,46 @@ export default function Providers() {
                     </div>
                   </div>
                 </>
-              )}
+              ) : formState.providerType === 'poe' ? (
+                <>
+                  <div className="space-y-2">
+                    <label htmlFor="poe-api-key" className="text-sm font-medium">
+                      Poe API Key {formState.id ? '(leave blank to keep current)' : ''}
+                    </label>
+                    <input
+                      id="poe-api-key"
+                      type="password"
+                      className="w-full border rounded-md px-3 py-2"
+                      value={formState.apiKey}
+                      placeholder={formState.id ? '••••••••' : ''}
+                      onChange={(e) =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          apiKey: e.target.value,
+                        }))
+                      }
+                    />
+                    {!formState.apiKey && formState.id ? (
+                      <p className="text-xs text-muted-foreground">Using existing API key.</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <label htmlFor="poe-max-concurrent" className="text-sm font-medium">
+                      Max Concurrent Jobs
+                    </label>
+                    <input
+                      id="poe-max-concurrent"
+                      type="number"
+                      className="w-full border rounded-md px-3 py-2"
+                      value={formState.maxConcurrentJobs}
+                      min={1}
+                      onChange={(e) =>
+                        setFormState((prev) => ({ ...prev, maxConcurrentJobs: e.target.value }))
+                      }
+                    />
+                  </div>
+                </>
+              ) : null}
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">

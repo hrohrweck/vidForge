@@ -220,6 +220,71 @@ async def _run_runpod_job(
     return str(output_path), None
 
 
+async def _run_poe_job(
+    job_id: str,
+    provider_instance,
+    model_preference: str | None,
+    input_data: dict[str, object],
+) -> str:
+    from app.services.model_registry import MODELS
+
+    prompt = input_data.get("prompt", "")
+    negative_prompt = input_data.get("negative_prompt", "")
+
+    selected_model = None
+    model_id = model_preference or "poe_veo31"
+
+    if model_id in MODELS:
+        selected_model = MODELS[model_id]
+    else:
+        for model in MODELS.values():
+            if model.provider == "poe" and model_id in model.id:
+                selected_model = model
+                break
+
+    if not selected_model:
+        selected_model = MODELS.get("poe_veo31")
+
+    poe_model_id = getattr(selected_model, "poe_model_id", "Veo-3.1")
+    capabilities = getattr(selected_model, "capabilities", [])
+
+    duration = input_data.get("duration", 10)
+    aspect_ratio = input_data.get("aspect_ratio", "16:9")
+    resolution = input_data.get("resolution", "1080p")
+
+    is_image = "image-generation" in capabilities
+
+    output_path = Path(settings.storage_path) / "output" / job_id
+
+    if is_image:
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_file = output_path / "image.png"
+        job_id_result, image_data = await provider_instance.generate_image(
+            prompt=prompt,
+            model=poe_model_id,
+            aspect_ratio=aspect_ratio,
+            quality=input_data.get("quality", "high"),
+            negative_prompt=negative_prompt,
+        )
+        if image_data:
+            output_file.write_bytes(image_data)
+        return str(output_path.relative_to(settings.storage_path)) + "/image.png"
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
+        output_file = output_path / "video.mp4"
+        job_id_result, video_data = await provider_instance.generate_video(
+            prompt=prompt,
+            model=poe_model_id,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            negative_prompt=negative_prompt,
+        )
+        if video_data:
+            output_file.write_bytes(video_data)
+        return str(output_path.relative_to(settings.storage_path)) + "/video.mp4"
+
+
 def _as_decimal(value: float | int | Decimal | None) -> Decimal | None:
     if value is None:
         return None
@@ -247,6 +312,8 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
 
             if not job.provider_preference:
                 job.provider_preference = preference
+
+            model_preference = job.model_preference
 
             template = None
             result = await db.execute(select(Template).where(Template.id == job.template_id))
@@ -311,6 +378,22 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
                         100,
                         output_path=relative_video,
                         preview_path=relative_preview,
+                    )
+                    return {"status": "completed", "job_id": job_id}
+
+                elif provider_record.provider_type == "poe":
+                    relative_video = await _run_poe_job(
+                        job_id,
+                        provider_instance,
+                        model_preference,
+                        input_data,
+                    )
+
+                    await update_job_status(
+                        job_uuid,
+                        "completed",
+                        100,
+                        output_path=relative_video,
                     )
                     return {"status": "completed", "job_id": job_id}
 

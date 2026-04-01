@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import Provider, Job, Worker
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 from app.services.providers.comfyui_direct import ComfyUIDirectProvider
+from app.services.providers.poe import PoeProvider
 from app.services.providers.runpod import RunPodProvider
 from app.services.worker_registry import WorkerRegistry
 from app.services.budget_tracker import BudgetTracker
@@ -45,6 +46,8 @@ class JobRouter:
             instance = ComfyUIDirectProvider(provider.id, provider.config)
         elif provider.provider_type == "runpod":
             instance = RunPodProvider(provider.id, provider.config)
+        elif provider.provider_type == "poe":
+            instance = PoeProvider(provider.id, provider.config)
         else:
             raise JobRouterError(f"Unknown provider type: {provider.provider_type}")
 

@@ -36,9 +36,16 @@ class RunPodProviderConfig(ProviderConfigBase):
     max_workers: int = 3
 
 
+class PoeProviderConfig(ProviderConfigBase):
+    api_key: str
+    max_concurrent_jobs: int = 1
+    default_video_model: str = "Veo-3.1"
+    default_image_model: str = "GPT-Image-1"
+
+
 class ProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod)$")
+    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod|poe)$")
     config: dict[str, Any]
     daily_budget_limit: float | None = None
     priority: int = 0
@@ -114,6 +121,8 @@ async def create_provider(
         ComfyUIDirectProviderConfig(**config)
     elif data.provider_type == "runpod":
         RunPodProviderConfig(**config)
+    elif data.provider_type == "poe":
+        PoeProviderConfig(**config)
 
     provider = Provider(
         name=data.name,
@@ -280,3 +289,56 @@ async def list_providers_status(
             )
 
     return response
+
+
+@router.get("/{provider_id}/models")
+async def get_provider_models(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    if provider.provider_type != "poe":
+        raise HTTPException(status_code=400, detail="Model discovery only available for Poe providers")
+
+    from app.services.providers.poe import PoeProvider
+
+    poe = PoeProvider(provider.id, provider.config)
+    await poe.initialize(provider.config)
+
+    video_models = poe.get_video_models()
+    image_models = poe.get_image_models()
+    text_models = poe.get_text_models()
+
+    await poe.shutdown()
+
+    return {
+        "video_models": [
+            {
+                "id": m["id"],
+                "description": m.get("description", ""),
+                "modality": m.get("architecture", {}).get("modality", ""),
+            }
+            for m in video_models
+        ],
+        "image_models": [
+            {
+                "id": m["id"],
+                "description": m.get("description", ""),
+                "modality": m.get("architecture", {}).get("modality", ""),
+            }
+            for m in image_models
+        ],
+        "text_models": [
+            {
+                "id": m["id"],
+                "description": m.get("description", ""),
+                "modality": m.get("architecture", {}).get("modality", ""),
+            }
+            for m in text_models
+        ],
+    }
