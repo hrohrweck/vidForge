@@ -4,12 +4,10 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000
+      - "3000:80"
     depends_on:
       - backend
+    restart: on-failure
 
   backend:
     build:
@@ -17,14 +15,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8000"
+    env_file:
+      - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://vidforge:vidforge@postgres:5432/vidforge
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=FA43D8A573BB213ACD73219030BECD56
-      - COMFYUI_URL=http://comfyui:8188
-      - OLLAMA_URL=http://ollama:11434
-      - STORAGE_BACKEND=local
-      - STORAGE_PATH=/app/storage
+      - COMFYUI_URL=${COMFYUI_URL:-http://localhost:8188}
     volumes:
       - ../backend/app:/app/app
       - vidforge-storage:/app/storage
@@ -33,22 +27,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      ollama:
-        condition: service_started
+    restart: on-failure
 
   worker:
     build:
       context: ../backend
       dockerfile: Dockerfile
     command: celery -A app.workers worker --loglevel=info
+    env_file:
+      - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://vidforge:vidforge@postgres:5432/vidforge
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=FA43D8A573BB213ACD73219030BECD56
-      - COMFYUI_URL=http://comfyui:8188
-      - OLLAMA_URL=http://ollama:11434
-      - STORAGE_BACKEND=local
-      - STORAGE_PATH=/app/storage
+      - COMFYUI_URL=${COMFYUI_URL:-http://localhost:8188}
     volumes:
       - ../backend/app:/app/app
       - vidforge-storage:/app/storage
@@ -56,53 +45,7 @@ services:
       - postgres
       - redis
       - backend
-      - ollama
-
-  comfyui:
-    build:
-      context: ./comfyui
-      dockerfile: Dockerfile
-    ports:
-      - "8188:8188"
-    volumes:
-      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
-      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      - video
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    profiles:
-      - rocm
-
-  ollama:
-    build:
-      context: ./ollama
-      dockerfile: Dockerfile
-    ports:
-      - "11434:11434"
-    volumes:
-      - ${OLLAMA_MODELS_PATH}:/root/.ollama
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    group_add:
-      - video
-    environment:
-      - HSA_OVERRIDE_GFX_VERSION=11.0.0
-      - OLLAMA_HOST=0.0.0.0
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    restart: on-failure
 
   postgres:
     image: postgres:16
@@ -119,6 +62,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: on-failure
 
   redis:
     image: redis:7-alpine
@@ -126,6 +70,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    restart: on-failure
 
 volumes:
   postgres-data:

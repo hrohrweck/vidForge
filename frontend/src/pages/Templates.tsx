@@ -27,6 +27,8 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
       model?: string
     }>
   }
+  const inputs = config?.inputs || []
+  const pipeline = config?.pipeline || []
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -40,6 +42,9 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
                   Built-in
                 </span>
               )}
+              {template.description && (
+                <p className="text-muted-foreground mt-2">{template.description}</p>
+              )}
             </div>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
               ×
@@ -47,26 +52,56 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
           </div>
         </div>
 
- <div>
-  )
-</footer>
-</div>
-</div>
-</div>
-</div>
-</div>
-</>
-                    <div className="flex justify-end gap-3 p-6 border-t">
-                      <Button variant="outline" onClick={onClose}>
-                        Cancel
-                      </Button>
-                      <Button onClick={onClose}>Close</Button>
-                    </div>
+        <div className="p-6 space-y-4">
+          {inputs.length > 0 && (
+            <div>
+              <h3 className="font-medium mb-2">Inputs</h3>
+              <div className="space-y-2">
+                {inputs.map((input) => (
+                  <div key={input.name} className="text-sm">
+                    <span className="font-medium">{input.name}</span>
+                    <span className="text-muted-foreground"> ({input.type})</span>
+                    {input.required && <span className="text-red-500 ml-1">*</span>}
+                    {input.description && (
+                      <span className="text-muted-foreground ml-2">- {input.description}</span>
+                    )}
                   </div>
-                </div>
-              )
+                ))}
+              </div>
             </div>
+          )}
+          {pipeline.length > 0 && (
+            <div>
+              <h3 className="font-medium mb-2">Pipeline</h3>
+              <div className="space-y-2">
+                {pipeline.map((step, idx) => (
+                  <div key={idx} className="text-sm">
+                    <span className="font-medium">{step.step}</span>
+                    {step.description && (
+                      <span className="text-muted-foreground ml-2">- {step.description}</span>
+                    )}
+                    {step.model && (
+                      <span className="text-muted-foreground ml-2">({step.model})</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+
+        <div className="p-6 border-t">
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={onUse}>Use Template</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function Templates() {
   const queryClient = useQueryClient()

@@ -82,6 +82,32 @@ def broadcast_update(job_id: str, message: dict) -> None:
     r.publish(f"job:{job_id}", json.dumps(message))
 
 
+async def get_template_name(template_id: UUID | None) -> str:
+    """Get template name from database by ID."""
+    if template_id is None:
+        return "prompt_to_video"
+    async_session_maker = get_db_session_factory()
+    async with async_session_maker() as db:
+        result = await db.execute(select(Template).where(Template.id == template_id))
+        template = result.scalar_one_or_none()
+        if template:
+            return template.name
+    return "prompt_to_video"
+
+
+def progress_callback_wrapper(job_id: str, progress: int, message: str) -> None:
+    """Broadcast progress updates to subscribers."""
+    try:
+        broadcast_update(job_id, {"type": "progress", "progress": progress, "message": message})
+    except Exception:
+        pass
+
+
+async def async_progress_callback(job_id: str, progress: int, message: str) -> None:
+    """Async wrapper for progress callback."""
+    progress_callback_wrapper(job_id, progress, message)
+
+
 async def update_job_status(
     job_id: UUID,
     status: str,
@@ -97,36 +123,28 @@ async def update_job_status(
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        input_data = job.input_data or {}
-        template_name = await get_template_name(job.template_id)
+        job.status = status
+        job.progress = progress
+        if error_message:
+            job.error_message = error_message
+        if output_path:
+            job.output_path = output_path
+        if preview_path:
+            job.preview_path = preview_path
 
-        try:
-            video_path, preview_path = await process_job_video(
-                job_id=job_id,
-                template_name=template_name,
-                input_data=input_data,
-                progress_callback=lambda p, m: progress_callback_wrapper(job_id, p, m),
-            )
+        if status == "processing" and not job.started_at:
+            job.started_at = datetime.utcnow()
+        if status in ("completed", "failed") and not job.completed_at:
+            job.completed_at = datetime.utcnow()
 
-            relative_video = str(Path(video_path).relative_to(settings.storage_path))
-            relative_preview = (
-                str(Path(preview_path).relative_to(settings.storage_path)) if preview_path else None
-            )
+        await db.commit()
 
-            await update_job_status(
-                job_uuid,
-                "completed",
-                100,
-                output_path=relative_video,
-                preview_path=relative_preview,
-            )
-            return {"status": "completed", "job_id": job_id}
-
-        except Exception as e:
-            await update_job_status(job_uuid, "failed", 0, error_message=str(e))
-            return {"status": "failed", "error": str(e), "job_id": job_id}
-
-    return asyncio.run(run())
+        broadcast_update(str(job_id), {
+            "type": "status_update",
+            "status": status,
+            "progress": progress,
+            "error_message": error_message,
+        })
 
 
 @celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
@@ -167,7 +185,7 @@ def process_video_job(self, job_id: str) -> dict:
                     job_id=job_id,
                     template_name=template_name,
                     input_data=input_data,
-                    progress_callback=lambda p, m: progress_callback_wrapper(job_id, p, m),
+                    progress_callback=lambda p, m: async_progress_callback(job_id, p, m),
                 )
                 relative_video = str(Path(video_path).relative_to(settings.storage_path))
                 relative_preview = (
@@ -178,8 +196,8 @@ def process_video_job(self, job_id: str) -> dict:
                     job_uuid,
                     "completed",
                     100,
-                    output_path=relative_video
-                    preview_path=relative_preview
+                    output_path=relative_video,
+                    preview_path=relative_preview,
                 )
                 return {"status": "completed", "job_id": job_id}
             except Exception as e:
