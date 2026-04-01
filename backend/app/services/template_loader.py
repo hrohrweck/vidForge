@@ -9,16 +9,31 @@ class TemplateLoader:
     """Load and validate video templates from YAML files."""
 
     def __init__(self, templates_dir: str = "templates"):
-        self.templates_dir = Path(templates_dir)
+        base = Path(templates_dir)
+        if not base.is_absolute():
+            candidate = Path.cwd() / base
+            if candidate.exists():
+                base = candidate
+            else:
+                fallback = Path(__file__).resolve().parents[2] / templates_dir
+                if fallback.exists():
+                    base = fallback
+        self.templates_dir = base
 
     def load_template(self, name: str) -> dict[str, Any]:
-        """Load a template by name (without .yaml extension)."""
+        """Load a template by name (without .yaml extension) or by template name field."""
         template_path = self.templates_dir / f"{name}.yaml"
-        if not template_path.exists():
-            raise FileNotFoundError(f"Template not found: {name}")
+        if template_path.exists():
+            with open(template_path) as f:
+                return yaml.safe_load(f)
 
-        with open(template_path) as f:
-            return yaml.safe_load(f)
+        for template_path in self.templates_dir.glob("*.yaml"):
+            with open(template_path) as f:
+                template = yaml.safe_load(f)
+                if template.get("name") == name:
+                    return template
+
+        raise FileNotFoundError(f"Template not found: {name}")
 
     def load_all_templates(self) -> list[dict[str, Any]]:
         """Load all templates from the templates directory."""
@@ -43,16 +58,31 @@ class StyleLoader:
     """Load and validate style presets from YAML files."""
 
     def __init__(self, styles_dir: str = "styles"):
-        self.styles_dir = Path(styles_dir)
+        base = Path(styles_dir)
+        if not base.is_absolute():
+            candidate = Path.cwd() / base
+            if candidate.exists():
+                base = candidate
+            else:
+                fallback = Path(__file__).resolve().parents[2] / styles_dir
+                if fallback.exists():
+                    base = fallback
+        self.styles_dir = base
 
     def load_style(self, name: str) -> dict[str, Any]:
-        """Load a style by name (without .yaml extension)."""
+        """Load a style by name (without .yaml extension) or by style name field."""
         style_path = self.styles_dir / f"{name}.yaml"
-        if not style_path.exists():
-            raise FileNotFoundError(f"Style not found: {name}")
+        if style_path.exists():
+            with open(style_path) as f:
+                return yaml.safe_load(f)
 
-        with open(style_path) as f:
-            return yaml.safe_load(f)
+        for style_path in self.styles_dir.glob("*.yaml"):
+            with open(style_path) as f:
+                style = yaml.safe_load(f)
+                if style.get("name") == name:
+                    return style
+
+        raise FileNotFoundError(f"Style not found: {name}")
 
     def load_all_styles(self) -> list[dict[str, Any]]:
         """Load all styles from the styles directory."""

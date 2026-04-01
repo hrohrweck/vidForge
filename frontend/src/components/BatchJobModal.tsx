@@ -16,6 +16,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [jobInputs, setJobInputs] = useState<string>('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
+  const [providerPreference, setProviderPreference] = useState<'auto' | 'local' | 'runpod'>('auto')
   
   const queryClient = useQueryClient()
   
@@ -28,7 +29,12 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   })
   
   const createBatchMutation = useMutation({
-    mutationFn: async (data: { template_id: string; jobs: Record<string, unknown>[]; auto_start: boolean }) => {
+    mutationFn: async (data: {
+      template_id: string
+      jobs: Record<string, unknown>[]
+      auto_start: boolean
+      provider_preference: 'auto' | 'local' | 'runpod'
+    }) => {
       return jobsApi.createBatch(data)
     },
     onSuccess: () => {
@@ -40,7 +46,12 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const createCsvMutation = useMutation({
     mutationFn: async () => {
       if (!csvFile || !selectedTemplate) return
-      return jobsApi.createFromCsv(selectedTemplate, csvFile, autoStart)
+      return jobsApi.createFromCsv(
+        selectedTemplate,
+        csvFile,
+        autoStart,
+        providerPreference
+      )
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -62,6 +73,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
           template_id: selectedTemplate,
           jobs,
           auto_start: autoStart,
+          provider_preference: providerPreference,
         })
       } catch {
         alert('Invalid JSON format')
@@ -115,6 +127,22 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
                   {t.name}
                 </option>
               ))}
+            </select>
+          </div>
+
+          <div>
+            <Label htmlFor="batch-provider">Provider Preference</Label>
+            <select
+              id="batch-provider"
+              className="w-full mt-1 border rounded px-3 py-2"
+              value={providerPreference}
+              onChange={(e) =>
+                setProviderPreference(e.target.value as 'auto' | 'local' | 'runpod')
+              }
+            >
+              <option value="auto">Auto</option>
+              <option value="local">Local</option>
+              <option value="runpod">RunPod</option>
             </select>
           </div>
           

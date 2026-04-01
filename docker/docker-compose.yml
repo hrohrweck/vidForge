@@ -33,7 +33,7 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    command: celery -A app.workers worker --loglevel=info
+    command: celery -A app.workers worker --loglevel=info --beat
     env_file:
       - ../backend/.env
     environment:
@@ -45,6 +45,55 @@ services:
       - postgres
       - redis
       - backend
+      - ollama
+    restart: on-failure
+
+  comfyui:
+    build:
+      context: ./comfyui
+      dockerfile: Dockerfile
+    ports:
+      - "8188:8188"
+    volumes:
+      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
+      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - rocm
+
+  ollama:
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
+    ports:
+      - "11434:11434"
+    volumes:
+      - ${OLLAMA_MODELS_PATH}:/root/.ollama
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=11.0.0
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_NUM_GPU=0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: on-failure
 
   postgres:

@@ -227,8 +227,123 @@ export const handlers = [
       preferences: {}
     })
   }),
-  
+
+  http.get('*/api/providers', () => {
+    return HttpResponse.json([
+      {
+        id: 'provider-local-1',
+        name: 'Local ComfyUI',
+        provider_type: 'local',
+        config: {
+          comfyui_url: 'http://localhost:8188',
+          max_concurrent_jobs: 1,
+        },
+        is_active: true,
+        daily_budget_limit: 50,
+        current_daily_spend: 12.34,
+        priority: 0,
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ])
+  }),
+
+  http.get('*/api/providers/status', () => {
+    return HttpResponse.json([
+      {
+        id: 'provider-local-1',
+        name: 'Local ComfyUI',
+        type: 'local',
+        is_available: true,
+        estimated_wait_seconds: 0,
+        message: 'Ready',
+        workers: {
+          total: 1,
+          online: 1,
+          busy: 0,
+          offline: 0,
+        },
+        daily_budget_limit: 50,
+        current_daily_spend: 12.34,
+      },
+    ])
+  }),
+
+  http.get('*/api/providers/:id/status', ({ params }) => {
+    const id = params.id as string
+    return HttpResponse.json({
+      id,
+      name: 'Provider',
+      type: 'local',
+      is_available: true,
+      estimated_wait_seconds: 0,
+      message: 'Ready',
+      workers: {
+        total: 1,
+        online: 1,
+        busy: 0,
+        offline: 0,
+      },
+      daily_budget_limit: 50,
+      current_daily_spend: 12.34,
+    })
+  }),
+
+  http.post('*/api/providers', async ({ request }) => {
+    const body = await request.json()
+    return HttpResponse.json(
+      {
+        id: 'provider-created',
+        name: (body as { name?: string }).name || 'Provider',
+        provider_type: 'local',
+        config: (body as { config?: Record<string, unknown> }).config || {},
+        is_active: true,
+        daily_budget_limit: 50,
+        current_daily_spend: 0,
+        priority: (body as { priority?: number }).priority || 0,
+        created_at: '2024-01-02T00:00:00Z',
+      },
+      { status: 201 }
+    )
+  }),
+
+  http.patch('*/api/providers/:id', async ({ request }) => {
+    const body = await request.json()
+    return HttpResponse.json({
+      id: paramsProvider(request.url),
+      name: (body as { name?: string }).name || 'Provider',
+      provider_type: 'runpod',
+      config: (body as { config?: Record<string, unknown> }).config || {},
+      is_active: true,
+      daily_budget_limit: 50,
+      current_daily_spend: 0,
+      priority: (body as { priority?: number }).priority || 0,
+      created_at: '2024-01-02T00:00:00Z',
+    })
+  }),
+
+  http.post('*/api/providers/:id/reset-spend', () => {
+    return HttpResponse.json({ status: 'success' })
+  }),
+
+  http.patch('*/api/providers/:id/budget', async ({ request }) => {
+    const body = await request.json()
+    return HttpResponse.json({
+      id: paramsProvider(request.url),
+      daily_budget_limit: (body as { daily_budget_limit?: number | null }).daily_budget_limit,
+    })
+  }),
+
+  http.delete('*/api/providers/:id', () => {
+    return HttpResponse.json({ status: 'deleted' })
+  }),
+
   http.put('*/api/users/settings', () => {
     return HttpResponse.json({ status: 'success' })
   })
 ]
+
+function paramsProvider(url: string) {
+  const pathname = new URL(url).pathname
+  const segments = pathname.split('/')
+  return segments[segments.length - 1]
+}

@@ -1,5 +1,14 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Video, FileVideo, Settings, LogOut, Clapperboard, Shield, Users } from 'lucide-react'
+import {
+  Video,
+  FileVideo,
+  Settings,
+  LogOut,
+  Clapperboard,
+  Shield,
+  Users,
+  Server,
+} from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import { ThemeToggle } from './ThemeToggle'
 import { cn } from '../lib/utils'
@@ -12,6 +21,7 @@ const getNavItems = (isSuperuser: boolean) => [
   ...(isSuperuser
     ? [
         { to: '/admin', label: 'Admin', icon: Shield },
+        { to: '/admin/providers', label: 'Providers', icon: Server },
         { to: '/admin/groups', label: 'Groups', icon: Users },
       ]
     : []),

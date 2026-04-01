@@ -40,6 +40,10 @@ export default function Jobs() {
     failed: 'bg-red-100 text-red-800',
   }
 
+  const formatCost = (cost: number | null) => {
+    return cost == null ? '-' : `$${cost.toFixed(4)}`
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -111,6 +115,9 @@ export default function Jobs() {
                   <p className="text-sm text-muted-foreground">
                     {new Date(job.created_at).toLocaleString()}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    Preference: {job.provider_preference || 'auto'} / Type: {job.provider_type ?? 'pending'}
+                  </p>
                 </div>
                 <span
                   className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -118,6 +125,12 @@ export default function Jobs() {
                   }`}
                 >
                   {job.status}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Est: {formatCost(job.estimated_cost)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Actual: {formatCost(job.actual_cost)}
                 </span>
                 {job.status === 'processing' && (
                   <span className="text-sm text-muted-foreground">

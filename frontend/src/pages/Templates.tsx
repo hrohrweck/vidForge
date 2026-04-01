@@ -27,6 +27,7 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
       model?: string
     }>
   }
+
   const inputs = config?.inputs || []
   const pipeline = config?.pipeline || []
 
@@ -52,37 +53,36 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
           </div>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6">
           {inputs.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-2">Inputs</h3>
+            <div className="mb-6">
+              <h3 className="font-semibold mb-3">Inputs</h3>
               <div className="space-y-2">
-                {inputs.map((input) => (
-                  <div key={input.name} className="text-sm">
-                    <span className="font-medium">{input.name}</span>
-                    <span className="text-muted-foreground"> ({input.type})</span>
-                    {input.required && <span className="text-red-500 ml-1">*</span>}
-                    {input.description && (
-                      <span className="text-muted-foreground ml-2">- {input.description}</span>
-                    )}
+                {inputs.map((input, idx) => (
+                  <div key={idx} className="text-sm border-l-2 border-muted pl-3">
+                    <div className="font-medium">
+                      {input.name}
+                      {input.required && <span className="text-red-500 ml-1">*</span>}
+                    </div>
+                    <div className="text-muted-foreground">
+                      {input.type}
+                      {input.description && ` - ${input.description}`}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           )}
+
           {pipeline.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-2">Pipeline</h3>
+            <div className="mb-6">
+              <h3 className="font-semibold mb-3">Pipeline</h3>
               <div className="space-y-2">
                 {pipeline.map((step, idx) => (
-                  <div key={idx} className="text-sm">
-                    <span className="font-medium">{step.step}</span>
-                    {step.description && (
-                      <span className="text-muted-foreground ml-2">- {step.description}</span>
-                    )}
-                    {step.model && (
-                      <span className="text-muted-foreground ml-2">({step.model})</span>
-                    )}
+                  <div key={idx} className="text-sm border-l-2 border-blue-500 pl-3">
+                    <div className="font-medium">{step.step}</div>
+                    {step.description && <div className="text-muted-foreground">{step.description}</div>}
+                    {step.model && <div className="text-xs text-muted-foreground">Model: {step.model}</div>}
                   </div>
                 ))}
               </div>
@@ -130,9 +130,7 @@ export default function Templates() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Templates</h1>
-          <p className="text-muted-foreground">
-            Video generation templates for different use cases
-          </p>
+          <p className="text-muted-foreground">Video generation templates for different use cases</p>
         </div>
       </div>
 
@@ -155,9 +153,7 @@ export default function Templates() {
                     <h3 className="font-semibold text-lg">{template.name}</h3>
                   </div>
                   {template.is_builtin && (
-                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                      Built-in
-                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Built-in</span>
                   )}
                 </div>
 

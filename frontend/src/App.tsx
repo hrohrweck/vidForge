@@ -8,6 +8,7 @@ import Templates from './pages/Templates'
 import Settings from './pages/Settings'
 import Admin from './pages/Admin'
 import Groups from './pages/Groups'
+import Providers from './pages/Providers'
 import Login from './pages/Login'
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="templates" element={<Templates />} />
           <Route path="settings" element={<Settings />} />
           <Route path="admin" element={<Admin />} />
+          <Route path="admin/providers" element={<Providers />} />
           <Route path="admin/groups" element={<Groups />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

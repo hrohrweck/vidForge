@@ -104,6 +104,23 @@ async def get_current_user(
     return user
 
 
+async def require_admin(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.is_superuser:
+        return current_user
+
+    permissions = await get_user_permissions(current_user, db)
+    admin_perms = ["admin:dashboard", "admin:users:read", "admin:users:write"]
+    if not any(p.name in admin_perms for p in permissions):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
     result = await db.execute(select(User).where(User.email == user_data.email))

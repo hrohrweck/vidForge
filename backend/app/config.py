@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal
+from decimal import Decimal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,6 +47,19 @@ class Settings(BaseSettings):
     preview_quality: int = 28
 
     task_time_limit: int = 172800
+
+    worker_id: str = "local-worker-1"
+    worker_name: str = "Local GPU Worker"
+    worker_heartbeat_interval: int = 30
+
+    default_provider_preference: Literal["local", "runpod", "auto"] = "auto"
+
+    runpod_api_key: str = ""
+    runpod_endpoint_id: str = ""
+    runpod_cost_per_gpu_hour: Decimal = Decimal("0.69")
+    runpod_idle_timeout: int = 30
+    runpod_flashboot_enabled: bool = True
+    runpod_max_workers: int = 3
 
 
 @lru_cache

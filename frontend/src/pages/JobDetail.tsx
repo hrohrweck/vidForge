@@ -112,6 +112,10 @@ export default function JobDetail() {
     failed: 'bg-red-100 text-red-800',
   }
 
+  const formatCost = (cost: number | null) => {
+    return cost == null ? '-' : `$${cost.toFixed(4)}`
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -220,6 +224,25 @@ export default function JobDetail() {
           <div>
             <p className="text-muted-foreground">Progress</p>
             <p className="font-medium">{job.progress}%</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Provider Preference</p>
+            <p className="font-medium">{job.provider_preference || 'auto'}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Provider</p>
+            <p className="font-medium">
+              {job.provider_type ?? 'Unassigned'}
+              {job.provider_id ? ` (${job.provider_id.slice(0, 8)}...)` : ''}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Estimated Cost</p>
+            <p className="font-medium">{formatCost(job.estimated_cost)}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Actual Cost</p>
+            <p className="font-medium">{formatCost(job.actual_cost)}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Started</p>

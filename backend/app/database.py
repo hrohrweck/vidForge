@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import AsyncGenerator
 from uuid import UUID, uuid4
 
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     Integer,
     ForeignKey,
+    Numeric,
     select,
     UniqueConstraint,
 )
@@ -153,12 +155,24 @@ class Job(Base):
     preview_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=True
+    )
+    worker_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("workers.id"), nullable=True
+    )
+    provider_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider_preference: Mapped[str] = mapped_column(String(50), default="auto")
+    estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
     template: Mapped["Template | None"] = relationship(back_populates="jobs")
+    provider: Mapped["Provider | None"] = relationship(back_populates="jobs")
+    worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
 
 
 class Template(Base):
@@ -194,6 +208,67 @@ class Style(Base):
     )
 
     users_using_default: Mapped[list["UserSettings"]] = relationship(back_populates="default_style")
+
+
+class Provider(Base):
+    __tablename__ = "providers"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    daily_budget_limit: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    current_daily_spend: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    spend_reset_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    workers: Mapped[list["Worker"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan"
+    )
+    jobs: Mapped[list["Job"]] = relationship(back_populates="provider")
+
+
+class Worker(Base):
+    __tablename__ = "workers"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("providers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="offline", index=True)
+    capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    current_job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    provider: Mapped["Provider"] = relationship(back_populates="workers")
+    jobs: Mapped[list["Job"]] = relationship(back_populates="worker")
+
+
+class CostLog(Base):
+    __tablename__ = "cost_log"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gpu_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 async def seed_builtin_data() -> None:

@@ -26,6 +26,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
+  const [providerPreference, setProviderPreference] = useState<'auto' | 'local' | 'runpod'>('auto')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
@@ -87,6 +88,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     createMutation.mutate({
       template_id: selectedTemplateId || undefined,
       input_data: { ...inputValues, ...uploadedFiles },
+      provider_preference: providerPreference,
     })
   }
 
@@ -218,11 +220,27 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                 </option>
               ))}
             </select>
-            {selectedTemplate?.description && (
-              <p className="text-sm text-muted-foreground">
-                {selectedTemplate.description}
-              </p>
-            )}
+          {selectedTemplate?.description && (
+            <p className="text-sm text-muted-foreground">
+              {selectedTemplate.description}
+            </p>
+          )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="providerPreference">Provider Preference</Label>
+            <select
+              id="providerPreference"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={providerPreference}
+              onChange={(e) =>
+                setProviderPreference(e.target.value as 'auto' | 'local' | 'runpod')
+              }
+            >
+              <option value="auto">Auto</option>
+              <option value="local">Local</option>
+              <option value="runpod">RunPod</option>
+            </select>
           </div>
 
           {templateInputs.length > 0 && (

@@ -19,7 +19,7 @@ class TestAdminAuthorization:
     @pytest.mark.asyncio
     async def test_unauthenticated_user_cannot_access_admin(self, client: AsyncClient):
         response = await client.get("/api/admin/users")
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     @pytest.mark.asyncio
     async def test_superuser_can_list_all_users(
@@ -107,4 +107,4 @@ class TestAdminAuthorization:
 
         for endpoint in endpoints:
             response = await client.get(endpoint)
-            assert response.status_code == 403, f"Endpoint {endpoint} should require authentication"
+            assert response.status_code == 401, f"Endpoint {endpoint} should require authentication"

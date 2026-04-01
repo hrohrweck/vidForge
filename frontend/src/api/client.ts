@@ -92,6 +92,51 @@ export interface UserUpdateRequest {
   group_ids?: string[]
 }
 
+export interface Provider {
+  id: string
+  name: string
+  provider_type: 'local' | 'runpod'
+  config: Record<string, unknown>
+  is_active: boolean
+  daily_budget_limit: number | null
+  current_daily_spend: number
+  priority: number
+  created_at: string
+}
+
+export interface ProviderCreateRequest {
+  name: string
+  provider_type: 'local' | 'runpod'
+  config: Record<string, unknown>
+  daily_budget_limit?: number | null
+  priority?: number
+}
+
+export interface ProviderUpdateRequest {
+  name?: string
+  config?: Record<string, unknown>
+  daily_budget_limit?: number | null
+  priority?: number
+  is_active?: boolean
+}
+
+export interface ProviderStatus {
+  id: string
+  name: string
+  type: 'local' | 'runpod'
+  is_available: boolean
+  estimated_wait_seconds: number
+  message: string
+  workers: {
+    total: number
+    online: number
+    busy: number
+    offline: number
+  } | null
+  daily_budget_limit: number | null
+  current_daily_spend: number
+}
+
 export interface GroupCreateRequest {
   name: string
   description?: string
@@ -113,6 +158,11 @@ export interface Job {
   preview_path: string | null
   thumbnail_path: string | null
   error_message: string | null
+  provider_id: string | null
+  provider_type: string | null
+  provider_preference: 'auto' | 'local' | 'runpod'
+  estimated_cost: number | null
+  actual_cost: number | null
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -121,12 +171,15 @@ export interface Job {
 export interface CreateJobRequest {
   template_id?: string
   input_data?: Record<string, unknown>
+  auto_start?: boolean
+  provider_preference?: 'auto' | 'local' | 'runpod'
 }
 
 export interface BatchJobRequest {
   template_id: string
   jobs: Record<string, unknown>[]
   auto_start?: boolean
+  provider_preference?: 'auto' | 'local' | 'runpod'
 }
 
 export interface BatchJobResponse {
@@ -180,11 +233,16 @@ export const jobsApi = {
     const response = await api.post<BatchJobResponse>('/jobs/batch', data)
     return response.data
   },
-  createFromCsv: async (templateId: string, file: File, autoStart: boolean = true) => {
+  createFromCsv: async (
+    templateId: string,
+    file: File,
+    autoStart: boolean = true,
+    providerPreference: 'auto' | 'local' | 'runpod' = 'auto'
+  ) => {
     const formData = new FormData()
     formData.append('file', file)
     const response = await api.post<BatchJobResponse>(
-      `/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}`,
+      `/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}&provider_preference=${providerPreference}`,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
     )
@@ -220,6 +278,43 @@ export const storageApi = {
   getConfig: () => api.get('/storage/config'),
   listFiles: (prefix: string = '') => api.get('/storage/files', { params: { prefix } }),
   deleteFile: (path: string) => api.delete(`/storage/files/${path}`),
+}
+
+export const providersApi = {
+  list: async () => {
+    const response = await api.get<Provider[]>('/providers')
+    return response.data
+  },
+  create: async (data: ProviderCreateRequest) => {
+    const response = await api.post<Provider>('/providers', data)
+    return response.data
+  },
+  update: async (id: string, data: ProviderUpdateRequest) => {
+    const response = await api.patch<Provider>(`/providers/${id}`, data)
+    return response.data
+  },
+  delete: async (id: string) => {
+    await api.delete(`/providers/${id}`)
+  },
+  getStatus: async (id: string) => {
+    const response = await api.get<ProviderStatus>(`/providers/${id}/status`)
+    return response.data
+  },
+  getStatuses: async () => {
+    const response = await api.get<ProviderStatus[]>('/providers/status')
+    return response.data
+  },
+  resetSpend: async (id: string) => {
+    const response = await api.post<{ status: string }>(`/providers/${id}/reset-spend`)
+    return response.data
+  },
+  setBudget: async (id: string, daily_budget_limit: number | null) => {
+    const response = await api.patch<{ daily_budget_limit: number | null }>(
+      `/providers/${id}/budget`,
+      { daily_budget_limit }
+    )
+    return response.data
+  },
 }
 
 export const usersApi = {

@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -27,6 +28,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
     --card: 222.2 84% 4.9%;
@@ -53,6 +55,22 @@
   * {
     @apply border-border;
   }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='submit']),
+  textarea,
+  select {
+    @apply bg-background text-foreground border border-input;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='submit'])::placeholder,
+  textarea::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
+
+  option {
+    @apply bg-background text-foreground;
+  }
+
   body {
     @apply bg-background text-foreground;
   }

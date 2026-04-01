@@ -20,17 +20,30 @@ class JobCreate(BaseModel):
     template_id: UUID | None = None
     input_data: dict[str, Any] | None = None
     auto_start: bool = True
+    provider_preference: str = "auto"
 
 
 class BatchJobCreate(BaseModel):
     template_id: UUID
     jobs: list[dict[str, Any]]
     auto_start: bool = True
+    provider_preference: str = "auto"
 
 
 class BatchJobResponse(BaseModel):
     created_count: int
-    job_ids: list[UUID]
+    job_ids: list[str]
+
+
+PROVIDER_PREFERENCES = {"auto", "local", "runpod"}
+
+
+def _normalize_provider_preference(value: str) -> str:
+    """Normalize provider preference to accepted values."""
+
+    if value not in PROVIDER_PREFERENCES:
+        return "auto"
+    return value
 
 
 class JobResponse(BaseModel):
@@ -42,6 +55,11 @@ class JobResponse(BaseModel):
     preview_path: str | None
     thumbnail_path: str | None
     error_message: str | None
+    provider_id: UUID | None
+    provider_type: str | None
+    provider_preference: str
+    estimated_cost: float | None
+    actual_cost: float | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -73,17 +91,19 @@ async def create_job(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
+    provider_preference = _normalize_provider_preference(job_data.provider_preference)
     job = Job(
         user_id=current_user.id,
         template_id=job_data.template_id,
         input_data=job_data.input_data or {},
+        provider_preference=provider_preference,
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
     if job_data.auto_start:
-        process_video_job.delay(str(job.id))
+        process_video_job.delay(str(job.id), provider_preference=provider_preference)
 
     return job
 
@@ -102,7 +122,7 @@ async def start_job(
     if job.status != "pending":
         raise HTTPException(status_code=400, detail=f"Cannot start job with status: {job.status}")
 
-    process_video_job.delay(str(job.id))
+    process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
     return {"status": "started", "job_id": str(job_id)}
 
 
@@ -155,12 +175,13 @@ async def retry_job(
     job.status = "pending"
     job.progress = 0
     job.error_message = None
+    job.actual_cost = None
     job.started_at = None
     job.completed_at = None
     await db.commit()
     await db.refresh(job)
 
-    process_video_job.delay(str(job.id))
+    process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
 
     return job
 
@@ -176,6 +197,8 @@ async def create_batch_jobs(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    provider_preference = _normalize_provider_preference(batch_data.provider_preference)
+
     jobs = []
     job_ids = []
     for job_input in batch_data.jobs:
@@ -183,6 +206,7 @@ async def create_batch_jobs(
             user_id=current_user.id,
             template_id=batch_data.template_id,
             input_data=job_input,
+            provider_preference=provider_preference,
         )
         jobs.append(job)
         db.add(job)
@@ -193,9 +217,9 @@ async def create_batch_jobs(
 
     if batch_data.auto_start:
         for job_id in job_ids:
-            process_video_job.delay(str(job_id))
+            process_video_job.delay(str(job_id), provider_preference=provider_preference)
 
-    return {"created_count": len(jobs), "job_ids": job_ids}
+    return {"created_count": len(jobs), "job_ids": [str(j) for j in job_ids]}
 
 
 @router.post("/batch/csv", response_model=BatchJobResponse)
@@ -203,6 +227,7 @@ async def create_jobs_from_csv(
     template_id: UUID,
     file: UploadFile = File(...),
     auto_start: bool = True,
+    provider_preference: str = "auto",
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -210,6 +235,8 @@ async def create_jobs_from_csv(
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
+
+    provider_preference = _normalize_provider_preference(provider_preference)
 
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a CSV")
@@ -231,6 +258,7 @@ async def create_jobs_from_csv(
             user_id=current_user.id,
             template_id=template_id,
             input_data=dict(row),
+            provider_preference=provider_preference,
         )
         jobs.append(job)
         db.add(job)
@@ -241,6 +269,6 @@ async def create_jobs_from_csv(
 
     if auto_start:
         for job_id in job_ids:
-            process_video_job.delay(str(job_id))
+            process_video_job.delay(str(job_id), provider_preference=provider_preference)
 
-    return {"created_count": len(jobs), "job_ids": job_ids}
+    return {"created_count": len(jobs), "job_ids": [str(j) for j in job_ids]}

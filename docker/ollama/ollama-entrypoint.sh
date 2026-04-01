@@ -1,15 +1,32 @@
 #!/bin/bash
 set -e
 
-echo "[VidForge] Checking for Ollama models..."
+echo "[VidForge] Starting Ollama server..."
 
-OLLAMA_MODELS_DIR="/root/.ollama/models"
+# Start ollama serve in background
+ollama serve &
+SERVER_PID=$!
+
+# Wait for server to be ready
+echo "[VidForge] Waiting for Ollama server to be ready..."
+for i in $(seq 1 30); do
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        echo "[VidForge] Ollama server is ready"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "[VidForge] Timeout waiting for Ollama server"
+        exit 1
+    fi
+    sleep 1
+done
+
 DEFAULT_MODEL="llama3.2"
 
 # Function to pull a model
 pull_if_missing() {
     local model=$1
-    if ! ollama list | grep -q "^$model"; then
+    if ! ollama list | grep -q "$model"; then
         echo "[VidForge] Pulling $model..."
         ollama pull "$model"
     else
@@ -27,5 +44,5 @@ pull_if_missing "nomic-embed-text"
 
 echo "[VidForge] Ollama setup complete."
 
-# Start Ollama serve
-exec ollama serve
+# Wait for the server process (keep container running)
+wait $SERVER_PID

@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
+from unittest.mock import MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy import JSON
@@ -48,6 +49,32 @@ async def db_session():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.fixture
+def mocker():
+    """Compatibility fixture for tests that expect pytest-mock's mocker fixture."""
+
+    from unittest.mock import patch
+
+    patches: list = []
+
+    class Mocker:
+        def MagicMock(self, *args, **kwargs):
+            return MagicMock(*args, **kwargs)
+
+        def patch(self, target, *args, **kwargs):
+            patcher = patch(target, *args, **kwargs)
+            started = patcher.start()
+            patches.append(patcher)
+            return started
+
+    mock = Mocker()
+    try:
+        yield mock
+    finally:
+        for patcher in reversed(patches):
+            patcher.stop()
 
 
 @pytest.fixture

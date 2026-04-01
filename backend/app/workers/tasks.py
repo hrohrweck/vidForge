@@ -1,21 +1,21 @@
 import asyncio
 import json
-from contextlib import asynccontextmanager
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 import redis
-from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import os
-
 from app.config import get_settings
-from app.database import Job, Template
+from app.database import Job, Provider, Template
+from app.services.budget_tracker import BudgetTracker
+from app.services.job_router import JobRouter
 from app.services.video_generator import process_job_video
+from app.services.worker_registry import WorkerRegistry
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -26,7 +26,7 @@ TASK_TIME_LIMIT = getattr(settings, "task_time_limit", 172800)
 
 
 class ComfyUISemaphore:
-    """Redis-based semaphore for limiting concurrent ComfyUI jobs using Redis INCR/DEcr operations."""
+    """Redis-based semaphore for limiting concurrent local ComfyUI jobs."""
 
     def __init__(self, key: str, max_concurrent: int):
         self.redis_client = redis.from_url(settings.redis_url)
@@ -34,38 +34,23 @@ class ComfyUISemaphore:
         self.max_concurrent = max_concurrent
         self._acquired = False
         self._job_id = None
-        self._release_time = None
 
     async def acquire(self, job_id: str, timeout: Optional[float] = None) -> bool:
-        """Try to acquire a slot for ComfyUI processing.
-        Returns True if acquired, False if queue is full or timeout reached.
-        """
         current = int(self.redis_client.get(self.key) or 0)
         if current < self.max_concurrent:
             self.redis_client.incr(self.key)
             self._acquired = True
             self._job_id = job_id
-            self._release_time = datetime.utcnow()
             return True
-
         return False
 
     async def release(self):
-        """Release the semaphore slot."""
         if self._acquired:
             current = int(self.redis_client.get(self.key) or 0)
             if current > 0:
                 self.redis_client.decr(self.key)
             self._acquired = False
             self._job_id = None
-            self._release_time = None
-
-    async def get_queue_position(self) -> int:
-        """Get current position in queue (0 = first, >0 if all slots taken)"""
-        current = int(self.redis_client.get(self.key) or 0)
-        if current <= self.max_concurrent:
-            return 0
-        return max(0, int(current) - self.max_concurrent)
 
 
 def get_db_session_factory():
@@ -115,6 +100,9 @@ async def update_job_status(
     error_message: str | None = None,
     output_path: str | None = None,
     preview_path: str | None = None,
+    provider_id: UUID | None = None,
+    estimated_cost: Decimal | None = None,
+    actual_cost: Decimal | None = None,
 ) -> None:
     async_session_maker = get_db_session_factory()
     async with async_session_maker() as db:
@@ -125,52 +113,128 @@ async def update_job_status(
 
         job.status = status
         job.progress = progress
-        if error_message:
+        if error_message is not None:
             job.error_message = error_message
-        if output_path:
+        if output_path is not None:
             job.output_path = output_path
-        if preview_path:
+        if preview_path is not None:
             job.preview_path = preview_path
+        if provider_id is not None:
+            job.provider_id = provider_id
+        if estimated_cost is not None:
+            job.estimated_cost = estimated_cost
+        if actual_cost is not None:
+            job.actual_cost = actual_cost
 
         if status == "processing" and not job.started_at:
             job.started_at = datetime.utcnow()
-        if status in ("completed", "failed") and not job.completed_at:
+        elif status in ("completed", "failed") and not job.completed_at:
             job.completed_at = datetime.utcnow()
 
         await db.commit()
 
-        broadcast_update(str(job_id), {
+        payload = {
             "type": "status_update",
             "status": status,
             "progress": progress,
             "error_message": error_message,
-        })
+            "output_path": output_path,
+            "preview_path": preview_path,
+        }
+        broadcast_update(str(job_id), payload)
+
+
+async def _resolve_provider_for_job(
+    db: AsyncSession,
+    job: Job,
+    workflow: dict[str, object],
+    preference: str,
+) -> tuple:
+    router = JobRouter(db)
+
+    if job.provider_id:
+        provider = await router.get_provider_record(job.provider_id)
+        if not provider:
+            raise ValueError(f"Assigned provider {job.provider_id} no longer exists")
+
+        if not provider.is_active:
+            raise ValueError(f"Assigned provider '{provider.name}' is inactive")
+
+        provider_instance = await router.get_provider_instance(provider.id)
+        estimated_cost = Decimal(str(await provider_instance.estimate_cost(workflow)))
+
+        if provider.provider_type == "runpod":
+            allowed, reason = await router.budget_tracker.check_budget(provider.id, estimated_cost)
+            if not allowed:
+                raise ValueError(f"Assigned provider '{provider.name}' unavailable: {reason}")
+
+        return provider, provider_instance, estimated_cost, router, "Assigned provider"
+
+    provider, provider_instance, reason = await router.select_provider(
+        preference=preference,
+        workflow=workflow,
+    )
+    estimated_cost = Decimal(str(await provider_instance.estimate_cost(workflow)))
+    return provider, provider_instance, estimated_cost, router, reason
+
+
+async def _run_local_job(
+    job_id: str,
+    template_name: str | None,
+    input_data: dict[str, object],
+) -> tuple[str, str | None]:
+    video_path, preview_path = await process_job_video(
+        job_id=job_id,
+        template_name=template_name,
+        input_data=input_data,
+        progress_callback=lambda p, m: progress_callback_wrapper(job_id, p, m),
+    )
+
+    relative_video = str(Path(video_path).relative_to(settings.storage_path))
+    relative_preview = (
+        str(Path(preview_path).relative_to(settings.storage_path)) if preview_path else None
+    )
+    return relative_video, relative_preview
+
+
+async def _run_runpod_job(
+    job_id: str,
+    workflow: dict[str, object],
+    provider_instance,
+) -> tuple[str, str | None]:
+    run_id = await provider_instance.queue_prompt(workflow)
+    result = await provider_instance.wait_for_completion(
+        run_id,
+        progress_callback=lambda p, m: progress_callback_wrapper(job_id, p, m),
+    )
+
+    output_data = await provider_instance.get_output(result)
+    if not output_data:
+        raise RuntimeError("RunPod returned no output data")
+
+    output_dir = Path(settings.storage_path) / "output" / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "video.mp4"
+    output_path.write_bytes(output_data)
+
+    return str(output_path), None
+
+
+def _as_decimal(value: float | int | Decimal | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value))
 
 
 @celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
-def process_video_job(self, job_id: str) -> dict:
+def process_video_job(self, job_id: str, provider_preference: str = "auto") -> dict:
     job_uuid = UUID(job_id)
 
-    semaphore = ComfyUISemaphore(
-        key=COMFYUI_SEMAPHORE_KEY,
-        max_concurrent=COMFYUI_MAX_CONCURRENT,
-    )
-
-    acquired = False
-
-    async def run():
-        await update_job_status(job_uuid, "queued", 0)
-        acquired = await semaphore.acquire(job_id, timeout=3600)
-        if not acquired:
-            await update_job_status(
-                job_uuid,
-                "failed",
-                0,
-                error_message="ComfyUI queue is full. Job will be retried when a slot is available.",
-            )
-            raise Exception("ComfyUI queue is full. Job will be retried when a slot is available.")
-        await update_job_status(job_uuid, "processing", 0)
+    async def run() -> dict:
         async_session_maker = get_db_session_factory()
+
+        await update_job_status(job_uuid, "queued", 0)
+
         async with async_session_maker() as db:
             result = await db.execute(select(Job).where(Job.id == job_uuid))
             job = result.scalar_one_or_none()
@@ -179,32 +243,196 @@ def process_video_job(self, job_id: str) -> dict:
 
             input_data = job.input_data or {}
             template_name = await get_template_name(job.template_id)
+            preference = job.provider_preference or provider_preference
+
+            if not job.provider_preference:
+                job.provider_preference = preference
+
+            template = None
+            result = await db.execute(select(Template).where(Template.id == job.template_id))
+            template = result.scalar_one_or_none()
+            workflow = template.config if template else {}
+
+            router = None
+            semaphore = None
 
             try:
-                video_path, preview_path = await process_job_video(
-                    job_id=job_id,
-                    template_name=template_name,
-                    input_data=input_data,
-                    progress_callback=lambda p, m: async_progress_callback(job_id, p, m),
+                (
+                    provider_record,
+                    provider_instance,
+                    estimated_cost,
+                    router,
+                    _,
+                ) = await _resolve_provider_for_job(db, job, workflow, preference)
+
+                job.provider_id = provider_record.id
+                job.provider_type = provider_record.provider_type
+                job.provider_preference = preference
+                if job.estimated_cost is None:
+                    job.estimated_cost = estimated_cost
+                await db.commit()
+
+                await update_job_status(
+                    job_uuid,
+                    "processing",
+                    0,
+                    provider_id=provider_record.id,
+                    estimated_cost=estimated_cost,
                 )
-                relative_video = str(Path(video_path).relative_to(settings.storage_path))
-                relative_preview = (
-                    str(Path(preview_path).relative_to(settings.storage_path))
-                    if preview_path else None
+
+                started_at = datetime.utcnow()
+
+                if provider_record.provider_type == "local":
+                    semaphore = ComfyUISemaphore(
+                        key=f"{COMFYUI_SEMAPHORE_KEY}:{provider_record.id}",
+                        max_concurrent=provider_record.config.get(
+                            "max_concurrent_jobs", COMFYUI_MAX_CONCURRENT
+                        ),
+                    )
+                    acquired = await semaphore.acquire(job_id, timeout=3600)
+                    if not acquired:
+                        await update_job_status(
+                            job_uuid,
+                            "failed",
+                            0,
+                            error_message="GPU queue is full. Job will be retried.",
+                        )
+                        return {"status": "failed", "error": "Queue full", "job_id": job_id}
+
+                    relative_video, relative_preview = await _run_local_job(
+                        job_id,
+                        template_name,
+                        input_data,
+                    )
+
+                    await update_job_status(
+                        job_uuid,
+                        "completed",
+                        100,
+                        output_path=relative_video,
+                        preview_path=relative_preview,
+                    )
+                    return {"status": "completed", "job_id": job_id}
+
+                run_result_video, run_result_preview = await _run_runpod_job(
+                    job_id, workflow, provider_instance
                 )
+
+                if run_result_video.startswith(settings.storage_path):
+                    relative_video = str(Path(run_result_video).relative_to(settings.storage_path))
+                else:
+                    relative_video = str(run_result_video)
+
+                if run_result_preview:
+                    if run_result_preview.startswith(settings.storage_path):
+                        relative_preview = str(
+                            Path(run_result_preview).relative_to(settings.storage_path)
+                        )
+                    else:
+                        relative_preview = str(run_result_preview)
+                else:
+                    relative_preview = None
+
+                actual_cost = _as_decimal(estimated_cost)
+                duration_seconds = max(1, int((datetime.utcnow() - started_at).total_seconds()))
+                budget_tracker = BudgetTracker(db)
+                await budget_tracker.record_spend(
+                    provider_record.id,
+                    job_uuid,
+                    actual_cost,
+                    duration_seconds=duration_seconds,
+                    gpu_type=provider_record.config.get("gpu_type"),
+                )
+
                 await update_job_status(
                     job_uuid,
                     "completed",
                     100,
                     output_path=relative_video,
                     preview_path=relative_preview,
+                    actual_cost=actual_cost,
                 )
                 return {"status": "completed", "job_id": job_id}
-            except Exception as e:
-                await update_job_status(job_uuid, "failed", 0, error_message=str(e))
-                return {"status": "failed", "error": str(e), "job_id": job_id}
+
+            except Exception as exc:
+                error_message = str(exc)
+                await update_job_status(job_uuid, "failed", 0, error_message=error_message)
+                return {"status": "failed", "error": error_message, "job_id": job_id}
+
             finally:
-                semaphore.release()
+                if semaphore:
+                    await semaphore.release()
+
+                if router is not None:
+                    try:
+                        await router.shutdown()
+                    except Exception:
+                        pass
+
+    return asyncio.run(run())
+
+
+@celery_app.task
+def send_heartbeat() -> dict:
+    async def run() -> dict:
+        async_session_maker = get_db_session_factory()
+        async with async_session_maker() as db:
+            registry = WorkerRegistry(db)
+
+            result = await db.execute(
+                select(Provider).where(
+                    Provider.provider_type == "local", Provider.is_active == True
+                )
+            )
+            provider = result.scalar_one_or_none()
+
+            if provider:
+                worker_id = settings.worker_id
+                worker_name = settings.worker_name
+
+                await registry.register(
+                    worker_id=worker_id,
+                    name=worker_name,
+                    provider_id=provider.id,
+                    capabilities={
+                        "gpu": "Radeon 890M",
+                        "max_concurrent": settings.comfyui_max_concurrent,
+                    },
+                )
+                await registry.heartbeat(worker_id)
+
+        return {"status": "ok"}
+
+    return asyncio.run(run())
+
+
+@celery_app.task
+def cleanup_stale_workers() -> dict:
+    async def run() -> dict:
+        async_session_maker = get_db_session_factory()
+        async with async_session_maker() as db:
+            registry = WorkerRegistry(db)
+            count = await registry.cleanup_stale_workers()
+            if count > 0:
+                print(f"[Worker] Cleaned up {count} stale workers")
+        return {"cleaned": count}
+
+    return asyncio.run(run())
+
+
+@celery_app.task
+def reset_daily_budgets() -> dict:
+    async def run() -> dict:
+        async_session_maker = get_db_session_factory()
+        async with async_session_maker() as db:
+            result = await db.execute(select(Provider))
+            providers = result.scalars().all()
+
+            tracker = BudgetTracker(db)
+            for provider in providers:
+                await tracker.reset_provider_spend(provider.id)
+
+        return {"reset_count": len(providers)}
 
     return asyncio.run(run())
 
@@ -213,9 +441,7 @@ def process_video_job(self, job_id: str) -> dict:
 def generate_preview(job_id: str) -> dict:
     from app.services.video_processor import VideoProcessor
 
-    job_uuid = UUID(job_id)
-
-    async def run():
+    async def run() -> dict:
         video_path = Path(settings.storage_path) / "output" / job_id / "video.mp4"
         preview_path = Path(settings.storage_path) / "output" / job_id / "preview.mp4"
 
@@ -240,9 +466,7 @@ def generate_preview(job_id: str) -> dict:
 def merge_videos(job_id: str, segment_paths: list[str]) -> dict:
     from app.services.video_processor import VideoProcessor
 
-    job_uuid = UUID(job_id)
-
-    async def run():
+    async def run() -> dict:
         output_path = Path(settings.storage_path) / "output" / job_id / "merged.mp4"
         await VideoProcessor.merge_videos(segment_paths, str(output_path))
         return {
@@ -251,4 +475,5 @@ def merge_videos(job_id: str, segment_paths: list[str]) -> dict:
             "segments": len(segment_paths),
             "output": str(output_path),
         }
+
     return asyncio.run(run())
