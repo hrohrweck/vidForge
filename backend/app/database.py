@@ -163,6 +163,7 @@ class Job(Base):
     )
     provider_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     provider_preference: Mapped[str] = mapped_column(String(50), default="auto")
+    model_preference: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

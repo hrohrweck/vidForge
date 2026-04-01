@@ -112,6 +112,36 @@ else
     echo "[VidForge] CLIP-L already present"
 fi
 
+# ============================================
+# LTX 2.3 Models
+# ============================================
+LTX_DIR="$MODELS_DIR/ltx"
+mkdir -p "$LTX_DIR"
+
+echo "[VidForge] Checking for LTX 2.3 models..."
+
+# Download LTX 2.3 full model
+if [ ! -f "$LTX_DIR/ltx-2.3-22b-dev.safetensors" ]; then
+    echo "[VidForge] Downloading LTX 2.3 full model (~22GB)..."
+    echo "[VidForge] This may take a while..."
+    curl -# -L -o "$LTX_DIR/ltx-2.3-22b-dev.safetensors" \
+        "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-dev.safetensors"
+    echo "[VidForge] LTX 2.3 full model downloaded successfully"
+else
+    echo "[VidForge] LTX 2.3 full model already present"
+fi
+
+# Download LTX 2.3 distilled model
+if [ ! -f "$LTX_DIR/ltx-2.3-22b-distilled.safetensors" ]; then
+    echo "[VidForge] Downloading LTX 2.3 distilled model (~22GB)..."
+    echo "[VidForge] This may take a while..."
+    curl -# -L -o "$LTX_DIR/ltx-2.3-22b-distilled.safetensors" \
+        "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled.safetensors"
+    echo "[VidForge] LTX 2.3 distilled model downloaded successfully"
+else
+    echo "[VidForge] LTX 2.3 distilled model already present"
+fi
+
 echo "[VidForge] Model setup complete. Starting ComfyUI..."
 echo "[VidForge] Note: First video generation may take longer as models are loaded."
 

@@ -161,6 +161,7 @@ export interface Job {
   provider_id: string | null
   provider_type: string | null
   provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
+  model_preference: string | null
   estimated_cost: number | null
   actual_cost: number | null
   created_at: string
@@ -173,6 +174,7 @@ export interface CreateJobRequest {
   input_data?: Record<string, unknown>
   auto_start?: boolean
   provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
+  model_preference?: string
 }
 
 export interface BatchJobRequest {
@@ -180,6 +182,7 @@ export interface BatchJobRequest {
   jobs: Record<string, unknown>[]
   auto_start?: boolean
   provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
+  model_preference?: string
 }
 
 export interface BatchJobResponse {
@@ -210,6 +213,18 @@ export interface Style {
   created_at: string
 }
 
+export interface VideoModel {
+  id: string
+  name: string
+  provider: 'wan' | 'ltx'
+  capabilities: string[]
+  max_duration: number
+  max_resolution: [number, number]
+  default_steps: number
+  distilled: boolean
+  description: string
+}
+
 export const authApi = {
   login: (data: LoginRequest) => api.post<TokenResponse>('/auth/login', data),
   register: (data: RegisterRequest) => api.post<User>('/auth/register', data),
@@ -237,12 +252,17 @@ export const jobsApi = {
     templateId: string,
     file: File,
     autoStart: boolean = true,
-    providerPreference: 'auto' | 'comfyui_direct' | 'runpod' = 'auto'
+    providerPreference: 'auto' | 'comfyui_direct' | 'runpod' = 'auto',
+    modelPreference?: string
   ) => {
     const formData = new FormData()
     formData.append('file', file)
+    let url = `/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}&provider_preference=${providerPreference}`
+    if (modelPreference) {
+      url += `&model_preference=${modelPreference}`
+    }
     const response = await api.post<BatchJobResponse>(
-      `/jobs/batch/csv?template_id=${templateId}&auto_start=${autoStart}&provider_preference=${providerPreference}`,
+      url,
       formData,
       { headers: { 'Content-Type': 'multipart/form-data' } }
     )
@@ -313,6 +333,17 @@ export const providersApi = {
       `/providers/${id}/budget`,
       { daily_budget_limit }
     )
+    return response.data
+  },
+}
+
+export const modelsApi = {
+  list: async () => {
+    const response = await api.get<VideoModel[]>('/models')
+    return response.data
+  },
+  get: async (id: string) => {
+    const response = await api.get<VideoModel>(`/models/${id}`)
     return response.data
   },
 }

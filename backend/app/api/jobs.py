@@ -21,6 +21,7 @@ class JobCreate(BaseModel):
     input_data: dict[str, Any] | None = None
     auto_start: bool = True
     provider_preference: str = "auto"
+    model_preference: str | None = None
 
 
 class BatchJobCreate(BaseModel):
@@ -28,6 +29,7 @@ class BatchJobCreate(BaseModel):
     jobs: list[dict[str, Any]]
     auto_start: bool = True
     provider_preference: str = "auto"
+    model_preference: str | None = None
 
 
 class BatchJobResponse(BaseModel):
@@ -58,6 +60,7 @@ class JobResponse(BaseModel):
     provider_id: UUID | None
     provider_type: str | None
     provider_preference: str
+    model_preference: str | None
     estimated_cost: float | None
     actual_cost: float | None
     created_at: datetime
@@ -97,6 +100,7 @@ async def create_job(
         template_id=job_data.template_id,
         input_data=job_data.input_data or {},
         provider_preference=provider_preference,
+        model_preference=job_data.model_preference,
     )
     db.add(job)
     await db.commit()
@@ -207,6 +211,7 @@ async def create_batch_jobs(
             template_id=batch_data.template_id,
             input_data=job_input,
             provider_preference=provider_preference,
+            model_preference=batch_data.model_preference,
         )
         jobs.append(job)
         db.add(job)
@@ -228,6 +233,7 @@ async def create_jobs_from_csv(
     file: UploadFile = File(...),
     auto_start: bool = True,
     provider_preference: str = "auto",
+    model_preference: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -259,6 +265,7 @@ async def create_jobs_from_csv(
             template_id=template_id,
             input_data=dict(row),
             provider_preference=provider_preference,
+            model_preference=model_preference,
         )
         jobs.append(job)
         db.add(job)

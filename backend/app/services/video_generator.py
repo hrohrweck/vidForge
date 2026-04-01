@@ -618,6 +618,12 @@ class VideoGenerator:
             "wan_s2v": "wan_s2v.json",
             "wan2.2_t2v": "wan_t2v.json",
             "wan2.2_s2v": "wan_s2v.json",
+            "ltx_t2v": "ltx_t2v.json",
+            "ltx_i2v": "ltx_i2v.json",
+            "ltx_distilled": "ltx_distilled.json",
+            "ltx2.3_t2v": "ltx_t2v.json",
+            "ltx2.3_i2v": "ltx_i2v.json",
+            "ltx2.3_distilled": "ltx_distilled.json",
         }
         workflow_file = workflow_map.get(model_name, "wan_t2v.json")
         workflow_path = Path(settings.comfyui_workflows_path) / workflow_file
@@ -633,6 +639,12 @@ class VideoGenerator:
         width, height = self._get_dimensions(aspect_ratio)
         video_length = int(duration * fps) + 1
 
+        is_ltx = model_name.startswith("ltx")
+        if is_ltx:
+            video_length = self._adjust_frames_for_ltx(video_length)
+            width = self._adjust_dimension_for_ltx(width)
+            height = self._adjust_dimension_for_ltx(height)
+
         for node_id, node in workflow.items():
             class_type = node.get("class_type")
             if class_type == "CLIPTextEncode":
@@ -640,13 +652,22 @@ class VideoGenerator:
                     node["inputs"]["text"] = prompt
                 elif node_id == "3":
                     node["inputs"]["text"] = negative_prompt
+            elif class_type == "LTXVideoEncodePrompt":
+                node["inputs"]["prompt"] = prompt
+                node["inputs"]["negative_prompt"] = negative_prompt
             elif class_type == "EmptyHunyuanLatentVideo":
                 node["inputs"]["width"] = width
                 node["inputs"]["height"] = height
                 node["inputs"]["length"] = video_length
+            elif class_type == "LTXVideoEmptyLatent":
+                node["inputs"]["width"] = width
+                node["inputs"]["height"] = height
+                node["inputs"]["frames"] = video_length
             elif class_type == "CreateVideo":
                 node["inputs"]["fps"] = fps
             elif class_type == "KSampler":
+                node["inputs"]["seed"] = random.randint(0, 2**31 - 1)
+            elif class_type == "LTXVideoSampler":
                 node["inputs"]["seed"] = random.randint(0, 2**31 - 1)
 
         result = await self.comfyui.queue_prompt(workflow)
@@ -662,6 +683,16 @@ class VideoGenerator:
         video_path = self.output_dir / "video.mp4"
         video_path.write_bytes(video_data)
         return {"video": str(video_path)}
+
+    def _adjust_frames_for_ltx(self, frames: int) -> int:
+        while frames % 8 != 1:
+            frames += 1
+        return frames
+
+    def _adjust_dimension_for_ltx(self, dimension: int) -> int:
+        if dimension % 32 != 0:
+            dimension = ((dimension // 32) + 1) * 32
+        return dimension
 
     async def _generate_preview(self, video_path: str) -> str | None:
         if not video_path:

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { jobsApi, templatesApi, Template } from '../api/client'
+import { jobsApi, templatesApi, modelsApi, Template, type VideoModel } from '../api/client'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
@@ -17,6 +17,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
   const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
+  const [modelPreference, setModelPreference] = useState<string>('')
   
   const queryClient = useQueryClient()
   
@@ -27,6 +28,11 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
       return res.data
     },
   })
+
+  const { data: models } = useQuery({
+    queryKey: ['models'],
+    queryFn: () => modelsApi.list(),
+  })
   
   const createBatchMutation = useMutation({
     mutationFn: async (data: {
@@ -34,6 +40,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
       jobs: Record<string, unknown>[]
       auto_start: boolean
       provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
+      model_preference?: string
     }) => {
       return jobsApi.createBatch(data)
     },
@@ -50,7 +57,8 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
         selectedTemplate,
         csvFile,
         autoStart,
-        providerPreference
+        providerPreference,
+        modelPreference || undefined
       )
     },
     onSuccess: () => {
@@ -74,6 +82,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
           jobs,
           auto_start: autoStart,
           provider_preference: providerPreference,
+          model_preference: modelPreference || undefined,
         })
       } catch {
         alert('Invalid JSON format')
@@ -143,6 +152,24 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
               <option value="auto">Auto</option>
               <option value="comfyui_direct">ComfyUI Direct</option>
               <option value="runpod">RunPod</option>
+            </select>
+          </div>
+
+          <div>
+            <Label htmlFor="batch-model">Video Model</Label>
+            <select
+              id="batch-model"
+              className="w-full mt-1 border rounded px-3 py-2"
+              value={modelPreference}
+              onChange={(e) => setModelPreference(e.target.value)}
+            >
+              <option value="">Use template default</option>
+              {models?.map((model: VideoModel) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider.toUpperCase()})
+                  {model.distilled ? ' - Fast' : ''}
+                </option>
+              ))}
             </select>
           </div>
           

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2 } from 'lucide-react'
-import { jobsApi, templatesApi, type CreateJobRequest, type Template } from '../api/client'
+import { jobsApi, templatesApi, modelsApi, type CreateJobRequest, type Template, type VideoModel } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -27,10 +27,16 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
   const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
+  const [modelPreference, setModelPreference] = useState<string>('')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
     queryFn: () => templatesApi.list(),
+  })
+
+  const { data: models } = useQuery({
+    queryKey: ['models'],
+    queryFn: () => modelsApi.list(),
   })
 
   const selectedTemplate = templates?.data?.find(
@@ -89,6 +95,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
       template_id: selectedTemplateId || undefined,
       input_data: { ...inputValues, ...uploadedFiles },
       provider_preference: providerPreference,
+      model_preference: modelPreference || undefined,
     })
   }
 
@@ -241,6 +248,29 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               <option value="comfyui_direct">ComfyUI Direct</option>
               <option value="runpod">RunPod</option>
             </select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="modelPreference">Video Model</Label>
+            <select
+              id="modelPreference"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={modelPreference}
+              onChange={(e) => setModelPreference(e.target.value)}
+            >
+              <option value="">Use template default</option>
+              {models?.map((model: VideoModel) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider.toUpperCase()})
+                  {model.distilled ? ' - Fast' : ''}
+                </option>
+              ))}
+            </select>
+            {modelPreference && (
+              <p className="text-xs text-muted-foreground">
+                {models?.find((m: VideoModel) => m.id === modelPreference)?.description}
+              </p>
+            )}
           </div>
 
           {templateInputs.length > 0 && (
