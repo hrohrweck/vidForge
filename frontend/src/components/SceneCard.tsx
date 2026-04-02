@@ -1,4 +1,4 @@
-import { Pencil, Upload, Play, Clock } from 'lucide-react'
+import { Pencil, Play, Clock } from 'lucide-react'
 import { Button } from '../components/ui/button'
 
 interface Scene {
@@ -24,7 +24,7 @@ interface SceneCardProps {
   formatTime: (seconds: number) => string
 }
 
-export function SceneCard({ scene, index, onEdit, formatTime }: SceneCardProps) {
+export function SceneCard({ scene, onEdit, formatTime }: SceneCardProps) {
   const duration = scene.end_time - scene.start_time
 
   return (

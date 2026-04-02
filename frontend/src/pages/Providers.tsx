@@ -648,7 +648,7 @@ export default function Providers() {
                     />
                   </div>
                 </>
-              ) : (
+              ) : formState.providerType === 'runpod' ? (
                 <>
                   <div className="space-y-2">
                     <label htmlFor="endpoint-id" className="text-sm font-medium">

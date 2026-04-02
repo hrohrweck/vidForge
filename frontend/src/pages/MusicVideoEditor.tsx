@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, Pause, Plus, Trash2, Save, Upload, RefreshCw, ChevronLeft, Image } from 'lucide-react'
-import { jobsApi, type Job } from '../api/client'
+import { Play, RefreshCw, ChevronLeft } from 'lucide-react'
+import { jobsApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -142,7 +142,7 @@ export default function MusicVideoEditor() {
   })
 
   const extractLyricsMutation = useMutation({
-    mutationFn: () => scenesApi.extractLyrics(jobId!, job?.input_data?.audio_file || ''),
+    mutationFn: () => scenesApi.extractLyrics(jobId!, (job?.input_data?.audio_file as string) || ''),
     onSuccess: (data) => {
       if (job?.input_data) {
         queryClient.setQueryData(['job', jobId], {
@@ -302,7 +302,7 @@ export default function MusicVideoEditor() {
                     >
                       {extractLyricsMutation.isPending ? 'Extracting...' : 'Extract Lyrics from Audio'}
                     </Button>
-                    {job?.input_data?.lyrics && (
+                    {!!job?.input_data?.lyrics && (
                       <Button onClick={handlePlanScenes} disabled={planScenesMutation.isPending}>
                         {planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
                       </Button>
@@ -344,7 +344,7 @@ export default function MusicVideoEditor() {
                       />
                     </div>
                     <Button onClick={handleManualLyricsSubmit}>Set Lyrics</Button>
-                    {job?.input_data?.lyrics && (
+                    {!!job?.input_data?.lyrics && (
                       <Button onClick={handlePlanScenes} disabled={planScenesMutation.isPending}>
                         {planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
                       </Button>
@@ -352,7 +352,7 @@ export default function MusicVideoEditor() {
                   </div>
                 )}
 
-                {job?.input_data?.lyrics && (
+                {!!job?.input_data?.lyrics && (
                   <div className="mt-4 p-4 bg-muted rounded-lg">
                     <h3 className="font-medium mb-2">Extracted Lyrics</h3>
                     <p className="text-sm text-muted-foreground">
@@ -411,7 +411,7 @@ export default function MusicVideoEditor() {
         <div className="space-y-4">
           <div className="bg-card rounded-lg border p-4">
             <h3 className="font-semibold mb-2">Audio</h3>
-            {job?.input_data?.audio_file && (
+            {!!job?.input_data?.audio_file && (
               <audio controls className="w-full" src={`/api/uploads/${job.input_data.audio_file}`}>
                 Your browser does not support audio.
               </audio>
@@ -420,7 +420,7 @@ export default function MusicVideoEditor() {
 
           <div className="bg-card rounded-lg border p-4">
             <h3 className="font-semibold mb-2">Lyrics</h3>
-            {job?.input_data?.lyrics && (
+            {!!job?.input_data?.lyrics && (
               <div className="text-sm text-muted-foreground max-h-60 overflow-y-auto">
                 {(job.input_data.lyrics as LyricsData).lines?.map((line: { text: string; start: number }, i: number) => (
                   <div key={i} className="py-1">
