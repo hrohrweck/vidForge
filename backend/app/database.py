@@ -236,6 +236,25 @@ class Provider(Base):
         back_populates="provider", cascade="all, delete-orphan"
     )
     jobs: Mapped[list["Job"]] = relationship(back_populates="provider")
+    poe_models: Mapped[list["PoeModel"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan"
+    )
+
+
+class PoeModel(Base):
+    __tablename__ = "poe_models"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    modality: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    provider: Mapped["Provider"] = relationship(back_populates="poe_models")
 
 
 class Worker(Base):

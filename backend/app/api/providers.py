@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, require_admin
-from app.database import get_db, Provider, User
+from app.database import get_db, Provider, User, PoeModel
 from app.services.job_router import JobRouter
 from app.services.worker_registry import WorkerRegistry
 from app.services.budget_tracker import BudgetTracker
@@ -342,3 +342,113 @@ async def get_provider_models(
             for m in text_models
         ],
     }
+
+
+class PoeModelCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    model_id: str = Field(..., min_length=1, max_length=255)
+    modality: str = Field(..., pattern="^(video|image|text)$")
+
+
+class PoeModelUpdate(BaseModel):
+    name: str | None = None
+    model_id: str | None = None
+    modality: str | None = Field(None, pattern="^(video|image|text)$")
+    is_active: bool | None = None
+
+
+class PoeModelResponse(BaseModel):
+    id: UUID
+    provider_id: UUID
+    name: str
+    model_id: str
+    modality: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/{provider_id}/poe-models", response_model=list[PoeModelResponse])
+async def list_poe_models(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(PoeModel).where(PoeModel.provider_id == provider_id))
+    return result.scalars().all()
+
+
+@router.post("/{provider_id}/poe-models", response_model=PoeModelResponse)
+async def create_poe_model(
+    provider_id: UUID,
+    data: PoeModelCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if provider.provider_type != "poe":
+        raise HTTPException(status_code=400, detail="Poe models only available for Poe providers")
+
+    poe_model = PoeModel(
+        provider_id=provider_id,
+        name=data.name,
+        model_id=data.model_id,
+        modality=data.modality,
+    )
+    db.add(poe_model)
+    await db.commit()
+    await db.refresh(poe_model)
+    return poe_model
+
+
+@router.patch("/{provider_id}/poe-models/{model_id}", response_model=PoeModelResponse)
+async def update_poe_model(
+    provider_id: UUID,
+    model_id: UUID,
+    data: PoeModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(
+        select(PoeModel).where(PoeModel.id == model_id, PoeModel.provider_id == provider_id)
+    )
+    poe_model = result.scalar_one_or_none()
+    if not poe_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if data.name is not None:
+        poe_model.name = data.name
+    if data.model_id is not None:
+        poe_model.model_id = data.model_id
+    if data.modality is not None:
+        poe_model.modality = data.modality
+    if data.is_active is not None:
+        poe_model.is_active = data.is_active
+
+    await db.commit()
+    await db.refresh(poe_model)
+    return poe_model
+
+
+@router.delete("/{provider_id}/poe-models/{model_id}")
+async def delete_poe_model(
+    provider_id: UUID,
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(
+        select(PoeModel).where(PoeModel.id == model_id, PoeModel.provider_id == provider_id)
+    )
+    poe_model = result.scalar_one_or_none()
+    if not poe_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    await db.delete(poe_model)
+    await db.commit()
+    return {"status": "deleted"}

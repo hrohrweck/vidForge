@@ -6,8 +6,10 @@ from typing import Literal
 class VideoModel:
     id: str
     name: str
+    display_name: str
     provider: Literal["wan", "ltx", "poe"]
     workflow: str
+    modality: Literal["video", "image"] = "video"
     capabilities: list[str] = field(default_factory=list)
     max_duration: int = 30
     max_resolution: tuple[int, int] = (1920, 1080)
@@ -21,8 +23,10 @@ MODELS: dict[str, VideoModel] = {
     "wan2.2_t2v": VideoModel(
         id="wan2.2_t2v",
         name="WAN 2.2 Text-to-Video",
+        display_name="WAN 2.2",
         provider="wan",
         workflow="wan_t2v.json",
+        modality="video",
         capabilities=["text-to-video"],
         max_duration=30,
         max_resolution=(1920, 1080),
@@ -32,19 +36,23 @@ MODELS: dict[str, VideoModel] = {
     "wan2.2_s2v": VideoModel(
         id="wan2.2_s2v",
         name="WAN 2.2 Scene-to-Video",
+        display_name="WAN 2.2",
         provider="wan",
         workflow="wan_s2v.json",
+        modality="video",
         capabilities=["text-to-video", "scene-to-video"],
         max_duration=30,
         max_resolution=(1920, 1080),
         default_steps=30,
-        description="WAN 2.2 5B model optimized for scene continuation.",
+        description="WAN 2.2 model optimized for scene continuation.",
     ),
     "ltx2.3_t2v": VideoModel(
         id="ltx2.3_t2v",
         name="LTX 2.3 Text-to-Video",
+        display_name="LTX 2.3",
         provider="ltx",
         workflow="ltx_t2v.json",
+        modality="video",
         capabilities=["text-to-video", "audio-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -54,8 +62,10 @@ MODELS: dict[str, VideoModel] = {
     "ltx2.3_distilled": VideoModel(
         id="ltx2.3_distilled",
         name="LTX 2.3 Distilled (Fast)",
+        display_name="LTX 2.3 Fast",
         provider="ltx",
         workflow="ltx_distilled.json",
+        modality="video",
         capabilities=["text-to-video", "audio-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -66,8 +76,10 @@ MODELS: dict[str, VideoModel] = {
     "ltx2.3_i2v": VideoModel(
         id="ltx2.3_i2v",
         name="LTX 2.3 Image-to-Video",
+        display_name="LTX 2.3",
         provider="ltx",
         workflow="ltx_i2v.json",
+        modality="video",
         capabilities=["image-to-video", "audio-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -77,8 +89,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_veo3": VideoModel(
         id="poe_veo3",
         name="Veo 3 (Poe)",
+        display_name="Veo 3",
         provider="poe",
         workflow="",
+        modality="video",
         capabilities=["text-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -89,8 +103,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_veo31": VideoModel(
         id="poe_veo31",
         name="Veo 3.1 (Poe)",
+        display_name="Veo 3.1",
         provider="poe",
         workflow="",
+        modality="video",
         capabilities=["text-to-video", "image-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -101,8 +117,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_sora2_pro": VideoModel(
         id="poe_sora2_pro",
         name="Sora 2 Pro (Poe)",
+        display_name="Sora 2 Pro",
         provider="poe",
         workflow="",
+        modality="video",
         capabilities=["text-to-video"],
         max_duration=20,
         max_resolution=(1920, 1080),
@@ -113,8 +131,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_nano_banana": VideoModel(
         id="poe_nano_banana",
         name="Nano-Banana (Poe)",
+        display_name="Nano-Banana",
         provider="poe",
         workflow="",
+        modality="image",
         capabilities=["image-generation"],
         max_duration=0,
         max_resolution=(1024, 1024),
@@ -125,8 +145,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_nano_banana2": VideoModel(
         id="poe_nano_banana2",
         name="Nano-Banana 2 (Poe)",
+        display_name="Nano-Banana 2",
         provider="poe",
         workflow="",
+        modality="image",
         capabilities=["image-generation"],
         max_duration=0,
         max_resolution=(1024, 1024),
@@ -137,8 +159,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_nano_banana_pro": VideoModel(
         id="poe_nano_banana_pro",
         name="Nano-Banana Pro (Poe)",
+        display_name="Nano-Banana Pro",
         provider="poe",
         workflow="",
+        modality="image",
         capabilities=["image-generation"],
         max_duration=0,
         max_resolution=(1024, 1024),
@@ -149,8 +173,10 @@ MODELS: dict[str, VideoModel] = {
     "poe_gpt_image": VideoModel(
         id="poe_gpt_image",
         name="GPT Image 1 (Poe)",
+        display_name="GPT Image 1",
         provider="poe",
         workflow="",
+        modality="image",
         capabilities=["image-generation"],
         max_duration=0,
         max_resolution=(1024, 1024),

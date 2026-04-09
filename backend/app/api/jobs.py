@@ -37,15 +37,33 @@ class BatchJobResponse(BaseModel):
     job_ids: list[str]
 
 
-PROVIDER_PREFERENCES = {"auto", "comfyui_direct", "runpod"}
+PROVIDER_PREFERENCES = {"auto"}
 
 
 def _normalize_provider_preference(value: str) -> str:
-    """Normalize provider preference to accepted values."""
-
-    if value not in PROVIDER_PREFERENCES:
+    """Normalize provider preference to accepted values.
+    
+    Accepts:
+    - "auto" - automatically select provider based on availability
+    - A valid provider UUID - use that specific provider
+    - Legacy provider types (comfyui_direct, runpod, poe) - converted to "auto" for backward compatibility
+    """
+    if value in PROVIDER_PREFERENCES:
+        return value
+    
+    # If it's a UUID (provider ID), pass through - will be validated at job processing time
+    try:
+        UUID(value)
+        return value
+    except ValueError:
+        pass
+    
+    # Legacy provider types are now treated as "auto"
+    legacy_types = {"comfyui_direct", "runpod", "poe"}
+    if value in legacy_types:
         return "auto"
-    return value
+    
+    return "auto"
 
 
 class JobResponse(BaseModel):

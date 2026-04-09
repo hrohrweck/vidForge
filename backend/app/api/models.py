@@ -22,7 +22,9 @@ async def list_models():
         {
             "id": m.id,
             "name": m.name,
+            "display_name": m.display_name,
             "provider": m.provider,
+            "modality": m.modality,
             "capabilities": m.capabilities,
             "max_duration": m.max_duration,
             "max_resolution": m.max_resolution,
@@ -43,8 +45,10 @@ async def get_model_details(model_id: str):
     return {
         "id": model.id,
         "name": model.name,
+        "display_name": model.display_name,
         "provider": model.provider,
         "workflow": model.workflow,
+        "modality": model.modality,
         "capabilities": model.capabilities,
         "max_duration": model.max_duration,
         "max_resolution": model.max_resolution,
@@ -62,7 +66,9 @@ async def get_models_by_capability(capability: str):
         {
             "id": m.id,
             "name": m.name,
+            "display_name": m.display_name,
             "provider": m.provider,
+            "modality": m.modality,
             "capabilities": m.capabilities,
         }
         for m in models

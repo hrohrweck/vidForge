@@ -63,6 +63,19 @@ class JobRouter:
         preference: str = "auto",
         workflow: dict[str, Any] | None = None,
     ) -> tuple[Provider, ComfyUIProvider, str]:
+        # If preference is a UUID, use that specific provider
+        try:
+            provider_id = UUID(preference)
+            result = await self.db.execute(
+                select(Provider).where(Provider.id == provider_id, Provider.is_active == True)
+            )
+            provider = result.scalar_one_or_none()
+            if provider:
+                instance = await self.get_provider_instance(provider.id)
+                return provider, instance, f"Provider {provider.name} selected by ID"
+        except ValueError:
+            pass
+        
         result = await self.db.execute(
             select(Provider).where(Provider.is_active == True).order_by(Provider.priority.desc())
         )

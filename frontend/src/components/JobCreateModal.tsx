@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2 } from 'lucide-react'
-import { jobsApi, templatesApi, modelsApi, type CreateJobRequest, type Template, type VideoModel } from '../api/client'
+import { jobsApi, templatesApi, modelsApi, providersApi, type CreateJobRequest, type Template, type VideoModel, type Provider } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -26,7 +26,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
-  const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
+  const [providerPreference, setProviderPreference] = useState<string>('auto')
   const [modelPreference, setModelPreference] = useState<string>('')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
@@ -38,6 +38,24 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     queryKey: ['models'],
     queryFn: () => modelsApi.list(),
   })
+
+  const { data: providers } = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => providersApi.list(),
+  })
+
+  const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
+  
+  const selectedProvider = activeProviders.find((p: Provider) => p.id === providerPreference)
+
+  const modelProviderType = selectedProvider ? selectedProvider.provider_type : null
+  
+  const filteredModels = models?.filter((m: VideoModel) => {
+    if (!modelProviderType || modelProviderType === 'poe') return true
+    return modelProviderType === 'comfyui_direct' || modelProviderType === 'runpod'
+      ? (m.provider === 'wan' || m.provider === 'ltx')
+      : true
+  }) || []
 
   const selectedTemplate = templates?.data?.find(
     (t: Template) => t.id === selectedTemplateId
@@ -240,18 +258,22 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               id="providerPreference"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={providerPreference}
-              onChange={(e) =>
-                setProviderPreference(e.target.value as 'auto' | 'comfyui_direct' | 'runpod')
-              }
+              onChange={(e) => {
+                setProviderPreference(e.target.value)
+                setModelPreference('')
+              }}
             >
               <option value="auto">Auto</option>
-              <option value="comfyui_direct">ComfyUI Direct</option>
-              <option value="runpod">RunPod</option>
+              {activeProviders.map((provider: Provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} ({provider.provider_type})
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="modelPreference">Video Model</Label>
+            <Label htmlFor="modelPreference">Generation Model</Label>
             <select
               id="modelPreference"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -259,10 +281,11 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               onChange={(e) => setModelPreference(e.target.value)}
             >
               <option value="">Use template default</option>
-              {models?.map((model: VideoModel) => (
+              {filteredModels.map((model: VideoModel) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} ({model.provider.toUpperCase()})
+                  {model.display_name} ({model.provider.toUpperCase()})
                   {model.distilled ? ' - Fast' : ''}
+                  {model.modality === 'image' ? ' - Image' : ''}
                 </option>
               ))}
             </select>

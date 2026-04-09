@@ -568,50 +568,25 @@ export default function Providers() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Provider Type</label>
-                <div className="flex gap-4">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={formState.providerType === 'comfyui_direct'}
-                      onChange={() =>
-                        setFormState((prev) => ({
-                          ...prev,
-                          providerType: 'comfyui_direct',
-                          apiKey: '',
-                        }))
-                      }
-                    />
-                    ComfyUI Direct
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={formState.providerType === 'runpod'}
-                      onChange={() =>
-                        setFormState((prev) => ({
-                          ...prev,
-                          providerType: 'runpod',
-                        }))
-                      }
-                    />
-                    RunPod
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="radio"
-                      checked={formState.providerType === 'poe'}
-                      onChange={() =>
-                        setFormState((prev) => ({
-                          ...prev,
-                          providerType: 'poe',
-                          apiKey: '',
-                        }))
-                      }
-                    />
-                    Poe
-                  </label>
-                </div>
+                <label htmlFor="provider-type" className="text-sm font-medium">
+                  Provider Type
+                </label>
+                <select
+                  id="provider-type"
+                  className="w-full border rounded-md px-3 py-2"
+                  value={formState.providerType}
+                  onChange={(e) =>
+                    setFormState((prev) => ({
+                      ...prev,
+                      providerType: e.target.value as 'comfyui_direct' | 'runpod' | 'poe',
+                      apiKey: e.target.value === 'poe' ? '' : prev.apiKey,
+                    }))
+                  }
+                >
+                  <option value="comfyui_direct">ComfyUI Direct</option>
+                  <option value="runpod">RunPod</option>
+                  <option value="poe">Poe</option>
+                </select>
               </div>
 
               {formState.providerType === 'comfyui_direct' ? (
@@ -802,6 +777,10 @@ export default function Providers() {
                       }
                     />
                   </div>
+                  
+                  {formState.id && (
+                    <PoeModelsSection providerId={formState.id} />
+                  )}
                 </>
               ) : null}
 
@@ -873,6 +852,140 @@ export default function Providers() {
             </form>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+interface PoeModelsSectionProps {
+  providerId: string
+}
+
+function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
+  const queryClient = useQueryClient()
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newModel, setNewModel] = useState({ name: '', model_id: '', modality: 'video' as const })
+  const [error, setError] = useState('')
+
+  const { data: models, isLoading } = useQuery({
+    queryKey: ['poe-models', providerId],
+    queryFn: () => providersApi.listPoeModels(providerId),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: (data: { name: string; model_id: string; modality: string }) =>
+      providersApi.createPoeModel(providerId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['poe-models', providerId] })
+      setShowAddForm(false)
+      setNewModel({ name: '', model_id: '', modality: 'video' })
+      setError('')
+    },
+    onError: (err) => setError(getErrorMessage(err)),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (modelId: string) => providersApi.deletePoeModel(providerId, modelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['poe-models', providerId] })
+    },
+  })
+
+  const handleAdd = () => {
+    if (!newModel.name.trim() || !newModel.model_id.trim()) {
+      setError('Name and Model ID are required')
+      return
+    }
+    createMutation.mutate(newModel)
+  }
+
+  return (
+    <div className="space-y-4 border-t pt-4 mt-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">Poe Models</h3>
+        <Button variant="outline" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
+          <Plus className="h-4 w-4 mr-1" /> Add Model
+        </Button>
+      </div>
+
+      {showAddForm && (
+        <div className="flex gap-2 items-end p-3 bg-muted/50 rounded-md">
+          <div className="flex-1">
+            <label className="text-xs">Name</label>
+            <input
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={newModel.name}
+              onChange={(e) => setNewModel((p) => ({ ...p, name: e.target.value }))}
+              placeholder="Veo 3.1"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs">Model ID</label>
+            <input
+              className="w-full border rounded px-2 py-1 text-sm"
+              value={newModel.model_id}
+              onChange={(e) => setNewModel((p) => ({ ...p, model_id: e.target.value }))}
+              placeholder="Veo-3.1"
+            />
+          </div>
+          <div>
+            <label className="text-xs">Type</label>
+            <select
+              className="border rounded px-2 py-1 text-sm"
+              value={newModel.modality}
+              onChange={(e) => setNewModel((p) => ({ ...p, modality: e.target.value as 'video' | 'image' | 'text' }))}
+            >
+              <option value="video">Video</option>
+              <option value="image">Image</option>
+              <option value="text">Text</option>
+            </select>
+          </div>
+          <Button size="sm" onClick={handleAdd} disabled={createMutation.isPending}>
+            Add
+          </Button>
+        </div>
+      )}
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      ) : models?.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No models configured.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left py-2">Name</th>
+              <th className="text-left py-2">Model ID</th>
+              <th className="text-left py-2">Type</th>
+              <th className="text-left py-2">Active</th>
+              <th className="text-right py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {models?.map((model) => (
+              <tr key={model.id} className="border-b">
+                <td className="py-2">{model.name}</td>
+                <td className="py-2 font-mono text-xs">{model.model_id}</td>
+                <td className="py-2 capitalize">{model.modality}</td>
+                <td className="py-2">{model.is_active ? 'Yes' : 'No'}</td>
+                <td className="py-2 text-right">
+                  <button
+                    className="text-red-500 hover:text-red-700"
+                    onClick={() => {
+                      if (confirm('Delete this model?')) {
+                        deleteMutation.mutate(model.id)
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   )

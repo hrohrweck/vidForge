@@ -137,6 +137,29 @@ export interface ProviderStatus {
   current_daily_spend: number
 }
 
+export interface PoeModel {
+  id: string
+  provider_id: string
+  name: string
+  model_id: string
+  modality: 'video' | 'image' | 'text'
+  is_active: boolean
+  created_at: string
+}
+
+export interface PoeModelCreate {
+  name: string
+  model_id: string
+  modality: 'video' | 'image' | 'text'
+}
+
+export interface PoeModelUpdate {
+  name?: string
+  model_id?: string
+  modality?: 'video' | 'image' | 'text'
+  is_active?: boolean
+}
+
 export interface GroupCreateRequest {
   name: string
   description?: string
@@ -217,7 +240,9 @@ export interface Style {
 export interface VideoModel {
   id: string
   name: string
-  provider: 'wan' | 'ltx'
+  display_name: string
+  provider: 'wan' | 'ltx' | 'poe'
+  modality: 'video' | 'image'
   capabilities: string[]
   max_duration: number
   max_resolution: [number, number]
@@ -335,6 +360,21 @@ export const providersApi = {
       { daily_budget_limit }
     )
     return response.data
+  },
+  listPoeModels: async (providerId: string) => {
+    const response = await api.get<PoeModel[]>(`/providers/${providerId}/poe-models`)
+    return response.data
+  },
+  createPoeModel: async (providerId: string, data: PoeModelCreate) => {
+    const response = await api.post<PoeModel>(`/providers/${providerId}/poe-models`, data)
+    return response.data
+  },
+  updatePoeModel: async (providerId: string, modelId: string, data: PoeModelUpdate) => {
+    const response = await api.patch<PoeModel>(`/providers/${providerId}/poe-models/${modelId}`, data)
+    return response.data
+  },
+  deletePoeModel: async (providerId: string, modelId: string) => {
+    await api.delete(`/providers/${providerId}/poe-models/${modelId}`)
   },
 }
 
