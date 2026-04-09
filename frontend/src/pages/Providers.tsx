@@ -864,7 +864,7 @@ interface PoeModelsSectionProps {
 function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
   const queryClient = useQueryClient()
   const [showAddForm, setShowAddForm] = useState(false)
-  const [newModel, setNewModel] = useState({ name: '', model_id: '', modality: 'video' as const })
+  const [newModel, setNewModel] = useState<{ name: string; model_id: string; modality: 'video' | 'image' | 'text' }>({ name: '', model_id: '', modality: 'video' })
   const [error, setError] = useState('')
 
   const { data: models, isLoading } = useQuery({
@@ -873,7 +873,7 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; model_id: string; modality: string }) =>
+    mutationFn: (data: { name: string; model_id: string; modality: 'video' | 'image' | 'text' }) =>
       providersApi.createPoeModel(providerId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['poe-models', providerId] })
@@ -933,7 +933,10 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
             <select
               className="border rounded px-2 py-1 text-sm"
               value={newModel.modality}
-              onChange={(e) => setNewModel((p) => ({ ...p, modality: e.target.value as 'video' | 'image' | 'text' }))}
+              onChange={(e) => {
+                const value = e.target.value as 'video' | 'image' | 'text'
+                setNewModel((p) => ({ ...p, modality: value }))
+              }}
             >
               <option value="video">Video</option>
               <option value="image">Image</option>

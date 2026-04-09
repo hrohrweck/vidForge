@@ -184,7 +184,7 @@ export interface Job {
   error_message: string | null
   provider_id: string | null
   provider_type: string | null
-  provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
+  provider_preference: string
   model_preference: string | null
   estimated_cost: number | null
   actual_cost: number | null
@@ -197,7 +197,7 @@ export interface CreateJobRequest {
   template_id?: string
   input_data?: Record<string, unknown>
   auto_start?: boolean
-  provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
+  provider_preference?: string
   model_preference?: string
 }
 
@@ -205,7 +205,7 @@ export interface BatchJobRequest {
   template_id: string
   jobs: Record<string, unknown>[]
   auto_start?: boolean
-  provider_preference?: 'auto' | 'comfyui_direct' | 'runpod'
+  provider_preference?: string
   model_preference?: string
 }
 
