@@ -397,24 +397,42 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
                     )
                     return {"status": "completed", "job_id": job_id}
 
-                run_result_video, run_result_preview = await _run_runpod_job(
-                    job_id, workflow, provider_instance
-                )
+                elif provider_record.provider_type == "runpod":
+                    run_result_video, run_result_preview = await _run_runpod_job(
+                        job_id, workflow, provider_instance
+                    )
 
-                if run_result_video.startswith(settings.storage_path):
-                    relative_video = str(Path(run_result_video).relative_to(settings.storage_path))
-                else:
-                    relative_video = str(run_result_video)
-
-                if run_result_preview:
-                    if run_result_preview.startswith(settings.storage_path):
-                        relative_preview = str(
-                            Path(run_result_preview).relative_to(settings.storage_path)
-                        )
+                    if run_result_video.startswith(settings.storage_path):
+                        relative_video = str(Path(run_result_video).relative_to(settings.storage_path))
                     else:
-                        relative_preview = str(run_result_preview)
+                        relative_video = str(run_result_video)
+
+                    if run_result_preview:
+                        if run_result_preview.startswith(settings.storage_path):
+                            relative_preview = str(
+                                Path(run_result_preview).relative_to(settings.storage_path)
+                            )
+                        else:
+                            relative_preview = str(run_result_preview)
+                    else:
+                        relative_preview = None
+
+                    actual_cost = _as_decimal(estimated_cost)
+                    if actual_cost and provider_record.provider_type == "runpod":
+                        await router.budget_tracker.record_spend(provider_record.id, actual_cost)
+
+                    await update_job_status(
+                        job_uuid,
+                        "completed",
+                        100,
+                        output_path=relative_video,
+                        preview_path=relative_preview,
+                        actual_cost=actual_cost,
+                    )
+                    return {"status": "completed", "job_id": job_id}
+
                 else:
-                    relative_preview = None
+                    raise ValueError(f"Unknown provider type: {provider_record.provider_type}")
 
                 actual_cost = _as_decimal(estimated_cost)
                 duration_seconds = max(1, int((datetime.utcnow() - started_at).total_seconds()))
