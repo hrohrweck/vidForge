@@ -90,7 +90,8 @@ def progress_callback_wrapper(job_id: str, progress: int, message: str) -> None:
 
 async def async_progress_callback(job_id: str, progress: int, message: str) -> None:
     """Async wrapper for progress callback."""
-    progress_callback_wrapper(job_id, progress, message)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, progress_callback_wrapper, job_id, progress, message)
 
 
 async def update_job_status(
@@ -187,7 +188,7 @@ async def _run_local_job(
         job_id=job_id,
         template_name=template_name,
         input_data=input_data,
-        progress_callback=lambda p, m: progress_callback_wrapper(job_id, p, m),
+        progress_callback=lambda p, m: async_progress_callback(job_id, p, m),
     )
 
     relative_video = str(Path(video_path).relative_to(settings.storage_path))
@@ -349,14 +350,21 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
 
                 started_at = datetime.utcnow()
 
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Job {job_id}: provider_type={provider_record.provider_type}, provider_id={provider_record.id}")
+
                 if provider_record.provider_type == "comfyui_direct":
+                    logger.info(f"Job {job_id}: Creating semaphore")
                     semaphore = ComfyUISemaphore(
                         key=f"{COMFYUI_SEMAPHORE_KEY}:{provider_record.id}",
                         max_concurrent=provider_record.config.get(
                             "max_concurrent_jobs", COMFYUI_MAX_CONCURRENT
                         ),
                     )
+                    logger.info(f"Job {job_id}: Acquiring semaphore")
                     acquired = await semaphore.acquire(job_id, timeout=3600)
+                    logger.info(f"Job {job_id}: Semaphore acquired: {acquired}")
                     if not acquired:
                         await update_job_status(
                             job_uuid,
