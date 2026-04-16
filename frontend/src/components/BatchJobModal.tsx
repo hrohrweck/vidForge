@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { jobsApi, templatesApi, modelsApi, Template, type VideoModel } from '../api/client'
+import { jobsApi, templatesApi, modelsApi, providersApi, Template, type VideoModel, type Provider } from '../api/client'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
@@ -16,7 +16,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [jobInputs, setJobInputs] = useState<string>('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
-  const [providerPreference, setProviderPreference] = useState<'auto' | 'comfyui_direct' | 'runpod'>('auto')
+  const [providerPreference, setProviderPreference] = useState<string>('auto')
   const [modelPreference, setModelPreference] = useState<string>('')
   
   const queryClient = useQueryClient()
@@ -33,13 +33,29 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
     queryKey: ['models'],
     queryFn: () => modelsApi.list(),
   })
+
+  const { data: providers } = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => providersApi.list(),
+  })
+
+  const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
+  const selectedProvider = activeProviders.find((p: Provider) => p.id === providerPreference)
+  const modelProviderType = selectedProvider ? selectedProvider.provider_type : null
+  
+  const filteredModels = models?.filter((m: VideoModel) => {
+    if (!modelProviderType || modelProviderType === 'poe') return true
+    return modelProviderType === 'comfyui_direct' || modelProviderType === 'runpod'
+      ? (m.provider === 'wan' || m.provider === 'ltx')
+      : true
+  }) || []
   
   const createBatchMutation = useMutation({
     mutationFn: async (data: {
       template_id: string
       jobs: Record<string, unknown>[]
       auto_start: boolean
-      provider_preference: 'auto' | 'comfyui_direct' | 'runpod'
+      provider_preference: string
       model_preference?: string
     }) => {
       return jobsApi.createBatch(data)
@@ -145,18 +161,22 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
               id="batch-provider"
               className="w-full mt-1 border rounded px-3 py-2"
               value={providerPreference}
-              onChange={(e) =>
-                setProviderPreference(e.target.value as 'auto' | 'comfyui_direct' | 'runpod')
-              }
+              onChange={(e) => {
+                setProviderPreference(e.target.value)
+                setModelPreference('')
+              }}
             >
               <option value="auto">Auto</option>
-              <option value="comfyui_direct">ComfyUI Direct</option>
-              <option value="runpod">RunPod</option>
+              {activeProviders.map((provider: Provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name} ({provider.provider_type})
+                </option>
+              ))}
             </select>
           </div>
 
           <div>
-            <Label htmlFor="batch-model">Video Model</Label>
+            <Label htmlFor="batch-model">Generation Model</Label>
             <select
               id="batch-model"
               className="w-full mt-1 border rounded px-3 py-2"
@@ -164,10 +184,11 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
               onChange={(e) => setModelPreference(e.target.value)}
             >
               <option value="">Use template default</option>
-              {models?.map((model: VideoModel) => (
+              {filteredModels.map((model: VideoModel) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} ({model.provider.toUpperCase()})
+                  {model.display_name} ({model.provider.toUpperCase()})
                   {model.distilled ? ' - Fast' : ''}
+                  {model.modality === 'image' ? ' - Image' : ''}
                 </option>
               ))}
             </select>

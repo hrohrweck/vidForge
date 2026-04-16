@@ -278,7 +278,7 @@ export const jobsApi = {
     templateId: string,
     file: File,
     autoStart: boolean = true,
-    providerPreference: 'auto' | 'comfyui_direct' | 'runpod' = 'auto',
+    providerPreference: string = 'auto',
     modelPreference?: string
   ) => {
     const formData = new FormData()

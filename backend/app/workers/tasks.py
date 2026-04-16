@@ -226,34 +226,41 @@ async def _run_poe_job(
     provider_instance,
     model_preference: str | None,
     input_data: dict[str, object],
+    db: AsyncSession,
 ) -> str:
-    from app.services.model_registry import MODELS
+    from sqlalchemy import select
+    from app.database import PoeModel
 
     prompt = input_data.get("prompt", "")
     negative_prompt = input_data.get("negative_prompt", "")
 
-    selected_model = None
-    model_id = model_preference or "poe_veo31"
+    result = await db.execute(
+        select(PoeModel).where(
+            PoeModel.provider_id == provider_instance.provider_id,
+            PoeModel.is_active == True,
+        )
+    )
+    available_models = list(result.scalars().all())
 
-    if model_id in MODELS:
-        selected_model = MODELS[model_id]
-    else:
-        for model in MODELS.values():
-            if model.provider == "poe" and model_id in model.id:
-                selected_model = model
+    if not available_models:
+        raise ValueError(f"No Poe models configured for provider {provider_instance.provider_id}")
+
+    selected_model = None
+    if model_preference:
+        for m in available_models:
+            if m.id == UUID(model_preference) or m.model_id == model_preference:
+                selected_model = m
                 break
 
     if not selected_model:
-        selected_model = MODELS.get("poe_veo31")
+        selected_model = available_models[0]
 
-    poe_model_id = getattr(selected_model, "poe_model_id", "Veo-3.1")
-    capabilities = getattr(selected_model, "capabilities", [])
+    poe_model_id = selected_model.model_id
+    is_image = selected_model.modality == "image"
 
     duration = input_data.get("duration", 10)
     aspect_ratio = input_data.get("aspect_ratio", "16:9")
     resolution = input_data.get("resolution", "1080p")
-
-    is_image = "image-generation" in capabilities
 
     output_path = Path(settings.storage_path) / "output" / job_id
 
@@ -350,21 +357,14 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
 
                 started_at = datetime.utcnow()
 
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Job {job_id}: provider_type={provider_record.provider_type}, provider_id={provider_record.id}")
-
                 if provider_record.provider_type == "comfyui_direct":
-                    logger.info(f"Job {job_id}: Creating semaphore")
                     semaphore = ComfyUISemaphore(
                         key=f"{COMFYUI_SEMAPHORE_KEY}:{provider_record.id}",
                         max_concurrent=provider_record.config.get(
                             "max_concurrent_jobs", COMFYUI_MAX_CONCURRENT
                         ),
                     )
-                    logger.info(f"Job {job_id}: Acquiring semaphore")
                     acquired = await semaphore.acquire(job_id, timeout=3600)
-                    logger.info(f"Job {job_id}: Semaphore acquired: {acquired}")
                     if not acquired:
                         await update_job_status(
                             job_uuid,
@@ -395,6 +395,7 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
                         provider_instance,
                         model_preference,
                         input_data,
+                        db,
                     )
 
                     await update_job_status(

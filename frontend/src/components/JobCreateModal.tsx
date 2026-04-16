@@ -47,11 +47,14 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
   
   const selectedProvider = activeProviders.find((p: Provider) => p.id === providerPreference)
-
+  
   const modelProviderType = selectedProvider ? selectedProvider.provider_type : null
   
   const filteredModels = models?.filter((m: VideoModel) => {
-    if (!modelProviderType || modelProviderType === 'poe') return true
+    if (!modelProviderType) return true
+    if (modelProviderType === 'poe') {
+      return m.provider === 'poe'
+    }
     return modelProviderType === 'comfyui_direct' || modelProviderType === 'runpod'
       ? (m.provider === 'wan' || m.provider === 'ltx')
       : true
