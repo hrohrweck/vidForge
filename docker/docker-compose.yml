@@ -45,18 +45,14 @@ services:
     restart: on-failure
 
   ollama:
-    build:
-      context: ./ollama
-      dockerfile: Dockerfile
+    image: ollama/ollama:rocm
     ports:
       - "11434:11434"
     volumes:
-      - ${OLLAMA_MODELS_PATH}:/root/.ollama
+      - ollama-data:/root/.ollama
     devices:
       - /dev/kfd
       - /dev/dri
-    group_add:
-      - video
     environment:
       - HSA_OVERRIDE_GFX_VERSION=11.5.1
       - OLLAMA_HOST=0.0.0.0
@@ -98,3 +94,4 @@ volumes:
   postgres-data:
   redis-data:
   vidforge-storage:
+  ollama-data:
