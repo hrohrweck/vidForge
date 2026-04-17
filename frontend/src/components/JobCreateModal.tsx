@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2 } from 'lucide-react'
 import { jobsApi, templatesApi, modelsApi, providersApi, type CreateJobRequest, type Template, type VideoModel, type Provider } from '../api/client'
@@ -23,6 +24,7 @@ interface TemplateInput {
 
 export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
@@ -80,9 +82,14 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
 
   const createMutation = useMutation({
     mutationFn: (data: CreateJobRequest) => jobsApi.create(data),
-    onSuccess: () => {
+    onSuccess: (job) => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      onClose()
+      const workflowType = selectedTemplate?.config?.workflow_type
+      if (workflowType === 'scene_based') {
+        navigate(`/editor/music/${job.id}`)
+      } else {
+        onClose()
+      }
     },
   })
 

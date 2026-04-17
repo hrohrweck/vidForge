@@ -58,6 +58,21 @@ class JobRouter:
         result = await self.db.execute(select(Provider).where(Provider.id == provider_id))
         return result.scalar_one_or_none()
 
+    async def iterate_providers(
+        self,
+        provider_types: list[str] | None = None,
+        active_only: bool = True,
+    ):
+        query = select(Provider)
+        if active_only:
+            query = query.where(Provider.is_active == True)  # noqa: E712
+        if provider_types:
+            query = query.where(Provider.provider_type.in_(provider_types))
+        query = query.order_by(Provider.priority.desc())
+        result = await self.db.execute(query)
+        for row in result.scalars():
+            yield row
+
     async def select_provider(
         self,
         preference: str = "auto",

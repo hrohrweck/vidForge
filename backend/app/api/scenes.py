@@ -55,6 +55,12 @@ class SceneResponse(BaseModel):
     thumbnail_path: str | None
     generated_video_path: str | None
     status: str
+    image_provider_id: UUID | None = None
+    video_provider_id: UUID | None = None
+    image_prompt_enhanced: str | None = None
+    duration: float | None = None
+    model_used: str | None = None
+    error_message: str | None = None
     created_at: Any
 
     class Config:
@@ -62,7 +68,7 @@ class SceneResponse(BaseModel):
 
 
 class JobStageUpdate(BaseModel):
-    stage: str = Field(..., pattern="^(planning|generating|rendering|completed)$")
+    stage: str = Field(..., pattern="^(planning|planned|generating_images|images_ready|generating_videos|videos_ready|rendering|completed)$")
 
 
 @router.post("/{job_id}/lyrics/extract")
@@ -346,3 +352,197 @@ async def regenerate_scene_prompts(
     await db.commit()
 
     return {"scenes": [{"id": str(s.id), "image_prompt": s.image_prompt} for s in updated_scenes]}
+
+
+class SceneGenerateRequest(BaseModel):
+    image_provider_id: UUID | None = None
+    video_provider_id: UUID | None = None
+    model_preference: str | None = None
+
+
+class ExportRequest(BaseModel):
+    audio_file: str | None = None
+    background_music: str | None = None
+    audio_volume: float = 1.0
+    background_music_volume: float = 0.3
+    transition_type: str = "cut"
+
+
+@router.post("/{job_id}/scenes/generate-image/{scene_id}")
+async def generate_scene_image(
+    job_id: UUID,
+    scene_id: UUID,
+    request: SceneGenerateRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(VideoScene).where(VideoScene.id == scene_id, VideoScene.job_id == job_id)
+    )
+    scene = result.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    if request and request.image_provider_id:
+        job.image_provider_id = request.image_provider_id
+        await db.commit()
+
+    from app.workers.tasks import generate_scene_media
+    generate_scene_media.delay(str(job_id), str(scene_id), "image")
+
+    scene.status = "generating"
+    await db.commit()
+
+    return {"status": "queued", "scene_id": str(scene_id), "media_type": "image"}
+
+
+@router.post("/{job_id}/scenes/generate-video/{scene_id}")
+async def generate_scene_video(
+    job_id: UUID,
+    scene_id: UUID,
+    request: SceneGenerateRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(VideoScene).where(VideoScene.id == scene_id, VideoScene.job_id == job_id)
+    )
+    scene = result.scalar_one_or_none()
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    if request and request.video_provider_id:
+        job.video_provider_id = request.video_provider_id
+        await db.commit()
+
+    from app.workers.tasks import generate_scene_media
+    generate_scene_media.delay(str(job_id), str(scene_id), "video")
+
+    scene.status = "generating"
+    await db.commit()
+
+    return {"status": "queued", "scene_id": str(scene_id), "media_type": "video"}
+
+
+@router.post("/{job_id}/scenes/generate-all-images")
+async def generate_all_images(
+    job_id: UUID,
+    request: SceneGenerateRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if request and request.image_provider_id:
+        job.image_provider_id = request.image_provider_id
+        await db.commit()
+
+    from app.workers.tasks import process_scene_video_job
+    process_scene_video_job.delay(str(job_id), "generating_images")
+
+    job.stage = "generating_images"
+    await db.commit()
+
+    return {"status": "queued", "job_id": str(job_id), "stage": "generating_images"}
+
+
+@router.post("/{job_id}/scenes/generate-all-videos")
+async def generate_all_videos(
+    job_id: UUID,
+    request: SceneGenerateRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if request and request.video_provider_id:
+        job.video_provider_id = request.video_provider_id
+        await db.commit()
+
+    from app.workers.tasks import process_scene_video_job
+    process_scene_video_job.delay(str(job_id), "generating_videos")
+
+    job.stage = "generating_videos"
+    await db.commit()
+
+    return {"status": "queued", "job_id": str(job_id), "stage": "generating_videos"}
+
+
+@router.post("/{job_id}/export")
+async def export_job(
+    job_id: UUID,
+    request: ExportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    options = {
+        "audio_file": request.audio_file,
+        "background_music": request.background_music,
+        "audio_volume": request.audio_volume,
+        "background_music_volume": request.background_music_volume,
+        "transition_type": request.transition_type,
+    }
+
+    job.export_options = options
+    job.stage = "rendering"
+    await db.commit()
+
+    from app.workers.tasks import export_scene_video
+    export_scene_video.delay(str(job_id), options)
+
+    return {"status": "queued", "job_id": str(job_id), "stage": "rendering"}
+
+
+@router.get("/{job_id}/export-options")
+async def get_export_options(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(VideoScene).where(VideoScene.job_id == job_id).order_by(VideoScene.scene_number)
+    )
+    scenes = result.scalars().all()
+
+    completed_scenes = sum(1 for s in scenes if s.generated_video_path)
+    total_scenes = len(scenes)
+
+    return {
+        "job_id": str(job_id),
+        "audio_file": job.input_data.get("audio_file") if job.input_data else None,
+        "can_export": completed_scenes == total_scenes and total_scenes > 0,
+        "completed_scenes": completed_scenes,
+        "total_scenes": total_scenes,
+        "transition_types": ["cut", "crossfade", "dissolve"],
+        "default_options": {
+            "audio_volume": 1.0,
+            "background_music_volume": 0.3,
+            "transition_type": "cut",
+        },
+    }

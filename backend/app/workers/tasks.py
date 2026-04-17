@@ -587,3 +587,620 @@ def merge_videos(job_id: str, segment_paths: list[str]) -> dict:
         }
 
     return asyncio.run(run())
+
+
+@celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
+def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
+    from app.database import VideoScene
+    from app.services.music_video_planner import MusicVideoPlanner
+
+    async def run() -> dict:
+        session_factory = get_db_session_factory()
+        async with session_factory() as db:
+            result = await db.execute(select(Job).where(Job.id == job_id))
+            job = result.scalar_one_or_none()
+            if not job:
+                return {"status": "failed", "error": "Job not found"}
+
+            await update_job_status(
+                job.id,
+                "processing",
+                progress=0,
+            )
+
+            if stage == "planning":
+                return await _stage_planning(db, job)
+            elif stage == "generating_images":
+                return await _stage_generating_images(db, job)
+            elif stage == "generating_videos":
+                return await _stage_generating_videos(db, job)
+            elif stage == "rendering":
+                return await _stage_rendering(db, job)
+            else:
+                return {"status": "failed", "error": f"Unknown stage: {stage}"}
+
+    return asyncio.run(run())
+
+
+async def _stage_planning(db: AsyncSession, job: Job) -> dict:
+    from app.database import VideoScene
+    from app.services.music_video_planner import MusicVideoPlanner
+
+    broadcast_update(str(job.id), {
+        "stage": "planning",
+        "progress": 10,
+        "status": "Processing lyrics...",
+    })
+
+    input_data = job.input_data or {}
+    audio_file = input_data.get("audio_file")
+    style = input_data.get("style", "realistic")
+    duration = input_data.get("duration", 30)
+
+    lyrics = input_data.get("lyrics")
+
+    planner = MusicVideoPlanner()
+    scenes = await planner.plan_music_video(
+        lyrics=lyrics,
+        duration=duration,
+        style=style,
+    )
+
+    broadcast_update(str(job.id), {
+        "progress": 50,
+        "status": f"Creating {len(scenes)} scenes...",
+    })
+
+    existing = await db.execute(select(VideoScene).where(VideoScene.job_id == job.id))
+    for scene in existing.scalars():
+        await db.delete(scene)
+
+    for i, scene_data in enumerate(scenes):
+        scene = VideoScene(
+            job_id=job.id,
+            scene_number=i + 1,
+            start_time=scene_data.get("start_time", 0),
+            end_time=scene_data.get("end_time", 5),
+            lyrics_segment=scene_data.get("lyrics_segment", ""),
+            visual_description=scene_data.get("visual_description", ""),
+            image_prompt=scene_data.get("image_prompt", ""),
+            mood=scene_data.get("mood", "neutral"),
+            camera_movement=scene_data.get("camera_movement", "static"),
+            status="pending",
+        )
+        db.add(scene)
+
+    job.stage = "planned"
+    job.workflow_type = "scene_based"
+    await db.commit()
+
+    broadcast_update(str(job.id), {
+        "stage": "planned",
+        "progress": 100,
+        "status": "Planning complete. Review scenes and start generation.",
+    })
+
+    return {
+        "status": "completed",
+        "job_id": str(job.id),
+        "stage": "planned",
+        "scene_count": len(scenes),
+    }
+
+
+async def _stage_generating_images(db: AsyncSession, job: Job) -> dict:
+    from app.database import VideoScene
+    import app.services.media_generator as media_generator
+
+    scenes_result = await db.execute(
+        select(VideoScene)
+        .where(VideoScene.job_id == job.id)
+        .order_by(VideoScene.scene_number)
+    )
+    scenes = scenes_result.scalars().all()
+
+    total = len(scenes)
+    completed = 0
+
+    for scene in scenes:
+        if scene.reference_image_path:
+            completed += 1
+            continue
+
+        broadcast_update(str(job.id), {
+            "stage": "generating_images",
+            "progress": int((completed / total) * 100),
+            "status": f"Generating image for scene {scene.scene_number}/{total}...",
+            "scene_id": str(scene.id),
+        })
+
+        try:
+            prompt = scene.image_prompt or scene.visual_description or scene.lyrics_segment or ""
+            if not prompt:
+                prompt = f"Scene {scene.scene_number}"
+
+            image_path, media_id, provider_id = await media_generator.generate_image(
+                db=db,
+                job=job,
+                prompt=prompt,
+                scene_number=scene.scene_number,
+                provider_id=job.image_provider_id,
+            )
+
+            scene.reference_image_path = image_path
+            scene.status = "image_ready"
+            scene.image_provider_id = provider_id
+
+            thumbnail_dir = Path(settings.storage_path) / "output" / str(job.id) / f"scene_{scene.scene_number:03d}"
+            thumbnail_path = thumbnail_dir / "thumbnail.png"
+            if thumbnail_path.exists():
+                scene.thumbnail_path = str(thumbnail_path.relative_to(settings.storage_path))
+
+        except Exception as e:
+            scene.status = "failed"
+            scene.error_message = str(e)
+
+        await db.commit()
+        completed += 1
+
+    job.stage = "images_ready"
+    await db.commit()
+
+    broadcast_update(str(job.id), {
+        "stage": "images_ready",
+        "progress": 100,
+        "status": "Image generation complete.",
+    })
+
+    return {
+        "status": "completed",
+        "job_id": str(job.id),
+        "stage": "images_ready",
+    }
+
+
+async def _stage_generating_videos(db: AsyncSession, job: Job) -> dict:
+    from app.database import VideoScene
+    import app.services.media_generator as media_generator
+
+    scenes_result = await db.execute(
+        select(VideoScene)
+        .where(VideoScene.job_id == job.id)
+        .order_by(VideoScene.scene_number)
+    )
+    scenes = scenes_result.scalars().all()
+
+    total = len(scenes)
+    completed = 0
+
+    input_data = job.input_data or {}
+    aspect_ratio = input_data.get("aspect_ratio", "16:9")
+
+    for scene in scenes:
+        if scene.generated_video_path:
+            completed += 1
+            continue
+
+        broadcast_update(str(job.id), {
+            "stage": "generating_videos",
+            "progress": int((completed / total) * 100),
+            "status": f"Generating video for scene {scene.scene_number}/{total}...",
+            "scene_id": str(scene.id),
+        })
+
+        try:
+            duration = int(scene.end_time - scene.start_time)
+            duration = max(2, min(duration, 30))
+
+            prompt = scene.visual_description or scene.lyrics_segment or ""
+
+            video_path, media_id, provider_id, actual_duration = await media_generator.generate_video(
+                db=db,
+                job=job,
+                prompt=prompt,
+                scene_number=scene.scene_number,
+                reference_image_path=scene.reference_image_path,
+                provider_id=job.video_provider_id,
+                duration=duration,
+                aspect_ratio=aspect_ratio,
+            )
+
+            scene.generated_video_path = video_path
+            scene.status = "video_ready"
+            scene.video_provider_id = provider_id
+            scene.duration = actual_duration
+
+            if not scene.thumbnail_path:
+                thumbnail_dir = Path(settings.storage_path) / "output" / str(job.id) / f"scene_{scene.scene_number:03d}"
+                thumbnail_path = thumbnail_dir / "thumbnail.png"
+                if thumbnail_path.exists():
+                    scene.thumbnail_path = str(thumbnail_path.relative_to(settings.storage_path))
+
+        except Exception as e:
+            scene.status = "failed"
+            scene.error_message = str(e)
+
+        await db.commit()
+        completed += 1
+
+    job.stage = "videos_ready"
+    await db.commit()
+
+    broadcast_update(str(job.id), {
+        "stage": "videos_ready",
+        "progress": 100,
+        "status": "Video generation complete.",
+    })
+
+    return {
+        "status": "completed",
+        "job_id": str(job.id),
+        "stage": "videos_ready",
+    }
+
+
+async def _stage_rendering(db: AsyncSession, job: Job) -> dict:
+    from app.database import VideoScene
+    from app.services.video_processor import VideoProcessor
+
+    broadcast_update(str(job.id), {
+        "stage": "rendering",
+        "progress": 10,
+        "status": "Preparing scene videos...",
+    })
+
+    scenes_result = await db.execute(
+        select(VideoScene)
+        .where(VideoScene.job_id == job.id, VideoScene.generated_video_path.isnot(None))
+        .order_by(VideoScene.scene_number)
+    )
+    scenes = list(scenes_result.scalars().all())
+
+    if not scenes:
+        return {"status": "failed", "error": "No generated videos to render"}
+
+    segment_paths = []
+    for scene in scenes:
+        full_path = Path(settings.storage_path) / scene.generated_video_path
+        if full_path.exists():
+            segment_paths.append(str(full_path))
+
+    broadcast_update(str(job.id), {
+        "progress": 30,
+        "status": "Merging scene videos...",
+    })
+
+    output_dir = Path(settings.storage_path) / "output" / str(job.id)
+    merged_path = output_dir / "merged.mp4"
+
+    if len(segment_paths) == 1:
+        import shutil
+        shutil.copy(segment_paths[0], merged_path)
+    else:
+        await VideoProcessor.merge_videos(segment_paths, str(merged_path))
+
+    broadcast_update(str(job.id), {
+        "progress": 60,
+        "status": "Adding audio...",
+    })
+
+    input_data = job.input_data or {}
+    audio_file = input_data.get("audio_file")
+    export_opts = job.export_options or {}
+
+    final_path = output_dir / "final.mp4"
+
+    if audio_file:
+        audio_path = Path(settings.storage_path) / audio_file
+        if audio_path.exists():
+            audio_volume = export_opts.get("audio_volume", 1.0)
+            await VideoProcessor.add_audio(
+                str(merged_path),
+                str(audio_path),
+                str(final_path),
+                audio_volume=audio_volume,
+            )
+        else:
+            import shutil
+            shutil.copy(str(merged_path), str(final_path))
+    else:
+        import shutil
+        shutil.copy(str(merged_path), str(final_path))
+
+    broadcast_update(str(job.id), {
+        "progress": 90,
+        "status": "Generating preview...",
+    })
+
+    preview_path = output_dir / "preview.mp4"
+    try:
+        await VideoProcessor.generate_preview(
+            str(final_path),
+            str(preview_path),
+            width=854,
+            height=480,
+            fps=15,
+            quality=28,
+        )
+    except Exception:
+        pass
+
+    job.output_path = str(final_path.relative_to(settings.storage_path))
+    job.preview_path = str(preview_path.relative_to(settings.storage_path))
+    job.stage = "completed"
+    job.status = "completed"
+    await update_job_status(job.id, "completed", 100)
+
+    broadcast_update(str(job.id), {
+        "stage": "completed",
+        "progress": 100,
+        "status": "Render complete!",
+        "output_path": job.output_path,
+    })
+
+    return {
+        "status": "completed",
+        "job_id": str(job.id),
+        "stage": "completed",
+        "output_path": job.output_path,
+    }
+
+
+@celery_app.task(bind=True, time_limit=1800)
+def generate_scene_media(
+    self,
+    job_id: str,
+    scene_id: str,
+    media_type: str = "video",
+) -> dict:
+    async def run() -> dict:
+        session_factory = get_db_session_factory()
+        async with session_factory() as db:
+            from uuid import UUID
+
+            job_uuid = UUID(job_id)
+            scene_uuid = UUID(scene_id)
+
+            result = await db.execute(select(Job).where(Job.id == job_uuid))
+            job = result.scalar_one_or_none()
+            if not job:
+                return {"status": "failed", "error": "Job not found"}
+
+            from app.database import VideoScene
+            result = await db.execute(select(VideoScene).where(VideoScene.id == scene_uuid))
+            scene = result.scalar_one_or_none()
+            if not scene:
+                return {"status": "failed", "error": "Scene not found"}
+
+            broadcast_update(job_id, {
+                "status": f"Generating {media_type}...",
+                "scene_id": scene_id,
+            })
+
+            try:
+                import app.services.media_generator as media_generator
+
+                if media_type == "image":
+                    prompt = scene.image_prompt or scene.visual_description or scene.lyrics_segment or ""
+                    if not prompt:
+                        prompt = f"Scene {scene.scene_number}"
+
+                    image_path, media_id, provider_id = await media_generator.generate_image(
+                        db=db,
+                        job=job,
+                        prompt=prompt,
+                        scene_number=scene.scene_number,
+                        provider_id=job.image_provider_id,
+                    )
+
+                    scene.reference_image_path = image_path
+                    scene.status = "image_ready"
+                    scene.image_provider_id = provider_id
+
+                    broadcast_update(job_id, {
+                        "status": "Image generated",
+                        "scene_id": scene_id,
+                        "reference_image_path": image_path,
+                    })
+
+                elif media_type == "video":
+                    input_data = job.input_data or {}
+                    aspect_ratio = input_data.get("aspect_ratio", "16:9")
+                    duration = int(scene.end_time - scene.start_time)
+                    duration = max(2, min(duration, 30))
+
+                    prompt = scene.visual_description or scene.lyrics_segment or ""
+
+                    video_path, media_id, provider_id, actual_duration = await media_generator.generate_video(
+                        db=db,
+                        job=job,
+                        prompt=prompt,
+                        scene_number=scene.scene_number,
+                        reference_image_path=scene.reference_image_path,
+                        provider_id=job.video_provider_id,
+                        duration=duration,
+                        aspect_ratio=aspect_ratio,
+                    )
+
+                    scene.generated_video_path = video_path
+                    scene.status = "video_ready"
+                    scene.video_provider_id = provider_id
+                    scene.duration = actual_duration
+
+                    broadcast_update(job_id, {
+                        "status": "Video generated",
+                        "scene_id": scene_id,
+                        "generated_video_path": video_path,
+                    })
+                else:
+                    return {"status": "failed", "error": f"Unknown media type: {media_type}"}
+
+                await db.commit()
+                return {
+                    "status": "completed",
+                    "job_id": job_id,
+                    "scene_id": scene_id,
+                    "media_type": media_type,
+                }
+
+            except Exception as e:
+                scene.status = "failed"
+                scene.error_message = str(e)
+                await db.commit()
+
+                broadcast_update(job_id, {
+                    "status": f"Generation failed: {str(e)}",
+                    "scene_id": scene_id,
+                    "error": str(e),
+                })
+
+                return {"status": "failed", "error": str(e)}
+
+    return asyncio.run(run())
+
+
+@celery_app.task(bind=True, time_limit=1800)
+def export_scene_video(
+    self,
+    job_id: str,
+    options: dict | None = None,
+) -> dict:
+    options = options or {}
+
+    async def run() -> dict:
+        session_factory = get_db_session_factory()
+        async with session_factory() as db:
+            job_uuid = UUID(job_id)
+            result = await db.execute(select(Job).where(Job.id == job_uuid))
+            job = result.scalar_one_or_none()
+            if not job:
+                return {"status": "failed", "error": "Job not found"}
+
+            from app.database import VideoScene
+            from app.services.video_processor import VideoProcessor
+
+            broadcast_update(job_id, {
+                "stage": "rendering",
+                "status": "Preparing export...",
+            })
+
+            scenes_result = await db.execute(
+                select(VideoScene)
+                .where(VideoScene.job_id == job.id, VideoScene.generated_video_path.isnot(None))
+                .order_by(VideoScene.scene_number)
+            )
+            scenes = list(scenes_result.scalars().all())
+
+            if not scenes:
+                return {"status": "failed", "error": "No generated videos to export"}
+
+            segment_paths = []
+            for scene in scenes:
+                full_path = Path(settings.storage_path) / scene.generated_video_path
+                if full_path.exists():
+                    segment_paths.append(str(full_path))
+
+            output_dir = Path(settings.storage_path) / "output" / job_id
+            merged_path = output_dir / "merged.mp4"
+
+            broadcast_update(job_id, {"status": "Merging videos..."})
+            if len(segment_paths) == 1:
+                import shutil
+                shutil.copy(segment_paths[0], merged_path)
+            else:
+                await VideoProcessor.merge_videos(segment_paths, str(merged_path))
+
+            audio_volume = options.get("audio_volume", 1.0)
+            background_music_volume = options.get("background_music_volume", 0.0)
+            audio_file = options.get("audio_file")
+            music_file = options.get("background_music")
+
+            final_path = output_dir / "final.mp4"
+
+            if audio_file or music_file:
+                audio_inputs = []
+                audio_streams = []
+
+                if audio_file:
+                    audio_path = Path(settings.storage_path) / audio_file
+                    if audio_path.exists():
+                        audio_inputs.append(str(audio_path))
+
+                if music_file:
+                    music_path = Path(settings.storage_path) / music_file
+                    if music_path.exists():
+                        audio_inputs.append(str(music_path))
+
+                if audio_inputs:
+                    broadcast_update(job_id, {"status": "Mixing audio..."})
+                    if len(audio_inputs) == 1:
+                        await VideoProcessor.add_audio(
+                            str(merged_path),
+                            audio_inputs[0],
+                            str(final_path),
+                            audio_volume=audio_volume,
+                        )
+                    else:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                            combined_audio = tmp.name
+
+                        if len(audio_inputs) == 2:
+                            import subprocess
+                            cmd = [
+                                "ffmpeg", "-y",
+                                "-i", audio_inputs[0], "-i", audio_inputs[1],
+                                "-filter_complex",
+                                f"[0:a]volume={audio_volume}[a];[1:a]volume={background_music_volume}[b];[a][b]amix=inputs=2:duration=longest[a]",
+                                "-map", "[a]",
+                                combined_audio,
+                            ]
+                            subprocess.run(cmd, check=True, capture_output=True)
+
+                        await VideoProcessor.add_audio(
+                            str(merged_path),
+                            combined_audio,
+                            str(final_path),
+                            audio_volume=1.0,
+                        )
+                        Path(combined_audio).unlink(missing_ok=True)
+            else:
+                import shutil
+                shutil.copy(str(merged_path), str(final_path))
+
+            broadcast_update(job_id, {"status": "Generating preview..."})
+            preview_path = output_dir / "preview.mp4"
+            try:
+                await VideoProcessor.generate_preview(
+                    str(final_path),
+                    str(preview_path),
+                    width=854,
+                    height=480,
+                    fps=15,
+                    quality=28,
+                )
+            except Exception:
+                pass
+
+            job.output_path = str(final_path.relative_to(settings.storage_path))
+            job.preview_path = str(preview_path.relative_to(settings.storage_path))
+            job.export_options = options
+            job.stage = "completed"
+            job.status = "completed"
+            await update_job_status(job.id, "completed", 100)
+
+            broadcast_update(job_id, {
+                "stage": "completed",
+                "status": "Export complete!",
+                "output_path": job.output_path,
+                "preview_path": job.preview_path,
+            })
+
+            return {
+                "status": "completed",
+                "job_id": job_id,
+                "output_path": job.output_path,
+                "preview_path": job.preview_path,
+            }
+
+    return asyncio.run(run())

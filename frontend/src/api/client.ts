@@ -188,6 +188,7 @@ export interface Job {
   model_preference: string | null
   estimated_cost: number | null
   actual_cost: number | null
+  workflow_type: string | null
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -445,6 +446,208 @@ export const adminApi = {
 
   getPermissions: async () => {
     const response = await api.get<Permission[]>('/admin/permissions')
+    return response.data
+  },
+}
+
+export interface VideoScene {
+  id: string
+  job_id: string
+  scene_number: number
+  start_time: number
+  end_time: number
+  lyrics_segment: string | null
+  visual_description: string | null
+  image_prompt: string | null
+  mood: string
+  camera_movement: string
+  reference_image_path: string | null
+  thumbnail_path: string | null
+  generated_video_path: string | null
+  status: string
+  image_provider_id: string | null
+  video_provider_id: string | null
+  image_prompt_enhanced: string | null
+  duration: number | null
+  model_used: string | null
+  error_message: string | null
+  created_at: string
+}
+
+export interface LyricsExtractRequest {
+  audio_file_path: string
+}
+
+export interface ManualLyricsRequest {
+  lyrics_text: string
+  duration: number
+}
+
+export interface ScenePlanRequest {
+  lyrics_data: Record<string, unknown>
+  duration: number
+  style: string
+}
+
+export interface SceneUpdate {
+  start_time?: number
+  end_time?: number
+  lyrics_segment?: string
+  visual_description?: string
+  image_prompt?: string
+  mood?: string
+  camera_movement?: string
+  reference_image_path?: string
+}
+
+export interface SceneGenerateRequest {
+  image_provider_id?: string
+  video_provider_id?: string
+}
+
+export interface ExportRequest {
+  audio_file?: string
+  background_music?: string
+  audio_volume?: number
+  background_music_volume?: number
+  transition_type?: string
+}
+
+export interface ExportOptions {
+  job_id: string
+  audio_file: string | null
+  can_export: boolean
+  completed_scenes: number
+  total_scenes: number
+  transition_types: string[]
+  default_options: {
+    audio_volume: number
+    background_music_volume: number
+    transition_type: string
+  }
+}
+
+export interface StageUpdate {
+  stage: string
+  progress: number
+  status: string
+}
+
+export interface LyricsData {
+  lyrics: Array<{
+    start: number
+    end: number
+    text: string
+  }>
+  duration: number
+  language: string
+}
+
+export const scenesApi = {
+  extractLyrics: async (jobId: string, request: LyricsExtractRequest) => {
+    const response = await api.post<{ lyrics: LyricsData }>(
+      `/scenes/${jobId}/lyrics/extract`,
+      request
+    )
+    return response.data
+  },
+
+  setManualLyrics: async (jobId: string, request: ManualLyricsRequest) => {
+    const response = await api.post<{ lyrics: LyricsData }>(
+      `/scenes/${jobId}/lyrics/manual`,
+      request
+    )
+    return response.data
+  },
+
+  planScenes: async (jobId: string, request: ScenePlanRequest) => {
+    const response = await api.post<{ scenes: VideoScene[] }>(
+      `/scenes/${jobId}/scenes/plan`,
+      request
+    )
+    return response.data
+  },
+
+  listScenes: async (jobId: string) => {
+    const response = await api.get<VideoScene[]>(`/scenes/${jobId}/scenes`)
+    return response.data
+  },
+
+  getScene: async (jobId: string, sceneId: string) => {
+    const response = await api.get<VideoScene>(
+      `/scenes/${jobId}/scenes/${sceneId}`
+    )
+    return response.data
+  },
+
+  updateScene: async (jobId: string, sceneId: string, data: SceneUpdate) => {
+    const response = await api.patch<VideoScene>(
+      `/scenes/${jobId}/scenes/${sceneId}`,
+      data
+    )
+    return response.data
+  },
+
+  reorderScenes: async (jobId: string, sceneIds: string[]) => {
+    const response = await api.post<{ scenes: VideoScene[] }>(
+      `/scenes/${jobId}/scenes/reorder`,
+      { scene_ids: sceneIds }
+    )
+    return response.data
+  },
+
+  generateImage: async (jobId: string, sceneId: string) => {
+    const response = await api.post<{ status: string; scene_id: string; media_type: string }>(
+      `/scenes/${jobId}/scenes/generate-image/${sceneId}`
+    )
+    return response.data
+  },
+
+  generateVideo: async (jobId: string, sceneId: string) => {
+    const response = await api.post<{ status: string; scene_id: string; media_type: string }>(
+      `/scenes/${jobId}/scenes/generate-video/${sceneId}`
+    )
+    return response.data
+  },
+
+  generateAllImages: async (jobId: string, request?: SceneGenerateRequest) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/scenes/${jobId}/scenes/generate-all-images`,
+      request || {}
+    )
+    return response.data
+  },
+
+  generateAllVideos: async (jobId: string, request?: SceneGenerateRequest) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/scenes/${jobId}/scenes/generate-all-videos`,
+      request || {}
+    )
+    return response.data
+  },
+
+  export: async (jobId: string, request: ExportRequest) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/scenes/${jobId}/export`,
+      request
+    )
+    return response.data
+  },
+
+  getExportOptions: async (jobId: string) => {
+    const response = await api.get<ExportOptions>(`/scenes/${jobId}/export-options`)
+    return response.data
+  },
+
+  getLyrics: async (jobId: string) => {
+    const response = await api.get<{ lyrics: LyricsData | null }>(
+      `/scenes/${jobId}/lyrics`
+    )
+    return response.data
+  },
+
+  getStage: async (jobId: string) => {
+    const response = await api.get<StageUpdate>(`/scenes/${jobId}/stage`)
     return response.data
   },
 }

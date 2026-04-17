@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     Integer,
+    BigInteger,
     ForeignKey,
     Numeric,
     select,
@@ -167,6 +168,14 @@ class Job(Base):
     model_preference: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     actual_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    image_provider_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=True
+    )
+    video_provider_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=True
+    )
+    export_options: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    workflow_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -314,6 +323,17 @@ class VideoScene(Base):
     thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     generated_video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
+    image_provider_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id", ondelete="SET NULL"), nullable=True
+    )
+    video_provider_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id", ondelete="SET NULL"), nullable=True
+    )
+    image_prompt_enhanced: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration: Mapped[float | None] = mapped_column(nullable=True)
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    seed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -3,27 +3,12 @@ import { X, Upload, Save } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-
-interface Scene {
-  id: string
-  scene_number: number
-  start_time: number
-  end_time: number
-  lyrics_segment: string | null
-  visual_description: string | null
-  image_prompt: string | null
-  mood: string
-  camera_movement: string
-  reference_image_path: string | null
-  thumbnail_path: string | null
-  generated_video_path: string | null
-  status: string
-}
+import type { VideoScene } from '../api/client'
 
 interface SceneEditModalProps {
-  scene: Scene
+  scene: VideoScene
   onClose: () => void
-  onSave: (updates: Partial<Scene>) => void
+  onSave: (updates: Partial<VideoScene>) => void
 }
 
 export function SceneEditModal({ scene, onClose, onSave }: SceneEditModalProps) {

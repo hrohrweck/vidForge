@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import Job, Template, User, get_db
-from app.workers.tasks import process_video_job
+from app.workers.tasks import process_video_job, process_scene_video_job
 
 router = APIRouter()
 
@@ -82,6 +82,7 @@ class JobResponse(BaseModel):
     model_preference: str | None
     estimated_cost: float | None
     actual_cost: float | None
+    workflow_type: str | None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -114,6 +115,7 @@ async def create_job(
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     provider_preference = _normalize_provider_preference(job_data.provider_preference)
+    
     job = Job(
         user_id=current_user.id,
         template_id=job_data.template_id,
@@ -121,12 +123,24 @@ async def create_job(
         provider_preference=provider_preference,
         model_preference=job_data.model_preference,
     )
+    
+    if job_data.template_id:
+        result = await db.execute(select(Template).where(Template.id == job_data.template_id))
+        template = result.scalar_one_or_none()
+        if template:
+            workflow_type = template.config.get("workflow_type")
+            if workflow_type == "scene_based":
+                job.workflow_type = "scene_based"
+    
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
     if job_data.auto_start:
-        process_video_job.delay(str(job.id), provider_preference=provider_preference)
+        if job.workflow_type == "scene_based":
+            process_scene_video_job.delay(str(job.id), stage="planning")
+        else:
+            process_video_job.delay(str(job.id), provider_preference=provider_preference)
 
     return job
 
@@ -145,7 +159,10 @@ async def start_job(
     if job.status != "pending":
         raise HTTPException(status_code=400, detail=f"Cannot start job with status: {job.status}")
 
-    process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
+    if job.workflow_type == "scene_based":
+        process_scene_video_job.delay(str(job.id), stage="planning")
+    else:
+        process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
     return {"status": "started", "job_id": str(job_id)}
 
 
@@ -204,7 +221,10 @@ async def retry_job(
     await db.commit()
     await db.refresh(job)
 
-    process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
+    if job.workflow_type == "scene_based":
+        process_scene_video_job.delay(str(job.id), stage="planning")
+    else:
+        process_video_job.delay(str(job.id), provider_preference=job.provider_preference)
 
     return job
 
@@ -221,6 +241,8 @@ async def create_batch_jobs(
         raise HTTPException(status_code=404, detail="Template not found")
 
     provider_preference = _normalize_provider_preference(batch_data.provider_preference)
+    workflow_type = template.config.get("workflow_type", "standard")
+    is_scene_based = workflow_type == "scene_based"
 
     jobs = []
     job_ids = []
@@ -231,6 +253,7 @@ async def create_batch_jobs(
             input_data=job_input,
             provider_preference=provider_preference,
             model_preference=batch_data.model_preference,
+            workflow_type=workflow_type if is_scene_based else None,
         )
         jobs.append(job)
         db.add(job)
@@ -241,7 +264,10 @@ async def create_batch_jobs(
 
     if batch_data.auto_start:
         for job_id in job_ids:
-            process_video_job.delay(str(job_id), provider_preference=provider_preference)
+            if is_scene_based:
+                process_scene_video_job.delay(str(job_id), stage="planning")
+            else:
+                process_video_job.delay(str(job_id), provider_preference=provider_preference)
 
     return {"created_count": len(jobs), "job_ids": [str(j) for j in job_ids]}
 
@@ -262,6 +288,8 @@ async def create_jobs_from_csv(
         raise HTTPException(status_code=404, detail="Template not found")
 
     provider_preference = _normalize_provider_preference(provider_preference)
+    workflow_type = template.config.get("workflow_type", "standard")
+    is_scene_based = workflow_type == "scene_based"
 
     if not file.filename or not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="File must be a CSV")
@@ -285,6 +313,7 @@ async def create_jobs_from_csv(
             input_data=dict(row),
             provider_preference=provider_preference,
             model_preference=model_preference,
+            workflow_type=workflow_type if is_scene_based else None,
         )
         jobs.append(job)
         db.add(job)
@@ -295,6 +324,9 @@ async def create_jobs_from_csv(
 
     if auto_start:
         for job_id in job_ids:
-            process_video_job.delay(str(job_id), provider_preference=provider_preference)
+            if is_scene_based:
+                process_scene_video_job.delay(str(job_id), stage="planning")
+            else:
+                process_video_job.delay(str(job_id), provider_preference=provider_preference)
 
     return {"created_count": len(jobs), "job_ids": [str(j) for j in job_ids]}
