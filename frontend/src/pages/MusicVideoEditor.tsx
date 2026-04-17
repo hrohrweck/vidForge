@@ -92,7 +92,7 @@ export default function MusicVideoEditor() {
 
   const planScenesMutation = useMutation({
     mutationFn: () => {
-      const lyrics = job?.input_data?.lyrics
+      const lyrics = job?.input_data?.lyrics as Record<string, unknown> | undefined
       if (!lyrics) throw new Error('No lyrics available')
       return scenesApi.planScenes(jobId!, {
         lyrics_data: lyrics,
@@ -589,7 +589,16 @@ export default function MusicVideoEditor() {
           scene={editingScene}
           onClose={() => setEditingScene(null)}
           onSave={(updates) => {
-            updateSceneMutation.mutate({ sceneId: editingScene.id, updates })
+            const cleanUpdates: SceneUpdate = {}
+            if (updates.lyrics_segment !== undefined) cleanUpdates.lyrics_segment = updates.lyrics_segment ?? undefined
+            if (updates.visual_description !== undefined) cleanUpdates.visual_description = updates.visual_description ?? undefined
+            if (updates.image_prompt !== undefined) cleanUpdates.image_prompt = updates.image_prompt ?? undefined
+            if (updates.mood !== undefined) cleanUpdates.mood = updates.mood
+            if (updates.camera_movement !== undefined) cleanUpdates.camera_movement = updates.camera_movement
+            if (updates.start_time !== undefined) cleanUpdates.start_time = updates.start_time
+            if (updates.end_time !== undefined) cleanUpdates.end_time = updates.end_time
+            if (updates.reference_image_path !== undefined) cleanUpdates.reference_image_path = updates.reference_image_path ?? undefined
+            updateSceneMutation.mutate({ sceneId: editingScene.id, updates: cleanUpdates })
             setEditingScene(null)
           }}
         />
