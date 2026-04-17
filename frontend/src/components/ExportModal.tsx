@@ -130,7 +130,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
                   </Button>
                 )}
               </div>
-              {backgroundMusicPath && (
+              {backgroundMusicPath && backgroundMusic && (
                 <p className="text-xs text-green-600 flex items-center gap-1">
                   <Download className="h-3 w-3" />
                   {backgroundMusic.name} uploaded

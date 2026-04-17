@@ -2,13 +2,12 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
-  Play, RefreshCw, ChevronLeft, Image, Video, Download, CheckCircle, Clock, AlertCircle 
+  RefreshCw, ChevronLeft, Image, Video, Download, CheckCircle, Clock, AlertCircle 
 } from 'lucide-react'
-import { jobsApi, scenesApi, VideoScene, ExportRequest } from '../api/client'
+import { jobsApi, scenesApi, VideoScene, SceneUpdate } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-import { SceneCard } from '../components/SceneCard'
 import { SceneEditModal } from '../components/SceneEditModal'
 import { ExportModal } from '../components/ExportModal'
 
@@ -113,8 +112,8 @@ export default function MusicVideoEditor() {
   })
 
   const updateSceneMutation = useMutation({
-    mutationFn: ({ sceneId, updates }: { sceneId: string; updates: Record<string, unknown> }) =>
-      scenesApi.updateScene(jobId!, sceneId, updates as scenesApi.SceneUpdate),
+    mutationFn: ({ sceneId, updates }: { sceneId: string; updates: SceneUpdate }) =>
+      scenesApi.updateScene(jobId!, sceneId, updates),
     onSuccess: () => refetchScenes(),
   })
 
@@ -180,15 +179,6 @@ export default function MusicVideoEditor() {
   const canGenerateVideos = () => {
     const stage = job?.stage
     return stage && ['images_ready', 'videos_ready'].includes(stage)
-  }
-
-  const canExport = () => {
-    return exportOptions?.can_export || false
-  }
-
-  const allImagesGenerated = () => {
-    if (!scenes || scenes.length === 0) return false
-    return scenes.every(s => s.reference_image_path)
   }
 
   const allVideosGenerated = () => {
