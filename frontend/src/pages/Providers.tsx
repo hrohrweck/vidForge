@@ -903,7 +903,7 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
     <div className="space-y-4 border-t pt-4 mt-4">
       <div className="flex items-center justify-between">
         <h3 className="font-medium">Poe Models</h3>
-        <Button variant="outline" size="sm" onClick={() => setShowAddForm(!showAddForm)}>
+        <Button variant="outline" size="sm" type="button" onClick={() => setShowAddForm(!showAddForm)}>
           <Plus className="h-4 w-4 mr-1" /> Add Model
         </Button>
       </div>
@@ -943,7 +943,7 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
               <option value="text">Text</option>
             </select>
           </div>
-          <Button size="sm" onClick={handleAdd} disabled={createMutation.isPending}>
+          <Button size="sm" type="button" onClick={handleAdd} disabled={createMutation.isPending}>
             Add
           </Button>
         </div>
@@ -975,6 +975,7 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
                 <td className="py-2">{model.is_active ? 'Yes' : 'No'}</td>
                 <td className="py-2 text-right">
                   <button
+                    type="button"
                     className="text-red-500 hover:text-red-700"
                     onClick={() => {
                       if (confirm('Delete this model?')) {
