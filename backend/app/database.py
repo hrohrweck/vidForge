@@ -182,7 +182,15 @@ class Job(Base):
 
     user: Mapped["User"] = relationship(back_populates="jobs")
     template: Mapped["Template | None"] = relationship(back_populates="jobs")
-    provider: Mapped["Provider | None"] = relationship(back_populates="jobs")
+    provider: Mapped["Provider | None"] = relationship(
+        back_populates="jobs", foreign_keys=[provider_id]
+    )
+    image_provider: Mapped["Provider | None"] = relationship(
+        foreign_keys=[image_provider_id]
+    )
+    video_provider: Mapped["Provider | None"] = relationship(
+        foreign_keys=[video_provider_id]
+    )
     worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
     scenes: Mapped[list["VideoScene"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
@@ -244,7 +252,9 @@ class Provider(Base):
     workers: Mapped[list["Worker"]] = relationship(
         back_populates="provider", cascade="all, delete-orphan"
     )
-    jobs: Mapped[list["Job"]] = relationship(back_populates="provider")
+    jobs: Mapped[list["Job"]] = relationship(
+        back_populates="provider", foreign_keys="Job.provider_id"
+    )
     poe_models: Mapped[list["PoeModel"]] = relationship(
         back_populates="provider", cascade="all, delete-orphan"
     )

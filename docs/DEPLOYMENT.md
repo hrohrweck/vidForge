@@ -47,7 +47,8 @@ SSH_KEY_PATH=/app/ssh_key
 SSH_REMOTE_PATH=/var/lib/vidforge/storage
 
 # LLM Service
-OLLAMA_URL=http://localhost:11434
+# Match OLLAMA_PORT in docker/.env (default 11435). Use 11434 only for a native install.
+OLLAMA_URL=http://localhost:11435
 
 # Optional
 DEBUG=false

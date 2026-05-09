@@ -1,4 +1,21 @@
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: on-failure
+
   frontend:
     build:
       context: ../frontend
@@ -47,7 +64,8 @@ services:
   ollama:
     image: ollama/ollama:rocm
     ports:
-      - "11434:11434"
+      # Override OLLAMA_PORT in docker/.env to change the host-mapped port.
+      - "${OLLAMA_PORT:-11435}:11434"
     volumes:
       - ollama-data:/root/.ollama
     devices:

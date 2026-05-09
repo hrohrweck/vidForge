@@ -102,5 +102,8 @@ temp/
 # Jupyter notebooks
 .ipynb_checkpoints/
 
+# Agentic coding
+.sisyphus
+
 # Alembic
 # Keep alembic/ but ignore any generated temp files
