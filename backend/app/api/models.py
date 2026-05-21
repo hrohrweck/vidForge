@@ -12,7 +12,7 @@ from app.services.model_config import (
     get_default_model_preferences,
     validate_model_preferences,
 )
-from app.services.model_registry import get_model, get_all_models, MODELS
+from app.services.model_registry import get_all_models, get_model
 
 router = APIRouter(tags=["models"])
 
@@ -123,7 +123,7 @@ async def get_model_details(model_id: str):
     model = get_model(model_id)
     if not model:
         return {"error": "Model not found"}
-    
+
     return {
         "id": model.id,
         "name": model.name,

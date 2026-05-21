@@ -4,16 +4,15 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, require_admin
-from app.database import get_db, Provider, User, PoeModel
+from app.database import PoeModel, Provider, User, get_db
+from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
 from app.services.worker_registry import WorkerRegistry
-from app.services.budget_tracker import BudgetTracker
-
 
 router = APIRouter(tags=["providers"])
 
@@ -70,8 +69,7 @@ class ProviderResponse(BaseModel):
     priority: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProviderStatusResponse(BaseModel):
@@ -96,8 +94,7 @@ class WorkerResponse(BaseModel):
     current_job_id: UUID | None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/status", response_model=list[ProviderStatusResponse])
@@ -136,14 +133,6 @@ async def list_providers_status(
 @router.get("", response_model=list[ProviderResponse])
 async def list_providers(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
-):
-    result = await db.execute(select(Provider).order_by(Provider.priority.desc()))
-    return list(result.scalars().all())
-
-
-@router.post("", response_model=ProviderResponse)
-async def create_provider(
-    data: ProviderCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)
 ):
     result = await db.execute(select(Provider).order_by(Provider.priority.desc()))
     return list(result.scalars().all())
@@ -374,8 +363,7 @@ class PoeModelResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("/{provider_id}/poe-models", response_model=list[PoeModelResponse])

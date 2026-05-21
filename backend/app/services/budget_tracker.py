@@ -3,11 +3,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func
 
-from app.database import Provider, CostLog
+from app.database import CostLog, Provider
 
 
 class BudgetTracker:

@@ -1,7 +1,5 @@
 import asyncio
 import json
-import subprocess
-from pathlib import Path
 from typing import Any
 
 
@@ -54,12 +52,7 @@ class AudioAnalyzer:
     async def analyze_beats(audio_path: str) -> list[float]:
         """Detect beats in audio file using librosa if available."""
         try:
-            import numpy as np
-
-            try:
-                import librosa
-            except ImportError:
-                return await AudioAnalyzer._ffmpeg_beat_detection(audio_path)
+            import librosa
 
             y, sr = librosa.load(audio_path, sr=None)
 

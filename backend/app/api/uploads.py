@@ -8,8 +8,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app.api.auth import get_current_user, get_current_user_from_cookie, get_current_user_from_bearer_or_cookie, get_current_user_optional
-from app.config import get_settings
+from app.api.auth import (
+    get_current_user,
+    get_current_user_from_bearer_or_cookie,
+    get_current_user_optional,
+)
 from app.database import User
 from app.services.video_processor import VideoProcessor
 from app.storage import get_storage_backend
@@ -41,7 +44,6 @@ def validate_file(file: UploadFile, allowed_types: set[str]) -> None:
 
 
 async def save_upload(file: UploadFile, category: str, user_id: str) -> UploadResponse:
-    settings = get_settings()
     storage = get_storage_backend()
 
     ext = os.path.splitext(file.filename or "file")[1]
@@ -197,7 +199,6 @@ async def get_video_thumbnail(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> Response:
     import tempfile
-    import uuid
 
     storage = get_storage_backend()
 

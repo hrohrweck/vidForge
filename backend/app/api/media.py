@@ -1,24 +1,38 @@
 """Media library API router"""
 
 import logging
+from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
-from sqlalchemy import select, func, and_, or_
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user_from_cookie
 from app.database import get_db
-from app.models.media import MediaFolder, MediaAsset, MediaTag, MediaAssetTag, MediaAssetReference
+from app.models.media import MediaAsset, MediaAssetReference, MediaAssetTag, MediaFolder, MediaTag
 from app.schemas.media import (
-    FolderCreate, FolderUpdate, FolderResponse, FolderTreeResponse,
-    AssetListQuery, AssetResponse, AssetListResponse, AssetUpdate,
-    TagCreate, TagUpdate, TagResponse,
-    BulkMoveRequest, BulkDeleteRequest, BulkTagRequest,
-    PreviewFrameRequest, UploadResponse,
+    AssetListQuery,
+    AssetListResponse,
+    AssetResponse,
+    AssetUpdate,
+    BulkDeleteRequest,
+    BulkMoveRequest,
+    BulkTagRequest,
+    FolderCreate,
+    FolderResponse,
+    FolderTreeResponse,
+    FolderUpdate,
+    PreviewFrameRequest,
+    TagCreate,
+    TagResponse,
+    TagUpdate,
+    UploadResponse,
 )
-from app.services.media_path import get_user_media_dir, asset_path
+from app.services.media_path import asset_path
 from app.services.preview_generator import extract_first_frame
 
 logger = logging.getLogger(__name__)
@@ -81,7 +95,7 @@ async def list_folders(
         query = query.where(MediaFolder.parent_id == UUID(parent_id))
     else:
         query = query.where(MediaFolder.parent_id.is_(None))
-    
+
     result = await db.execute(query)
     folders = result.scalars().all()
     return [folder_to_response(f) for f in folders]
@@ -105,7 +119,7 @@ async def create_folder(
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Folder with this name already exists")
-    
+
     folder = MediaFolder(
         user_id=current_user.id,
         parent_id=parent_uuid,
@@ -134,12 +148,12 @@ async def update_folder(
     folder = result.scalar_one_or_none()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    
+
     if payload.name is not None:
         folder.name = payload.name
     if payload.parent_id is not None:
         folder.parent_id = UUID(payload.parent_id) if payload.parent_id else None
-    
+
     await db.commit()
     await db.refresh(folder)
     return folder_to_response(folder)
@@ -161,20 +175,20 @@ async def delete_folder(
     folder = result.scalar_one_or_none()
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    
+
     # Check if folder has children (subfolders or assets)
     children_count = await db.execute(
         select(func.count()).where(MediaFolder.parent_id == folder.id)
     )
     if children_count.scalar() > 0:
         raise HTTPException(status_code=409, detail="Folder is not empty")
-    
+
     assets_count = await db.execute(
         select(func.count()).where(MediaAsset.folder_id == folder.id)
     )
     if assets_count.scalar() > 0:
         raise HTTPException(status_code=409, detail="Folder contains assets")
-    
+
     await db.delete(folder)
     await db.commit()
 
@@ -189,11 +203,11 @@ async def get_folder_tree(
         select(MediaFolder).where(MediaFolder.user_id == current_user.id)
     )
     folders = result.scalars().all()
-    
+
     # Build tree structure
     folder_map = {str(f.id): folder_to_response(f) for f in folders}
     root_folders = []
-    
+
     for folder in folders:
         folder_data = folder_map[str(folder.id)]
         if folder.parent_id and str(folder.parent_id) in folder_map:
@@ -203,7 +217,7 @@ async def get_folder_tree(
             parent.children.append(folder_data)
         else:
             root_folders.append(folder_data)
-    
+
     return root_folders
 
 
@@ -217,7 +231,7 @@ async def list_assets(
 ):
     """List assets with cursor pagination and filtering."""
     db_query = select(MediaAsset).where(MediaAsset.user_id == current_user.id)
-    
+
     # Apply filters
     if query.folder_id:
         db_query = db_query.where(MediaAsset.folder_id == UUID(query.folder_id))
@@ -230,14 +244,14 @@ async def list_assets(
     if query.search:
         search_term = f"%{query.search}%"
         db_query = db_query.where(MediaAsset.name.ilike(search_term))
-    
+
     # Apply sorting
     sort_column = getattr(MediaAsset, query.sort_by, MediaAsset.created_at)
     if query.sort_order == "desc":
         db_query = db_query.order_by(sort_column.desc())
     else:
         db_query = db_query.order_by(sort_column.asc())
-    
+
     # Apply cursor pagination
     if query.cursor:
         try:
@@ -248,19 +262,19 @@ async def list_assets(
                 db_query = db_query.where(MediaAsset.created_at > cursor_date)
         except ValueError:
             pass
-    
+
     # Limit + 1 to check if there's a next page
     db_query = db_query.limit(query.limit + 1)
-    
+
     result = await db.execute(db_query)
     assets = result.scalars().all()
-    
+
     # Check if there's a next page
     next_cursor = None
     if len(assets) > query.limit:
         next_cursor = assets[query.limit - 1].created_at.isoformat()
         assets = assets[:query.limit]
-    
+
     return AssetListResponse(
         assets=[asset_to_response(a) for a in assets],
         next_cursor=next_cursor,
@@ -303,12 +317,12 @@ async def update_asset(
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    
+
     if payload.name is not None:
         asset.name = payload.name
     if payload.folder_id is not None:
         asset.folder_id = UUID(payload.folder_id) if payload.folder_id else None
-    
+
     # Update tags if provided
     if payload.tag_ids is not None:
         # Clear existing tags and set new ones
@@ -317,7 +331,7 @@ async def update_asset(
         )
         for tag_id in payload.tag_ids:
             db.add(MediaAssetTag(asset_id=asset.id, tag_id=UUID(tag_id)))
-    
+
     await db.commit()
     await db.refresh(asset)
     return asset_to_response(asset)
@@ -339,7 +353,7 @@ async def delete_asset(
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    
+
     # Check if asset is referenced by other assets
     refs_result = await db.execute(
         select(MediaAssetReference).where(
@@ -355,7 +369,7 @@ async def delete_asset(
                 "referrers": [str(r.referrer_asset_id) for r in refs],
             }
         )
-    
+
     await db.delete(asset)
     await db.commit()
 
@@ -391,7 +405,7 @@ async def create_tag(
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Tag with this name already exists")
-    
+
     tag = MediaTag(
         user_id=current_user.id,
         name=payload.name,
@@ -420,12 +434,12 @@ async def update_tag(
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    
+
     if payload.name is not None:
         tag.name = payload.name
     if payload.color is not None:
         tag.color = payload.color
-    
+
     await db.commit()
     await db.refresh(tag)
     return tag_to_response(tag)
@@ -447,7 +461,7 @@ async def delete_tag(
     tag = result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    
+
     await db.delete(tag)
     await db.commit()
 
@@ -463,7 +477,7 @@ async def bulk_move_assets(
     """Bulk move assets to a different folder."""
     moved = 0
     target_folder_id = UUID(request.target_folder_id) if request.target_folder_id else None
-    
+
     for asset_id in request.asset_ids:
         result = await db.execute(
             select(MediaAsset).where(
@@ -475,7 +489,7 @@ async def bulk_move_assets(
         if asset:
             asset.folder_id = target_folder_id
             moved += 1
-    
+
     await db.commit()
     return {"moved": moved}
 
@@ -488,7 +502,7 @@ async def bulk_delete_assets(
 ):
     """Bulk delete assets."""
     deleted = 0
-    
+
     for asset_id in request.asset_ids:
         result = await db.execute(
             select(MediaAsset).where(
@@ -500,7 +514,7 @@ async def bulk_delete_assets(
         if asset:
             await db.delete(asset)
             deleted += 1
-    
+
     await db.commit()
     return {"deleted": deleted}
 
@@ -514,7 +528,7 @@ async def bulk_tag_assets(
     """Bulk tag assets."""
     tagged = 0
     tag_ids = [UUID(tid) for tid in request.tag_ids]
-    
+
     for asset_id in request.asset_ids:
         result = await db.execute(
             select(MediaAsset).where(
@@ -535,7 +549,7 @@ async def bulk_tag_assets(
                 if not existing.scalar_one_or_none():
                     db.add(MediaAssetTag(asset_id=asset.id, tag_id=tag_id))
             tagged += 1
-    
+
     await db.commit()
     return {"tagged": tagged}
 
@@ -551,17 +565,16 @@ async def upload_assets(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload one or more files as assets."""
-    from app.services.media_path import asset_path
     import mimetypes
-    
+
     uploaded_assets = []
     failed = []
-    
+
     for file in files:
         try:
             # Determine file type from mime type
             mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
-            
+
             if mime_type.startswith("image/"):
                 file_type = "image"
             elif mime_type.startswith("video/"):
@@ -572,7 +585,7 @@ async def upload_assets(
                 file_type = "markdown"
             else:
                 file_type = "image"  # Default fallback
-            
+
             # Create asset record
             asset = MediaAsset(
                 user_id=current_user.id,
@@ -587,34 +600,34 @@ async def upload_assets(
             )
             db.add(asset)
             await db.flush()  # Get asset.id
-            
+
             # Save file
             file_path = asset_path(current_user.id, asset.id, file.filename or "unnamed")
             content = await file.read()
             file_path.write_bytes(content)
-            
+
             # Update asset with path and size
             asset.file_path = str(file_path)
             asset.size_bytes = len(content)
-            
+
             # Generate preview for videos
             if file_type == "video":
                 preview_path = await extract_first_frame(file_path, current_user.id, asset.id)
                 if preview_path:
                     asset.preview_path = str(preview_path)
-            
+
             uploaded_assets.append(asset)
-            
+
         except Exception as e:
             logger.error(f"Upload failed for {file.filename}: {e}")
             failed.append({"filename": file.filename, "error": str(e)})
-    
+
     await db.commit()
-    
+
     # Refresh all uploaded assets
     for asset in uploaded_assets:
         await db.refresh(asset)
-    
+
     return UploadResponse(
         assets=[asset_to_response(a) for a in uploaded_assets],
         failed=failed,
@@ -632,7 +645,7 @@ async def regenerate_preview(
 ):
     """Regenerate preview frame for a video asset."""
     from app.services.preview_generator import extract_preview_frame
-    
+
     result = await db.execute(
         select(MediaAsset).where(
             MediaAsset.id == UUID(asset_id),
@@ -642,28 +655,25 @@ async def regenerate_preview(
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    
+
     if asset.file_type != "video":
         raise HTTPException(status_code=400, detail="Preview regeneration only supported for video assets")
-    
+
     video_path = Path(asset.file_path)
     preview_path = await extract_preview_frame(
         video_path, current_user.id, asset.id,
         timestamp_seconds=request.timestamp_seconds
     )
-    
+
     if preview_path:
         asset.preview_path = str(preview_path)
         await db.commit()
         await db.refresh(asset)
-    
+
     return asset_to_response(asset)
 
 
 # ============== RAW ASSET SERVING ==============
-
-from fastapi import Response
-from fastapi.responses import FileResponse
 
 
 @router.get("/assets/raw/{asset_path:path}")
@@ -674,7 +684,7 @@ async def serve_asset_file(
 ):
     """Serve raw asset file (images, videos, etc.)."""
     from pathlib import Path
-    
+
     # Look up the asset by path to verify ownership
     result = await db.execute(
         select(MediaAsset).where(
@@ -683,14 +693,14 @@ async def serve_asset_file(
         )
     )
     asset = result.scalar_one_or_none()
-    
+
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    
+
     file_path = Path(asset.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     return FileResponse(
         path=file_path,
         media_type=asset.mime_type or "application/octet-stream",
@@ -706,7 +716,7 @@ async def serve_preview(
 ):
     """Serve asset preview image."""
     from pathlib import Path
-    
+
     result = await db.execute(
         select(MediaAsset).where(
             MediaAsset.id == UUID(asset_id),
@@ -714,14 +724,14 @@ async def serve_preview(
         )
     )
     asset = result.scalar_one_or_none()
-    
+
     if not asset or not asset.preview_path:
         raise HTTPException(status_code=404, detail="Preview not found")
-    
+
     preview_path = Path(asset.preview_path)
     if not preview_path.exists():
         raise HTTPException(status_code=404, detail="Preview file not found")
-    
+
     return FileResponse(
         path=preview_path,
         media_type="image/jpeg",

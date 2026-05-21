@@ -43,7 +43,9 @@ build/
 .env
 .env.local
 .env.*.local
-*.env
+# But NOT .env.example files
+!.env.example
+!**/.env.example
 
 # IDE and editors
 .vscode/
@@ -107,3 +109,4 @@ temp/
 
 # Alembic
 # Keep alembic/ but ignore any generated temp files
+# Session dumps\nsession-*.md

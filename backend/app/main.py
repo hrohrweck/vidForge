@@ -5,10 +5,24 @@ from typing import Any, AsyncGenerator
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, jobs, media, models, projects, providers, scenes, styles, storage, templates, uploads, users
+from app.api import (
+    admin,
+    auth,
+    jobs,
+    media,
+    models,
+    projects,
+    providers,
+    scenes,
+    storage,
+    styles,
+    templates,
+    uploads,
+    users,
+)
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
-from app.database import create_tables, seed_builtin_data
+from app.database import User, async_session, create_tables, seed_builtin_data, seed_rbac_data
 from app.services.model_manager import ModelManager, ModelManagerError
 
 
@@ -18,6 +32,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.debug:
         await create_tables()
     await seed_builtin_data()
+    await seed_rbac_data()
+
+    # Create initial superuser if none exists
+    from passlib.context import CryptContext
+    from sqlalchemy import select as sa_select
+
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    async with async_session() as db:
+        result = await db.execute(sa_select(User).where(User.is_superuser))
+        if not result.scalar_one_or_none():
+            admin_user = User(
+                email=settings.admin_email,
+                hashed_password=pwd_context.hash(settings.admin_password),
+                is_active=True,
+                is_superuser=True,
+            )
+            db.add(admin_user)
+            await db.commit()
+            print(f"[Init] Created admin user: {settings.admin_email}")
+        else:
+            print("[Init] Admin user already exists")
 
     model_manager = ModelManager()
     try:

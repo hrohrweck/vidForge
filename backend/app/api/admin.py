@@ -3,23 +3,24 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import func, select, delete as sql_delete
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import delete as sql_delete
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.database import (
-    Job,
-    User,
     Group,
-    Permission,
-    UserGroup,
     GroupPermission,
+    Job,
+    Permission,
     Template,
+    User,
+    UserGroup,
     get_db,
 )
-from app.services.permissions import has_permission, get_user_permissions, require_permission
+from app.services.permissions import get_user_permissions
 
 router = APIRouter()
 settings = get_settings()
@@ -43,8 +44,7 @@ class RecentJob(BaseModel):
     created_at: datetime
     user_email: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdminDashboard(BaseModel):

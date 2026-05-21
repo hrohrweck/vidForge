@@ -2,10 +2,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-import yaml
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi import UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +27,7 @@ class TemplateResponse(BaseModel):
     is_builtin: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("", response_model=list[TemplateResponse])

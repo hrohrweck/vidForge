@@ -253,7 +253,7 @@ class TestJobsAPIFunctionality:
         assert response.status_code == 200
         data = response.json()
 
-        assert data["provider_preference"] == "comfyui_direct"
+        assert data["provider_preference"] == "auto"  # legacy types converted to auto
         assert data["estimated_cost"] is None
         assert data["actual_cost"] is None
 

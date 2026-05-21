@@ -8,8 +8,6 @@ from typing import Optional
 from uuid import UUID
 
 import redis
-
-logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -20,6 +18,8 @@ from app.services.job_router import JobRouter
 from app.services.video_generator import process_job_video
 from app.services.worker_registry import WorkerRegistry
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -232,6 +232,7 @@ async def _run_poe_job(
     db: AsyncSession,
 ) -> str:
     from sqlalchemy import select
+
     from app.database import PoeModel
 
     prompt = input_data.get("prompt", "")
@@ -240,7 +241,7 @@ async def _run_poe_job(
     result = await db.execute(
         select(PoeModel).where(
             PoeModel.provider_id == provider_instance.provider_id,
-            PoeModel.is_active == True,
+            PoeModel.is_active,
         )
     )
     available_models = list(result.scalars().all())
@@ -494,7 +495,7 @@ def send_heartbeat() -> dict:
 
             result = await db.execute(
                 select(Provider).where(
-                    Provider.provider_type == "comfyui_direct", Provider.is_active == True
+                    Provider.provider_type == "comfyui_direct", Provider.is_active
                 )
             )
             provider = result.scalar_one_or_none()
@@ -594,8 +595,6 @@ def merge_videos(job_id: str, segment_paths: list[str]) -> dict:
 
 @celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
 def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
-    from app.database import VideoScene
-    from app.services.music_video_planner import MusicVideoPlanner
 
     async def run() -> dict:
         session_factory = get_db_session_factory()
@@ -627,8 +626,8 @@ def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
 
 async def _stage_planning(db: AsyncSession, job: Job) -> dict:
     from app.database import VideoScene
-    from app.services.music_video_planner import MusicVideoPlanner
     from app.services.lyrics_extractor import LyricsExtractor
+    from app.services.music_video_planner import MusicVideoPlanner
 
     broadcast_update(str(job.id), {
         "stage": "planning",
@@ -639,9 +638,9 @@ async def _stage_planning(db: AsyncSession, job: Job) -> dict:
     input_data = job.input_data or {}
     audio_file = input_data.get("audio_file")
     style = input_data.get("style", "realistic")
-    
+
     lyrics = input_data.get("lyrics")
-    
+
     if lyrics and isinstance(lyrics, dict):
         duration = lyrics.get("duration", input_data.get("duration", 30))
     else:
@@ -763,8 +762,8 @@ async def _stage_planning(db: AsyncSession, job: Job) -> dict:
 
 
 async def _stage_generating_images(db: AsyncSession, job: Job) -> dict:
-    from app.database import VideoScene
     import app.services.media_generator as media_generator
+    from app.database import VideoScene
 
     scenes_result = await db.execute(
         select(VideoScene)
@@ -807,7 +806,7 @@ async def _stage_generating_images(db: AsyncSession, job: Job) -> dict:
 
             # Create MediaAsset for the generated image
             try:
-                from app.services.auto_import import _get_or_create_folder, _create_asset_from_file
+                from app.services.auto_import import _create_asset_from_file, _get_or_create_folder
                 image_full_path = Path(settings.storage_path).resolve() / image_path
                 logger.info(f"Attempting to create MediaAsset: file={image_full_path}, exists={image_full_path.exists()}")
                 if image_full_path.exists():
@@ -866,8 +865,8 @@ async def _stage_generating_images(db: AsyncSession, job: Job) -> dict:
 
 
 async def _stage_generating_videos(db: AsyncSession, job: Job) -> dict:
-    from app.database import VideoScene
     import app.services.media_generator as media_generator
+    from app.database import VideoScene
 
     scenes_result = await db.execute(
         select(VideoScene)
@@ -1227,7 +1226,6 @@ def export_scene_video(
 
             if audio_file or music_file:
                 audio_inputs = []
-                audio_streams = []
 
                 if audio_file:
                     audio_path = storage_path / audio_file

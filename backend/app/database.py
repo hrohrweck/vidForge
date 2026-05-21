@@ -4,18 +4,19 @@ from typing import AsyncGenerator
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
     String,
     Text,
-    Boolean,
-    Integer,
-    BigInteger,
-    ForeignKey,
-    Numeric,
-    select,
     UniqueConstraint,
+    select,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -88,6 +89,9 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 async def create_tables() -> None:
+    # Import media models so their tables are included in Base.metadata
+    import app.models.media  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -120,13 +124,13 @@ class User(Base):
     groups: Mapped[list["Group"]] = relationship(
         secondary="user_groups", back_populates="users", lazy="selectin"
     )
-    media_folders: Mapped[list["MediaFolder"]] = relationship(
+    media_folders: Mapped[list["MediaFolder"]] = relationship(  # noqa: F821
         back_populates="user", cascade="all, delete-orphan"
     )
-    media_assets: Mapped[list["MediaAsset"]] = relationship(
+    media_assets: Mapped[list["MediaAsset"]] = relationship(  # noqa: F821
         back_populates="user", cascade="all, delete-orphan"
     )
-    media_tags: Mapped[list["MediaTag"]] = relationship(
+    media_tags: Mapped[list["MediaTag"]] = relationship(  # noqa: F821
         back_populates="user", cascade="all, delete-orphan"
     )
     projects: Mapped[list["Project"]] = relationship(
@@ -167,7 +171,7 @@ class Project(Base):
 
     user: Mapped["User"] = relationship(back_populates="projects")
     jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
-    media_assets: Mapped[list["MediaAsset"]] = relationship(back_populates="project")
+    media_assets: Mapped[list["MediaAsset"]] = relationship(back_populates="project")  # noqa: F821
 
 
 class Job(Base):
@@ -389,8 +393,8 @@ class VideoScene(Base):
 
 async def seed_builtin_data() -> None:
     """Load built-in templates and styles from YAML files into the database."""
-    from app.services.template_loader import TemplateLoader, StyleLoader
     from app.config import get_settings
+    from app.services.template_loader import StyleLoader, TemplateLoader
 
     settings = get_settings()
 

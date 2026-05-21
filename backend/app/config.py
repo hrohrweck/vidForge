@@ -1,6 +1,6 @@
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
-from decimal import Decimal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     runpod_idle_timeout: int = 30
     runpod_flashboot_enabled: bool = True
     runpod_max_workers: int = 3
+
+    admin_email: str = "admin@vidforge.local"
+    admin_password: str = "admin"
 
 
 @lru_cache

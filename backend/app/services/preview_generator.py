@@ -18,26 +18,26 @@ async def extract_preview_frame(
     output_filename: str = "preview.jpg",
 ) -> Path | None:
     """Extract a single frame from a video at the given timestamp.
-    
+
     Args:
         video_path: Path to the video file
         user_id: User ID for storage path
         asset_id: Asset ID for storage path
         timestamp_seconds: Timestamp to extract frame from (default 0 = first frame)
         output_filename: Output filename for the preview
-        
+
     Returns:
         Path to the generated preview image, or None if extraction failed
     """
     preview_path = get_preview_path(user_id, asset_id, output_filename)
-    
+
     # Ensure video path is absolute
     video_path = Path(video_path).resolve()
-    
+
     if not video_path.exists():
         logger.error(f"Video file not found: {video_path}")
         return None
-    
+
     # FFmpeg command to extract single frame
     cmd = [
         "ffmpeg",
@@ -49,7 +49,7 @@ async def extract_preview_frame(
         "-vf", "scale=480:-1",  # Scale width to 480px, maintain aspect ratio
         str(preview_path),
     ]
-    
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -57,18 +57,18 @@ async def extract_preview_frame(
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             logger.error(f"FFmpeg preview extraction failed: {stderr.decode()}")
             return None
-        
+
         if not preview_path.exists():
             logger.error("Preview file was not created")
             return None
-        
+
         logger.info(f"Preview extracted: {preview_path}")
         return preview_path
-        
+
     except Exception as e:
         logger.error(f"Preview extraction error: {e}")
         return None
@@ -85,18 +85,18 @@ async def extract_first_frame(
 
 async def get_video_duration(video_path: Path) -> float | None:
     """Get video duration in seconds using ffprobe.
-    
+
     Args:
         video_path: Path to the video file
-        
+
     Returns:
         Duration in seconds, or None if failed
     """
     video_path = Path(video_path).resolve()
-    
+
     if not video_path.exists():
         return None
-    
+
     cmd = [
         "ffprobe",
         "-v", "error",
@@ -104,7 +104,7 @@ async def get_video_duration(video_path: Path) -> float | None:
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(video_path),
     ]
-    
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -112,14 +112,14 @@ async def get_video_duration(video_path: Path) -> float | None:
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             logger.error(f"ffprobe failed: {stderr.decode()}")
             return None
-        
+
         duration = float(stdout.decode().strip())
         return duration
-        
+
     except Exception as e:
         logger.error(f"Duration check error: {e}")
         return None

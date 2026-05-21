@@ -6,7 +6,7 @@ from uuid import UUID
 
 import httpx
 
-from app.services.providers.base import ComfyUIProvider, JobResult, ProviderInfo
+from app.services.providers.base import ComfyUIProvider, ProviderInfo
 
 
 class PoeProvider(ComfyUIProvider):
@@ -89,6 +89,7 @@ class PoeProvider(ComfyUIProvider):
         # Add reference image as base64 input_image if available
         if image_path:
             from pathlib import Path
+
             from app.config import get_settings
             settings = get_settings()
             full_image_path = Path(settings.storage_path) / image_path
@@ -175,6 +176,7 @@ class PoeProvider(ComfyUIProvider):
         content: list[dict[str, Any]] | str
         if image_path:
             from pathlib import Path
+
             from app.config import get_settings
             settings = get_settings()
             full_image_path = Path(settings.storage_path) / image_path

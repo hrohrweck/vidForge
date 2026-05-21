@@ -113,7 +113,7 @@ Guidelines:
                 raise MusicVideoPlannerError(f"Failed to parse LLM response: {repr(response[:300])}")
 
             return self._validate_and_fix_scenes(parsed, duration)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             raise MusicVideoPlannerError(f"Failed to parse LLM response: {repr(response[:200])}")
 
     def _extract_json_by_brace_matching(self, response: str) -> dict[str, Any] | None:
@@ -142,8 +142,6 @@ Guidelines:
 
         scenes = []
         for match in re.finditer(scene_pattern, response):
-            scene_str = match.group(0)
-            # Try to extend to find closing brace
             start_idx = match.start()
             brace_count = 1
             for i in range(start_idx + 1, len(response)):
@@ -291,16 +289,16 @@ Create a detailed scene plan in JSON format."""
 
         for i, scene in enumerate(scenes):
             scene["start_time"] = max(scene.get("start_time", expected_start), expected_start)
-            
+
             if i == len(scenes) - 1:
                 scene["end_time"] = duration
             else:
                 next_start = scenes[i + 1].get("start_time", duration)
                 scene["end_time"] = min(scene.get("end_time", next_start), next_start)
-            
+
             if scene["end_time"] <= scene["start_time"]:
                 scene["end_time"] = scene["start_time"] + 5.0
-            
+
             fixed_scenes.append(scene)
             expected_start = scene["end_time"]
 

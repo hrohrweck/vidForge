@@ -51,7 +51,7 @@ class ComfyUIDirectProvider(ComfyUIProvider):
                     progress = 50
                     if status.get("executing"):
                         progress = 75
-                    await progress_callback(progress, f"Processing on local GPU...")
+                    await progress_callback(progress, "Processing on local GPU...")
 
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
@@ -85,7 +85,7 @@ class ComfyUIDirectProvider(ComfyUIProvider):
             )
 
         try:
-            info = await self.client.get_system_info()
+            await self.client.get_system_info()
             return ProviderInfo(
                 name="comfyui_direct",
                 provider_type="comfyui_direct",

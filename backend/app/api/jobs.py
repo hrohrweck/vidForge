@@ -4,14 +4,14 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import Job, Template, User, get_db
-from app.workers.tasks import process_video_job, process_scene_video_job
+from app.workers.tasks import process_scene_video_job, process_video_job
 
 router = APIRouter()
 
@@ -44,7 +44,7 @@ PROVIDER_PREFERENCES = {"auto"}
 
 def _normalize_provider_preference(value: str) -> str:
     """Normalize provider preference to accepted values.
-    
+
     Accepts:
     - "auto" - automatically select provider based on availability
     - A valid provider UUID - use that specific provider
@@ -52,19 +52,19 @@ def _normalize_provider_preference(value: str) -> str:
     """
     if value in PROVIDER_PREFERENCES:
         return value
-    
+
     # If it's a UUID (provider ID), pass through - will be validated at job processing time
     try:
         UUID(value)
         return value
     except ValueError:
         pass
-    
+
     # Legacy provider types are now treated as "auto"
     legacy_types = {"comfyui_direct", "runpod", "poe"}
     if value in legacy_types:
         return "auto"
-    
+
     return "auto"
 
 
@@ -90,8 +90,7 @@ class JobResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 @router.get("", response_model=list[JobResponse])
@@ -121,7 +120,7 @@ async def create_job(
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     provider_preference = _normalize_provider_preference(job_data.provider_preference)
-    
+
     job = Job(
         user_id=current_user.id,
         template_id=job_data.template_id,
@@ -130,7 +129,7 @@ async def create_job(
         model_preference=job_data.model_preference,
         project_id=job_data.project_id,
     )
-    
+
     if job_data.template_id:
         result = await db.execute(select(Template).where(Template.id == job_data.template_id))
         template = result.scalar_one_or_none()
@@ -138,7 +137,7 @@ async def create_job(
             workflow_type = template.config.get("workflow_type")
             if workflow_type == "scene_based":
                 job.workflow_type = "scene_based"
-    
+
     db.add(job)
     await db.commit()
     await db.refresh(job)

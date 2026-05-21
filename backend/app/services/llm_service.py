@@ -169,7 +169,7 @@ Output only valid JSON, nothing else."""
     ) -> list[dict[str, Any]]:
         import json
 
-        user_prompt = f"Analyze this script and break it into visual segments"
+        user_prompt = "Analyze this script and break it into visual segments"
         if total_duration:
             user_prompt += f" (target total duration: {total_duration} seconds)"
         user_prompt += f":\n\n{script}"

@@ -1,5 +1,4 @@
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -285,9 +284,8 @@ class MusicGenService:
         duration: float,
         model: str,
     ) -> str:
-        import torch
-        from audiocraft.models import MusicGen
         from audiocraft.data.audio import audio_write
+        from audiocraft.models import MusicGen
 
         mg = MusicGen.get_pretrained(model, device=self.device)
         mg.set_generation_params(duration=duration)

@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Worker, Provider
+from app.database import Provider, Worker
 
 
 class WorkerRegistry:
@@ -84,7 +84,7 @@ class WorkerRegistry:
             query = query.where(Worker.provider_id == provider_id)
         elif provider_type:
             query = query.join(Provider).where(
-                and_(Provider.provider_type == provider_type, Provider.is_active == True)
+                and_(Provider.provider_type == provider_type, Provider.is_active)
             )
 
         result = await self.db.execute(query)

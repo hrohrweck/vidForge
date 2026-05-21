@@ -112,7 +112,7 @@ describe('Providers Page', () => {
           {
             id: 'provider-created',
             name: (capturedBody.name as string) || 'New Provider',
-            provider_type: 'local',
+            provider_type: 'comfyui_direct',
             config: (capturedBody.config as Record<string, unknown>) || {},
             is_active: true,
             daily_budget_limit: 50,
@@ -137,7 +137,7 @@ describe('Providers Page', () => {
       expect(capturedBody).not.toBeNull()
       expect(capturedBody).toMatchObject({
         name: 'New Local Provider',
-        provider_type: 'local',
+        provider_type: 'comfyui_direct',
       })
     })
   })

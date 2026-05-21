@@ -1,6 +1,5 @@
 import asyncio
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -302,7 +301,6 @@ class VideoProcessor:
         thumb_height: int = 90,
     ) -> str:
         """Create a sprite sheet of thumbnails for video scrubbing preview."""
-        import math
 
         duration = await VideoProcessor.get_duration(video_path)
         count = columns * rows

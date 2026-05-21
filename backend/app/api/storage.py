@@ -1,12 +1,11 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.config import get_settings
-from app.database import User, get_db
+from app.database import User
 from app.storage import get_storage_backend
 
 router = APIRouter()

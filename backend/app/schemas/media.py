@@ -1,11 +1,12 @@
 """Media library Pydantic schemas"""
 
 from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileType(str, Enum):
@@ -36,7 +37,7 @@ class FolderUpdate(BaseModel):
 
 class FolderResponse(FolderBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: str
     user_id: str
     parent_id: str | None
@@ -65,7 +66,7 @@ class TagUpdate(BaseModel):
 
 class TagResponse(TagBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: str
     user_id: str
     created_at: datetime
@@ -87,7 +88,7 @@ class AssetListQuery(BaseModel):
 
 class AssetResponse(FolderBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: str
     user_id: str
     folder_id: str | None

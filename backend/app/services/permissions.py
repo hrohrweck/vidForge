@@ -3,11 +3,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import (
-    Permission,
     Group,
-    UserGroup,
     GroupPermission,
+    Permission,
     User,
+    UserGroup,
     get_db,
 )
 

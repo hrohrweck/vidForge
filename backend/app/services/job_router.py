@@ -7,13 +7,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Provider, Job, Worker
+from app.database import Job, Provider
+from app.services.budget_tracker import BudgetTracker
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 from app.services.providers.comfyui_direct import ComfyUIDirectProvider
 from app.services.providers.poe import PoeProvider
 from app.services.providers.runpod import RunPodProvider
 from app.services.worker_registry import WorkerRegistry
-from app.services.budget_tracker import BudgetTracker
 
 
 class JobRouterError(Exception):
@@ -82,7 +82,7 @@ class JobRouter:
         try:
             provider_id = UUID(preference)
             result = await self.db.execute(
-                select(Provider).where(Provider.id == provider_id, Provider.is_active == True)
+                select(Provider).where(Provider.id == provider_id, Provider.is_active)
             )
             provider = result.scalar_one_or_none()
             if provider:
@@ -90,9 +90,9 @@ class JobRouter:
                 return provider, instance, f"Provider {provider.name} selected by ID"
         except ValueError:
             pass
-        
+
         result = await self.db.execute(
-            select(Provider).where(Provider.is_active == True).order_by(Provider.priority.desc())
+            select(Provider).where(Provider.is_active).order_by(Provider.priority.desc())
         )
         providers = list(result.scalars().all())
 
@@ -197,7 +197,7 @@ class JobRouter:
         return await instance.get_status()
 
     async def get_all_providers_status(self) -> list[dict[str, Any]]:
-        result = await self.db.execute(select(Provider).where(Provider.is_active == True))
+        result = await self.db.execute(select(Provider).where(Provider.is_active))
         providers = list(result.scalars().all())
 
         statuses = []

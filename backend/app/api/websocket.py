@@ -1,9 +1,8 @@
-import asyncio
 import json
 from typing import Set
 
 import redis.asyncio as redis
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from app.config import get_settings
 

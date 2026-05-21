@@ -5,8 +5,9 @@ import asyncio
 import sys
 from getpass import getpass
 
-from app.database import async_session, User
 from sqlalchemy import select
+
+from app.database import User, async_session
 
 
 async def create_superuser() -> None:

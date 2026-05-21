@@ -1,6 +1,5 @@
 import json
 import random
-import subprocess
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -11,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import Job, Provider, UserSettings
 from app.services.job_router import JobRouter
-from app.services.model_config import get_model_config, get_default_model_preferences
+from app.services.model_config import get_default_model_preferences, get_model_config
 from app.services.providers import (
     ComfyUIDirectProvider,
     PoeProvider,
@@ -188,7 +187,7 @@ async def generate_image(
     # Get user's model preferences
     user_prefs = await get_user_model_preferences(db, job.user_id)
     selected_model = model_preference or user_prefs.get("image_model", "sdxl")
-    model_config = get_model_config(selected_model)
+    _ = get_model_config(selected_model)
 
     provider, instance = await get_comfyui_direct_provider(db, provider_id)
 

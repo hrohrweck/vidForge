@@ -3,25 +3,22 @@ import json
 import random
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from uuid import UUID
 
 from app.config import get_settings
 from app.services import ComfyUIClient
+from app.services.audio_analyzer import AudioAnalyzer
 from app.services.audio_generation import (
     MusicGenService,
     TTSService,
-    generate_background_music,
-    generate_narration,
 )
-from app.services.audio_analyzer import AudioAnalyzer
 from app.services.llm_service import (
     PromptEnhancer,
     enhance_prompt_for_video,
     segment_script_for_video,
 )
 from app.services.template_loader import (
-    TemplateLoader,
     StyleLoader,
+    TemplateLoader,
     load_comfyui_workflow,
     merge_style_into_workflow,
 )
@@ -384,7 +381,6 @@ class VideoGenerator:
         return {"audio": None, "narration_duration": 0}
 
     async def _get_audio_duration(self, audio_path: str) -> float:
-        import json
 
         cmd = [
             "ffprobe",
@@ -539,6 +535,8 @@ class VideoGenerator:
         workflow = merge_style_into_workflow(workflow, style_params)
 
         audio_file = context.get("audio_file", "")
+        # audio_file available in context for downstream merge
+        _ = audio_file
 
         segments_dir = self.output_dir / "segments"
         segments_dir.mkdir(parents=True, exist_ok=True)

@@ -5,11 +5,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import User, Group, UserGroup, get_db
+from app.database import Group, User, UserGroup, get_db
 from app.services.permissions import get_user_permissions
 
 router = APIRouter()
@@ -148,15 +148,15 @@ async def get_current_user_from_bearer_or_cookie(
 ) -> User:
     import logging
     logger = logging.getLogger(__name__)
-    
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     logger.info(f"Auth check - cookies: {request.cookies}, token_name: {TOKEN_COOKIE_NAME}")
-    
+
     if credentials and credentials.credentials:
         try:
             payload = jwt.decode(
@@ -178,7 +178,7 @@ async def get_current_user_from_bearer_or_cookie(
             return user
         except JWTError:
             pass
-    
+
     token = request.cookies.get(TOKEN_COOKIE_NAME)
     if token:
         try:
@@ -201,7 +201,7 @@ async def get_current_user_from_bearer_or_cookie(
             return user
         except JWTError:
             pass
-    
+
     raise credentials_exception
 
 
@@ -304,6 +304,15 @@ async def login(
 async def logout(response: Response) -> dict:
     response.delete_cookie(key=TOKEN_COOKIE_NAME)
     return {"message": "Logged out"}
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token(
+    current_user: User = Depends(get_current_user),
+) -> Token:
+    """Issue a fresh access token for an authenticated user."""
+    token = create_access_token(data={"sub": str(current_user.id)})
+    return Token(access_token=token, token_type="bearer")
 
 
 @router.get("/me", response_model=UserResponse)
