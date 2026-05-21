@@ -241,52 +241,13 @@ async def generate_video(
 
     provider, instance = await get_comfyui_direct_provider(db, provider_id)
 
-    workflow_name = VIDEO_WORKFLOW_MAP.get(model_preference or "", "wan_t2v.json")
-    workflow = load_comfyui_workflow(workflow_name) or _build_minimal_workflow(
-        model_preference or "wan2.2_t2v"
+    # Build a proper Wan2.2 workflow with correct parameters
+    workflow = _build_wan_video_workflow(
+        prompt=prompt,
+        aspect_ratio=aspect_ratio,
+        frames=_duration_to_frames(duration),
+        provider_config=instance.config,
     )
-
-    seed = random.randint(0, 2**31 - 1)
-
-    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
-    frames = _duration_to_frames(duration)
-
-    prompt_applied = False
-    for node_id, node in workflow.items():
-        if isinstance(node, dict) and "inputs" in node:
-            class_type = str(node.get("class_type", ""))
-            if node["inputs"].get("text") == "${positive_prompt}":
-                node["inputs"]["text"] = prompt
-                prompt_applied = True
-            elif class_type == "CLIPTextEncode" and not prompt_applied:
-                node["inputs"]["text"] = prompt
-                prompt_applied = True
-            elif "prompt" in node["inputs"]:
-                node["inputs"]["prompt"] = prompt
-                prompt_applied = True
-            if "width" in node["inputs"]:
-                node["inputs"]["width"] = width
-            if "height" in node["inputs"]:
-                node["inputs"]["height"] = height
-            if "frames" in node["inputs"]:
-                node["inputs"]["frames"] = frames
-            if "length" in node["inputs"]:
-                node["inputs"]["length"] = frames
-            if "batch_size" in node["inputs"]:
-                node["inputs"]["batch_size"] = 1
-            if "seed" in node["inputs"]:
-                node["inputs"]["seed"] = seed
-            if "steps" in node["inputs"] and node["inputs"]["steps"] > 5:
-                node["inputs"]["steps"] = 5
-
-    if frames > 25:
-        frames = 25
-        for node_id, node in workflow.items():
-            if isinstance(node, dict) and "inputs" in node:
-                if node["inputs"].get("length"):
-                    node["inputs"]["length"] = frames
-                if node["inputs"].get("frames"):
-                    node["inputs"]["frames"] = frames
 
     prompt_id = await instance.queue_prompt(workflow)
     result = await instance.wait_for_completion(prompt_id)
@@ -303,58 +264,34 @@ async def generate_video(
     )
 
 
-def _build_minimal_workflow(model: str) -> dict[str, Any]:
-    return {
-        "1": {
-            "inputs": {
-                "text": "",
-                "clip": ["2", 0],
-            },
-            "class_type": "CLIPTextEncode",
-        },
-        "2": {
-            "inputs": {"clip": []},
-            "class_type": "CLIP",
-        },
-        "3": {
-            "inputs": {
-                "width": 1280,
-                "height": 720,
-                "length": 25,
-                "batch_size": 1,
-            },
-            "class_type": "EmptyHunyuanLatentVideo",
-        },
-        "4": {
-            "inputs": {
-                "model": [],
-                "positive": ["1", 0],
-                "negative": ["1", 0],
-                "latent": ["3", 0],
-            },
-            "class_type": "HunyuanVideoSampler",
-        },
-    }
-
-
 def _build_wan_video_workflow(
     prompt: str,
     aspect_ratio: str,
     frames: int,
     provider_config: dict[str, Any],
 ) -> dict[str, Any]:
-    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    """Build a Wan2.2 video generation workflow.
+
+    Uses the image-to-video (ti2v) model by default, which produces
+    higher quality than text-to-video.
+    """
+    width, height = _video_generation_resolution(aspect_ratio)
     seed = random.randint(0, 2**31 - 1)
 
     clip_name = str(provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
     vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
     unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
-    steps = int(provider_config.get("wan_steps") or 5)
-    cfg = float(provider_config.get("wan_cfg") or 5.0)
-    shift = float(provider_config.get("wan_shift") or 8.0)
-    fps = int(provider_config.get("wan_fps") or 6)
 
-    workflow = {
+    # Quality settings — these are the sweet spot for Wan2.2
+    steps = int(provider_config.get("wan_video_steps") or 30)
+    cfg = float(provider_config.get("wan_video_cfg") or 5.0)
+    shift = float(provider_config.get("wan_video_shift") or 8.0)
+    fps = int(provider_config.get("wan_video_fps") or 16)
+    sampler = str(provider_config.get("wan_video_sampler") or "uni_pc")
+    scheduler = str(provider_config.get("wan_video_scheduler") or "simple")
+    negative_prompt = str(provider_config.get("wan_video_negative_prompt") or "")
+
+    return {
         "1": {
             "class_type": "CLIPLoader",
             "inputs": {"clip_name": clip_name, "type": "wan"},
@@ -365,7 +302,7 @@ def _build_wan_video_workflow(
         },
         "3": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": "", "clip": ["1", 0]},
+            "inputs": {"text": negative_prompt, "clip": ["1", 0]},
         },
         "4": {
             "class_type": "VAELoader",
@@ -393,8 +330,8 @@ def _build_wan_video_workflow(
                 "seed": seed,
                 "steps": steps,
                 "cfg": cfg,
-                "sampler_name": "uni_pc",
-                "scheduler": "simple",
+                "sampler_name": sampler,
+                "scheduler": scheduler,
                 "denoise": 1.0,
             },
         },
@@ -409,41 +346,6 @@ def _build_wan_video_workflow(
         "11": {
             "class_type": "SaveVideo",
             "inputs": {"video": ["10", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
-        },
-    }
-    return workflow
-
-
-def _build_minimal_workflow(model: str) -> dict[str, Any]:
-    return {
-        "1": {
-            "inputs": {
-                "text": "",
-                "clip": ["2", 0],
-            },
-            "class_type": "CLIPTextEncode",
-        },
-        "2": {
-            "inputs": {"clip": []},
-            "class_type": "CLIP",
-        },
-        "3": {
-            "inputs": {
-                "width": 1280,
-                "height": 720,
-                "length": 25,
-                "batch_size": 1,
-            },
-            "class_type": "EmptyHunyuanLatentVideo",
-        },
-        "4": {
-            "inputs": {
-                "model": [],
-                "positive": ["1", 0],
-                "negative": ["1", 0],
-                "latent": ["3", 0],
-            },
-            "class_type": "HunyuanVideoSampler",
         },
     }
 
@@ -608,9 +510,36 @@ def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
     return ratios.get(aspect_ratio, (1280, 720))
 
 
-def _duration_to_frames(duration: int, fps: int = 4) -> int:
-    frames = duration * fps
-    return max(frames - (frames % 8) + 1, 9)
+def _duration_to_frames(duration: int, fps: int = 16) -> int:
+    """Convert duration in seconds to frame count.
+
+    Wan2.2 works well with 16fps.  Frame count is always odd (>= 9)
+    as required by EmptyHunyuanLatentVideo.
+    """
+    frames = int(duration * fps)
+    if frames < 9:
+        frames = 9
+    if frames % 2 == 0:
+        frames += 1
+    return frames
+
+
+def _video_generation_resolution(aspect_ratio: str) -> tuple[int, int]:
+    """Resolution for video generation.
+
+    Uses 848x480 (or equivalent) which is the sweet spot for Wan2.2
+    on consumer GPUs — large enough for good quality, small enough
+    to fit in VRAM at 30 steps with 80+ frames.
+    """
+    ratios = {
+        "16:9": (848, 480),
+        "9:16": (480, 848),
+        "1:1": (640, 640),
+        "4:3": (640, 480),
+        "3:2": (640, 432),
+        "21:9": (848, 384),
+    }
+    return ratios.get(aspect_ratio, (848, 480))
 
 
 def _build_flux_image_workflow(
