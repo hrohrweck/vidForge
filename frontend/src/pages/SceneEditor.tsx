@@ -14,8 +14,7 @@ import {
   CheckCircle, Clock, AlertCircle, Trash2, Plus,
 } from 'lucide-react'
 import {
-  jobsApi, scenesApi, type VideoScene, type SceneUpdate,
-  type Template,
+  jobsApi, scenesApi, templatesApi, type VideoScene, type SceneUpdate,
 } from '../api/client'
 import { Button } from '../components/ui/button'
 import { SceneEditModal } from '../components/SceneEditModal'
@@ -68,25 +67,26 @@ export default function SceneEditor() {
     },
   })
 
-  // Resolve template → plugin_id
-  const pluginId = useMemo(() => {
-    // We'll load the template to read plugin_id from config
-    return job?.input_data?.plugin_id as string | undefined
-  }, [job])
-
+  // Resolve template → plugin_id via the templates API
   const { data: template } = useQuery({
     queryKey: ['template', job?.template_id],
     queryFn: async () => {
-      if (!job?.template_id) return null
-      const res = await fetch(`/api/templates/${job.template_id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-      })
-      return res.json() as Promise<Template>
+      const resp = await templatesApi.get(job!.template_id!)
+      return resp.data
     },
     enabled: !!job?.template_id,
   })
 
-  const resolvedPluginId = pluginId || (template?.config?.plugin_id as string) || 'music_video'
+  // Plugin ID from template config, with smart fallback based on input_data
+  const resolvedPluginId = useMemo(() => {
+    if (template?.config?.plugin_id) return template.config.plugin_id as string
+    // Fallback: infer from input_data before template loads
+    const input = job?.input_data || {}
+    if ('script' in input) return 'script_to_video'
+    if ('prompt' in input && !('audio_file' in input)) return 'prompt_to_video'
+    if ('audio_file' in input) return 'music_video'
+    return 'music_video'
+  }, [template?.config?.plugin_id, job?.input_data])
 
   const { data: scenes, isLoading: scenesLoading, refetch: refetchScenes } = useQuery({
     queryKey: ['scenes', jobId],
