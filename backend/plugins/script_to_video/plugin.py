@@ -142,10 +142,44 @@ class ScriptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job,
         scenes: list[VideoScene], context: dict[str, Any],
     ) -> dict[str, Any]:
-        # Use default render, but pass narration audio path
+        # Pass narration audio to the renderer
         narration_path = context.get("narration_path")
         if narration_path:
+            context["audio_file"] = narration_path
             context["audio_volume"] = 1.0
+
+        # Generate background music if requested
+        input_data = job.input_data or {}
+        if input_data.get("background_music", True):
+            try:
+                from app.services.audio_generation import MusicGenService
+
+                svc = MusicGenService()
+                if await svc.is_available():
+                    # Build a music prompt from the script content
+                    script_text = input_data.get("script", "")
+                    music_prompt = _build_music_prompt(script_text)
+                    total_duration = context.get("total_duration", 30)
+
+                    settings = get_settings()
+                    output_dir = Path(settings.storage_path) / "output" / str(job.id)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    bgm_path = str(output_dir / "background_music.mp3")
+
+                    logger.info("Generating background music (%.0fs): %s", total_duration, music_prompt)
+                    actual_path = await svc.generate(
+                        prompt=music_prompt,
+                        output_path=bgm_path,
+                        duration=min(total_duration, 120),
+                        output_format="mp3",
+                    )
+                    context["background_music"] = actual_path
+                    context["background_music_volume"] = 0.3
+                    logger.info("Background music generated: %s", actual_path)
+                else:
+                    logger.warning("AudioCraft server not available, skipping background music")
+            except Exception:
+                logger.warning("Failed to generate background music", exc_info=True)
 
         return await super().render(db, job, scenes, context)
 
@@ -162,3 +196,15 @@ class ScriptToVideoPlugin(PluginBase):
                 {"id": "export", "label": "Export", "component": "ExportPanel"},
             ],
         }
+
+
+def _build_music_prompt(script_text: str) -> str:
+    """Derive a music generation prompt from the script content."""
+    # Take first 200 chars of the script as inspiration
+    snippet = script_text[:200].replace("\n", " ").strip()
+    # Remove bracket annotations
+    import re
+    snippet = re.sub(r"\[[^\]]+\]", "", snippet).strip()
+    if len(snippet) > 100:
+        snippet = snippet[:100]
+    return f"Subtle ambient background music for a video. Mood: {snippet}"

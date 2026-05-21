@@ -234,12 +234,46 @@ class PluginBase(ABC):
         final_path = output_dir / "final.mp4"
         input_data = job.input_data or {}
         audio_file = input_data.get("audio_file") or context.get("audio_file")
-        if audio_file:
+        bgm_file = context.get("background_music")
+        bgm_volume = context.get("background_music_volume", 0.3)
+
+        if audio_file and bgm_file:
+            # Mix narration + background music
+            audio_path = storage_path / audio_file
+            bgm_path = Path(bgm_file)
+            if audio_path.exists() and bgm_path.exists():
+                mixed_audio = output_dir / "mixed_audio.mp3"
+                await VideoProcessor.mix_audio(
+                    [str(audio_path), str(bgm_path)],
+                    str(mixed_audio),
+                    volumes=[context.get("audio_volume", 1.0), bgm_volume],
+                )
+                await VideoProcessor.add_audio(
+                    str(merged_path), str(mixed_audio), str(final_path),
+                    audio_volume=1.0,
+                )
+            elif audio_path.exists():
+                await VideoProcessor.add_audio(
+                    str(merged_path), str(audio_path), str(final_path),
+                    audio_volume=context.get("audio_volume", 1.0),
+                )
+            else:
+                shutil.copy(str(merged_path), str(final_path))
+        elif audio_file:
             audio_path = storage_path / audio_file
             if audio_path.exists():
                 await VideoProcessor.add_audio(
                     str(merged_path), str(audio_path), str(final_path),
                     audio_volume=context.get("audio_volume", 1.0),
+                )
+            else:
+                shutil.copy(str(merged_path), str(final_path))
+        elif bgm_file:
+            bgm_path = Path(bgm_file)
+            if bgm_path.exists():
+                await VideoProcessor.add_audio(
+                    str(merged_path), str(bgm_path), str(final_path),
+                    audio_volume=bgm_volume,
                 )
             else:
                 shutil.copy(str(merged_path), str(final_path))

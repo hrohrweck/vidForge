@@ -61,6 +61,25 @@ services:
       - ollama
     restart: on-failure
 
+  audiocraft:
+    build:
+      context: ./audiocraft
+      dockerfile: Dockerfile
+    ports:
+      - "5050:5000"
+    volumes:
+      - audiocraft-cache:/app/hf_cache
+      - vidforge-storage:/shared-storage
+    environment:
+      - HF_HOME=/app/hf_cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: on-failure
+
   ollama:
     image: ollama/ollama:rocm
     ports:
@@ -113,3 +132,4 @@ volumes:
   redis-data:
   vidforge-storage:
   ollama-data:
+  audiocraft-cache:

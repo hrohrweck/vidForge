@@ -143,7 +143,7 @@ class TestTemplateLoaderOperations:
             templates = loader.load_all_templates()
             template_names = [t["name"] for t in templates]
 
-            assert "Music Video" in template_names
+            assert "Music Video (Scene-Based)" in template_names
             assert "Prompt to Video" in template_names
             assert "Script to Video" in template_names
         except FileNotFoundError:

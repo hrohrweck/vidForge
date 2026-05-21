@@ -255,87 +255,87 @@ class TTSService:
 
 
 class MusicGenService:
-    def __init__(self, output_dir: Path | None = None, device: str = "cuda"):
-        self.output_dir = output_dir or Path("./storage/music")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.device = device
+    """Generate background music via the remote AudioCraft container.
+
+    The container exposes a simple REST API at ``/generate``.  This
+    service is a thin HTTP client — no model loading happens in the
+    backend process.
+    """
+
+    def __init__(self, base_url: str | None = None):
+        from app.config import get_settings
+        settings = get_settings()
+        self.base_url = (base_url or settings.audiocraft_url).rstrip("/")
 
     async def generate(
         self,
         prompt: str,
         output_path: str | None = None,
         duration: float = 10.0,
-        model: str = "facebook/musicgen-small",
+        output_format: str = "mp3",
     ) -> str:
+        """Generate music and return the local file path.
+
+        If *output_path* is given the file is copied there; otherwise
+        a path under ``storage/music/`` is used.
+        """
+        from pathlib import Path
+
+        import httpx
+
+        url = f"{self.base_url}/generate"
+        payload = {
+            "prompt": prompt,
+            "duration": duration,
+            "output_format": output_format,
+        }
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        remote_path = data["path"]
+
+        # If audiocraft container shares the storage volume, the file
+        # is already accessible.  Otherwise, download it.
+        remote = Path(remote_path)
+        if remote.exists():
+            if output_path:
+                import shutil
+                out = Path(output_path)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(remote), str(out))
+                return str(out)
+            return str(remote)
+
+        # Fallback: download via HTTP
+        filename = data["filename"]
+        file_url = f"{self.base_url}/files/{filename}"
         if not output_path:
-            import uuid
+            output_path = str(Path("./storage/music") / filename)
 
-            output_path = str(self.output_dir / f"{uuid.uuid4()}.wav")
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
 
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+            async with client.stream("GET", file_url) as stream:
+                stream.raise_for_status()
+                with open(out, "wb") as f:
+                    async for chunk in stream.aiter_bytes(chunk_size=65536):
+                        f.write(chunk)
+
+        return str(out)
+
+    async def is_available(self) -> bool:
+        """Check if the AudioCraft server is reachable."""
+        import httpx
         try:
-            return await self._generate_with_audiocraft(prompt, output_path, duration, model)
-        except ImportError:
-            return await self._generate_with_cli(prompt, output_path, duration, model)
-
-    async def _generate_with_audiocraft(
-        self,
-        prompt: str,
-        output_path: str,
-        duration: float,
-        model: str,
-    ) -> str:
-        from audiocraft.data.audio import audio_write
-        from audiocraft.models import MusicGen
-
-        mg = MusicGen.get_pretrained(model, device=self.device)
-        mg.set_generation_params(duration=duration)
-
-        wav = mg.generate([prompt])
-        wav = wav.cpu()
-
-        for idx, one_wav in enumerate(wav):
-            audio_write(
-                output_path.replace(".wav", ""),
-                one_wav,
-                mg.sample_rate,
-                strategy="loudness",
-            )
-
-        return output_path
-
-    async def _generate_with_cli(
-        self,
-        prompt: str,
-        output_path: str,
-        duration: float,
-        model: str,
-    ) -> str:
-        cmd = [
-            "python",
-            "-m",
-            "audiocraft",
-            "generate",
-            "--prompt",
-            prompt,
-            "--duration",
-            str(duration),
-            "--output",
-            output_path,
-            "--model",
-            model,
-        ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-
-        if proc.returncode != 0:
-            raise TTSError(f"MusicGen failed: {stderr.decode()}")
-
-        return output_path
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+                resp = await client.get(f"{self.base_url}/health")
+                return resp.status_code == 200
+        except Exception:
+            return False
 
 
 async def generate_narration(

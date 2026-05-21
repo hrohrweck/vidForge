@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     admin,
+    audio,
     auth,
     jobs,
     media,
@@ -107,6 +108,7 @@ app.include_router(providers.router, prefix="/api/providers", tags=["providers"]
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(scenes.router, prefix="/api/jobs", tags=["scenes"])
 app.include_router(media.router, prefix="/api/media", tags=["media"])
+app.include_router(audio.router, prefix="/api/audio", tags=["audio"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 
 
