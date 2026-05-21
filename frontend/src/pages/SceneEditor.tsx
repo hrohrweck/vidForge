@@ -413,16 +413,45 @@ export default function SceneEditor() {
                           </div>
                         </div>
 
-                        {/* Thumbnail */}
-                        {scene.reference_image_path && (
-                          <div className="mt-2">
-                            <img
-                              src={`/api/uploads/stream/${scene.reference_image_path}`}
-                              alt={`Scene ${index + 1}`}
-                              className="h-20 object-cover rounded border"
-                            />
-                          </div>
-                        )}
+                        {/* Media preview */}
+                        <div className="mt-3 flex gap-3">
+                          {/* Image thumbnail */}
+                          {scene.reference_image_path && !scene.generated_video_path && (
+                            <div className="relative group/img">
+                              <img
+                                src={`/api/uploads/stream/${scene.reference_image_path}`}
+                                alt={`Scene ${index + 1}`}
+                                className="h-24 object-cover rounded-lg border"
+                              />
+                              <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
+                                IMAGE
+                              </span>
+                            </div>
+                          )}
+                          {/* Video player */}
+                          {scene.generated_video_path && (
+                            <div className="relative">
+                              <video
+                                src={`/api/uploads/stream/${scene.generated_video_path}`}
+                                className="h-24 object-cover rounded-lg border"
+                                controls
+                                muted
+                                preload="metadata"
+                                onError={(e) => {
+                                  // Fallback: try with different URL pattern
+                                  const vid = e.currentTarget
+                                  if (!vid.dataset.retried) {
+                                    vid.dataset.retried = '1'
+                                    vid.src = `/api/uploads/stream/${scene.generated_video_path}`
+                                  }
+                                }}
+                              />
+                              <span className="absolute bottom-1 left-1 bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5 rounded font-medium">
+                                VIDEO
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
