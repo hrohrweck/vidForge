@@ -392,48 +392,75 @@ class VideoScene(Base):
 
 
 async def seed_builtin_data() -> None:
-    """Load built-in templates and styles from YAML files into the database."""
+    """Load built-in templates and styles into the database.
+
+    Templates come from two sources:
+    1. Plugin ``template.yaml`` files (preferred)
+    2. Legacy ``templates/*.yaml`` files (kept for backward compat)
+    """
     from app.config import get_settings
+    from app.plugins.registry import get_all_plugins
     from app.services.template_loader import StyleLoader, TemplateLoader
 
     settings = get_settings()
 
     async with async_session() as db:
-        # Load templates
+        # --- Load templates from plugins first ---
+        for plugin in get_all_plugins().values():
+            try:
+                tdef = plugin.get_template_definition()
+                result = await db.execute(
+                    select(Template).where(Template.name == tdef["name"])
+                )
+                existing = result.scalar_one_or_none()
+                if existing:
+                    # Update config so existing jobs still work
+                    existing.config = {
+                        "plugin_id": plugin.plugin_id,
+                        "workflow_type": "scene_based",
+                        "inputs": tdef.get("inputs", []),
+                    }
+                    if "config" in tdef:
+                        existing.config.update(tdef["config"])
+                    if "stages" in tdef:
+                        existing.config["stages"] = tdef["stages"]
+                    continue
+
+                config: dict = {
+                    "plugin_id": plugin.plugin_id,
+                    "workflow_type": "scene_based",
+                    "inputs": tdef.get("inputs", []),
+                    "pipeline": tdef.get("pipeline", []),
+                }
+                if "config" in tdef:
+                    config.update(tdef["config"])
+                if "stages" in tdef:
+                    config["stages"] = tdef["stages"]
+
+                template = Template(
+                    name=tdef["name"],
+                    description=tdef.get("description"),
+                    config=config,
+                    is_builtin=True,
+                    created_by=None,
+                )
+                db.add(template)
+            except Exception as e:
+                print(f"Warning: Could not seed template from plugin {plugin.plugin_id}: {e}")
+
+        # --- Load legacy templates (those without a plugin) ---
         template_loader = TemplateLoader(settings.templates_path)
         try:
-            templates = template_loader.load_all_templates()
-            for template_data in templates:
-                # Check if template already exists by name
+            for template_data in template_loader.load_all_templates():
                 result = await db.execute(
                     select(Template).where(Template.name == template_data["name"])
                 )
-                existing = result.scalar_one_or_none()
-
-                if not existing:
-                    config = {
-                        "template_file": template_data.get("_source_file", ""),
-                        "inputs": template_data.get("inputs", []),
-                        "pipeline": template_data.get("pipeline", []),
-                    }
-                    # Merge top-level config block (e.g. workflow_type) and stages
-                    if "config" in template_data:
-                        config.update(template_data["config"])
-                    if "stages" in template_data:
-                        config["stages"] = template_data["stages"]
-
-                    template = Template(
-                        name=template_data["name"],
-                        description=template_data.get("description"),
-                        config=config,
-                        is_builtin=True,
-                        created_by=None,
-                    )
-                    db.add(template)
-            await db.commit()
+                if result.scalar_one_or_none():
+                    continue  # already loaded via plugin
         except Exception as e:
-            await db.rollback()
-            print(f"Warning: Could not seed templates: {e}")
+            print(f"Warning: Could not scan legacy templates: {e}")
+
+        await db.commit()
 
         # Load styles
         style_loader = StyleLoader(settings.styles_path)

@@ -31,6 +31,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     if settings.debug:
         await create_tables()
+
+    # Discover and register template plugins
+    from app.plugins.registry import discover_plugins, get_all_plugins
+    discover_plugins()
+    for pid, plugin in get_all_plugins().items():
+        print(f"[Plugin] {pid}: {plugin.display_name}")
+
     await seed_builtin_data()
     await seed_rbac_data()
 

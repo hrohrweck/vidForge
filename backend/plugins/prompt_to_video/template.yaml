@@ -1,0 +1,78 @@
+name: "Prompt to Video"
+description: "Generate a video from a text prompt"
+inputs:
+  - name: prompt
+    type: text
+    required: true
+    description: "Text description of the video to generate"
+  - name: style
+    type: select
+    options: [realistic, anime, manga]
+    default: realistic
+    required: true
+    description: "Visual style for the generated video"
+  - name: duration
+    type: number
+    default: 5
+    min: 2
+    max: 30
+    required: false
+    description: "Video duration in seconds"
+  - name: aspect_ratio
+    type: select
+    options: ["16:9", "9:16", "1:1"]
+    default: "16:9"
+    required: false
+    description: "Output video aspect ratio"
+  - name: fps
+    type: number
+    default: 24
+    min: 15
+    max: 60
+    required: false
+    description: "Frames per second"
+  - name: generate_audio
+    type: boolean
+    default: false
+    required: false
+    description: "Generate background music"
+pipeline:
+  - step: enhance_prompt
+    model: llm
+    description: "Enhance prompt for video generation"
+    inputs:
+      - prompt
+      - style
+    outputs:
+      - enhanced_prompt
+  - step: generate_video
+    model: wan2.2_t2v
+    description: "Generate video from prompt"
+    inputs:
+      - enhanced_prompt
+    params:
+      duration: ${duration}
+      fps: ${fps}
+    outputs:
+      - video
+  - step: generate_audio
+    model: musicgen
+    description: "Generate background music"
+    condition: ${generate_audio}
+    inputs:
+      - prompt
+    outputs:
+      - audio
+  - step: combine
+    tool: ffmpeg
+    description: "Combine video and audio"
+    condition: ${generate_audio}
+    inputs:
+      - video
+      - audio
+    outputs:
+      - final_video
+  - step: generate_preview
+    description: "Generate low-res preview"
+    outputs:
+      - preview
