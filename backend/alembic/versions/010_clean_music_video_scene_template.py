@@ -26,6 +26,10 @@ def upgrade() -> None:
         "inputs": template_data.get("inputs", []),
         "pipeline": template_data.get("pipeline", []),
     }
+    if "config" in template_data:
+        new_config.update(template_data["config"])
+    if "stages" in template_data:
+        new_config["stages"] = template_data["stages"]
 
     conn = op.get_bind()
     conn.execute(

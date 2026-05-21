@@ -23,6 +23,12 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git && \
     cd ComfyUI && \
     pip install -r requirements.txt
 
+# Install ComfyUI-LTXVideo custom nodes
+RUN cd /workspace/ComfyUI/custom_nodes && \
+    git clone https://github.com/Lightricks/ComfyUI-LTXVideo.git && \
+    cd ComfyUI-LTXVideo && \
+    pip install -r requirements.txt
+
 COPY comfyui-entrypoint.sh /usr/local/bin/comfyui-entrypoint.sh
 RUN chmod +x /usr/local/bin/comfyui-entrypoint.sh
 

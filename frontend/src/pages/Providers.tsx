@@ -5,6 +5,7 @@ import { Plus, RefreshCw, Pencil, Trash2, Power, PowerOff, RotateCcw } from 'luc
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/auth'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import {
   Provider,
   ProviderCreateRequest,
@@ -191,7 +192,7 @@ export default function Providers() {
   if (!user?.is_superuser) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <p className="mb-4 text-red-600">Admin access is required.</p>
+        <p className="mb-4 text-destructive">Admin access is required.</p>
         <Button variant="outline" onClick={() => navigate('/')}>
           Back to Dashboard
         </Button>
@@ -446,19 +447,15 @@ export default function Providers() {
                       <p className="text-sm text-muted-foreground">Type: {provider.provider_type}</p>
                       <p className="text-sm text-muted-foreground">
                         Priority: {provider.priority} · Active:{' '}
-                        <span className={provider.is_active ? 'text-green-700' : 'text-red-700'}>
+                        <span className={provider.is_active ? 'text-primary' : 'text-destructive'}>
                           {provider.is_active ? 'Yes' : 'No'}
                         </span>
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs ${
-                          status?.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}
-                      >
+                      <Badge variant={status?.is_available ? 'outline' : 'destructive'}>
                         {status?.is_available ? 'Available' : 'Unavailable'}
-                      </span>
+                      </Badge>
                       {status?.estimated_wait_seconds != null && (
                         <span className="px-2 py-1 rounded-full bg-secondary text-sm">
                           wait {status.estimated_wait_seconds}s
@@ -523,7 +520,7 @@ export default function Providers() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-red-600"
+                      className="text-destructive"
                       onClick={() => {
                         if (window.confirm(`Delete provider ${provider.name}?`)) {
                           setActionError('')
@@ -976,7 +973,7 @@ function PoeModelsSection({ providerId }: PoeModelsSectionProps) {
                 <td className="py-2 text-right">
                   <button
                     type="button"
-                    className="text-red-500 hover:text-red-700"
+                    className="text-destructive hover:text-destructive/80"
                     onClick={() => {
                       if (confirm('Delete this model?')) {
                         deleteMutation.mutate(model.id)

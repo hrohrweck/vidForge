@@ -100,9 +100,50 @@ class WorkerResponse(BaseModel):
         from_attributes = True
 
 
+@router.get("/status", response_model=list[ProviderStatusResponse])
+async def list_providers_status(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    router = JobRouter(db)
+    statuses = await router.get_all_providers_status()
+
+    result = await db.execute(select(Provider))
+    providers = {str(p.id): p for p in result.scalars().all()}
+
+    response = []
+    for status in statuses:
+        provider = providers.get(status["id"])
+        if provider:
+            response.append(
+                ProviderStatusResponse(
+                    id=UUID(status["id"]),
+                    name=status["name"],
+                    type=status["type"],
+                    is_available=status.get("is_available", False),
+                    estimated_wait_seconds=status.get("estimated_wait_seconds", 0),
+                    message=status.get("message", ""),
+                    workers=status.get("workers"),
+                    daily_budget_limit=float(provider.daily_budget_limit)
+                    if provider.daily_budget_limit
+                    else None,
+                    current_daily_spend=float(provider.current_daily_spend),
+                )
+            )
+
+    return response
+
+
 @router.get("", response_model=list[ProviderResponse])
 async def list_providers(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    result = await db.execute(select(Provider).order_by(Provider.priority.desc()))
+    return list(result.scalars().all())
+
+
+@router.post("", response_model=ProviderResponse)
+async def create_provider(
+    data: ProviderCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)
 ):
     result = await db.execute(select(Provider).order_by(Provider.priority.desc()))
     return list(result.scalars().all())
@@ -256,39 +297,6 @@ async def reset_provider_spend(
     if not success:
         raise HTTPException(status_code=404, detail="Provider not found")
     return {"status": "reset"}
-
-
-@router.get("/status", response_model=list[ProviderStatusResponse])
-async def list_providers_status(
-    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
-):
-    router = JobRouter(db)
-    statuses = await router.get_all_providers_status()
-
-    result = await db.execute(select(Provider))
-    providers = {str(p.id): p for p in result.scalars().all()}
-
-    response = []
-    for status in statuses:
-        provider = providers.get(status["id"])
-        if provider:
-            response.append(
-                ProviderStatusResponse(
-                    id=UUID(status["id"]),
-                    name=status["name"],
-                    type=status["type"],
-                    is_available=status.get("is_available", False),
-                    estimated_wait_seconds=status.get("estimated_wait_seconds", 0),
-                    message=status.get("message", ""),
-                    workers=status.get("workers"),
-                    daily_budget_limit=float(provider.daily_budget_limit)
-                    if provider.daily_budget_limit
-                    else None,
-                    current_daily_spend=float(provider.current_daily_spend),
-                )
-            )
-
-    return response
 
 
 @router.get("/{provider_id}/models")

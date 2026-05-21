@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { jobsApi, templatesApi, modelsApi, providersApi, Template, type VideoModel, type Provider } from '../api/client'
+import { jobsApi, templatesApi, providersApi, Template, type Provider } from '../api/client'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
@@ -17,10 +17,9 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
   const [providerPreference, setProviderPreference] = useState<string>('auto')
-  const [modelPreference, setModelPreference] = useState<string>('')
-  
+
   const queryClient = useQueryClient()
-  
+
   const { data: templates } = useQuery({
     queryKey: ['templates'],
     queryFn: async () => {
@@ -29,34 +28,19 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
     },
   })
 
-  const { data: models } = useQuery({
-    queryKey: ['models'],
-    queryFn: () => modelsApi.list(),
-  })
-
   const { data: providers } = useQuery({
     queryKey: ['providers'],
     queryFn: () => providersApi.list(),
   })
 
   const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
-  const selectedProvider = activeProviders.find((p: Provider) => p.id === providerPreference)
-  const modelProviderType = selectedProvider ? selectedProvider.provider_type : null
-  
-  const filteredModels = models?.filter((m: VideoModel) => {
-    if (!modelProviderType || modelProviderType === 'poe') return true
-    return modelProviderType === 'comfyui_direct' || modelProviderType === 'runpod'
-      ? (m.provider === 'wan' || m.provider === 'ltx')
-      : true
-  }) || []
-  
+
   const createBatchMutation = useMutation({
     mutationFn: async (data: {
       template_id: string
       jobs: Record<string, unknown>[]
       auto_start: boolean
       provider_preference: string
-      model_preference?: string
     }) => {
       return jobsApi.createBatch(data)
     },
@@ -73,8 +57,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
         selectedTemplate,
         csvFile,
         autoStart,
-        providerPreference,
-        modelPreference || undefined
+        providerPreference
       )
     },
     onSuccess: () => {
@@ -98,7 +81,6 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
           jobs,
           auto_start: autoStart,
           provider_preference: providerPreference,
-          model_preference: modelPreference || undefined,
         })
       } catch {
         alert('Invalid JSON format')
@@ -163,7 +145,6 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
               value={providerPreference}
               onChange={(e) => {
                 setProviderPreference(e.target.value)
-                setModelPreference('')
               }}
             >
               <option value="auto">Auto</option>
@@ -175,25 +156,6 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
             </select>
           </div>
 
-          <div>
-            <Label htmlFor="batch-model">Generation Model</Label>
-            <select
-              id="batch-model"
-              className="w-full mt-1 border rounded px-3 py-2"
-              value={modelPreference}
-              onChange={(e) => setModelPreference(e.target.value)}
-            >
-              <option value="">Use template default</option>
-              {filteredModels.map((model: VideoModel) => (
-                <option key={model.id} value={model.id}>
-                  {model.display_name} ({model.provider.toUpperCase()})
-                  {model.distilled ? ' - Fast' : ''}
-                  {model.modality === 'image' ? ' - Image' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          
           {mode === 'manual' && (
             <div>
               <Label htmlFor="jobInputs">Job Inputs (JSON Array)</Label>
@@ -205,7 +167,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
                 value={jobInputs}
                 onChange={(e) => setJobInputs(e.target.value)}
               />
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 Enter a JSON array where each object contains the input data for one job
               </p>
             </div>
@@ -221,7 +183,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
                 className="mt-1"
                 onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
               />
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 CSV file with headers matching template input names. Each row creates one job.
               </p>
             </div>
@@ -252,7 +214,7 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
         </div>
         
         {(createBatchMutation.isError || createCsvMutation.isError) && (
-          <p className="text-red-500 mt-2">
+          <p className="text-destructive mt-2">
             Error creating jobs. Please check your input.
           </p>
         )}

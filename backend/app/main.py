@@ -1,14 +1,15 @@
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, jobs, models, scenes, styles, storage, templates, uploads, users, providers
+from app.api import admin, auth, jobs, media, models, projects, providers, scenes, styles, storage, templates, uploads, users
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
 from app.database import create_tables, seed_builtin_data
+from app.services.model_manager import ModelManager, ModelManagerError
 
 
 @asynccontextmanager
@@ -17,6 +18,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.debug:
         await create_tables()
     await seed_builtin_data()
+
+    model_manager = ModelManager()
+    try:
+        required = ModelManager.get_required_models()
+        results = await model_manager.ensure_models(required)
+        for model, status in results.items():
+            if status == "available":
+                print(f"[ModelManager] {model} already available")
+            elif status == "pulled":
+                print(f"[ModelManager] Pulled {model}")
+            else:
+                print(f"[ModelManager] WARNING: {model} is not available and could not be pulled")
+    except ModelManagerError as e:
+        print(f"[ModelManager] Warning: {e}")
+    finally:
+        await model_manager.close()
+
     yield
 
 
@@ -29,7 +47,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://10.80.2.253"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,11 +64,31 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(scenes.router, prefix="/api/jobs", tags=["scenes"])
+app.include_router(media.router, prefix="/api/media", tags=["media"])
+app.include_router(projects.router, prefix="/api", tags=["projects"])
 
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.get("/health/models")
+async def health_models() -> dict[str, Any]:
+    from app.services.model_manager import ModelManager, ModelManagerError
+
+    model_manager = ModelManager()
+    try:
+        required = ModelManager.get_required_models()
+        available = await model_manager.list_available_models()
+        results: dict[str, str] = {}
+        for model in required:
+            results[model] = "available" if model in available else "missing"
+        return {"models": results}
+    except ModelManagerError as e:
+        return {"models": {}, "error": str(e)}
+    finally:
+        await model_manager.close()
 
 
 @app.websocket("/ws/jobs/{job_id}")

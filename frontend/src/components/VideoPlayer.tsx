@@ -142,11 +142,11 @@ export default function VideoPlayer({
           }`}
         >
           <div
-            className="w-full h-1 bg-gray-600 rounded cursor-pointer mb-3"
+            className="w-full h-1 bg-muted rounded cursor-pointer mb-3"
             onClick={handleSeek}
           >
             <div
-              className="h-full bg-blue-500 rounded"
+              className="h-full bg-primary rounded"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -155,7 +155,7 @@ export default function VideoPlayer({
             <div className="flex items-center gap-2">
               <button
                 onClick={togglePlay}
-                className="text-white hover:text-blue-400 transition"
+                className="text-white hover:text-primary transition"
               >
                 {isPlaying ? (
                   <Pause className="h-5 w-5" />
@@ -166,7 +166,7 @@ export default function VideoPlayer({
 
               <button
                 onClick={toggleMute}
-                className="text-white hover:text-blue-400 transition"
+                className="text-white hover:text-primary transition"
               >
                 {isMuted ? (
                   <VolumeX className="h-5 w-5" />
@@ -196,7 +196,7 @@ export default function VideoPlayer({
               {showDownload && (
                 <button
                   onClick={handleDownload}
-                  className="text-white hover:text-blue-400 transition"
+                  className="text-white hover:text-primary transition"
                 >
                   <Download className="h-5 w-5" />
                 </button>
@@ -204,7 +204,7 @@ export default function VideoPlayer({
 
               <button
                 onClick={handleFullscreen}
-                className="text-white hover:text-blue-400 transition"
+                className="text-white hover:text-primary transition"
               >
                 <Maximize className="h-5 w-5" />
               </button>

@@ -6,6 +6,7 @@ import { jobsApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import JobCreateModal from '../components/JobCreateModal'
 import { BatchJobModal } from '../components/BatchJobModal'
+import { Badge } from '../components/ui/badge'
 
 export default function Jobs() {
   const navigate = useNavigate()
@@ -33,14 +34,14 @@ export default function Jobs() {
     },
   })
 
-  const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
+  const statusVariants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    pending: 'secondary',
+    processing: 'default',
+    completed: 'outline',
+    failed: 'destructive',
   }
 
-  const formatCost = (cost: number | null) => {
+  const formatCost = (cost: number | null | undefined) => {
     return cost == null ? '-' : `$${cost.toFixed(4)}`
   }
 
@@ -80,106 +81,101 @@ export default function Jobs() {
             variant={status === s ? 'default' : 'outline'}
             size="sm"
             onClick={() => setStatus(s)}
+            className="capitalize"
           >
-            {s.charAt(0).toUpperCase() + s.slice(1)}
+            {s}
           </Button>
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        <div className="border rounded-lg divide-y">
-          {jobs?.map((job) => (
-            <div
-              key={job.id}
-              className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
-              onClick={() => navigate(`/jobs/${job.id}`)}
-            >
-              <div className="flex items-center gap-4">
-                {job.thumbnail_path ? (
-                  <img
-                    src={`/api/uploads/${job.thumbnail_path}`}
-                    alt="Job thumbnail"
-                    className="w-20 h-14 object-cover rounded"
-                  />
-                ) : (
-                  <div className="w-20 h-14 bg-gray-200 rounded flex items-center justify-center">
-                    <RefreshCw className="h-4 w-4 text-gray-400" />
-                  </div>
-                )}
-                <div>
-                  <p className="font-medium">{job.id}</p>
-                  <p className="text-sm text-muted-foreground">
+      <div className="border rounded-lg bg-card text-card-foreground shadow-sm overflow-hidden">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-muted/50 text-muted-foreground">
+            <tr>
+              <th className="px-6 py-3 font-medium">ID</th>
+              <th className="px-6 py-3 font-medium">Template</th>
+              <th className="px-6 py-3 font-medium">Status</th>
+              <th className="px-6 py-3 font-medium">Cost</th>
+              <th className="px-6 py-3 font-medium">Created</th>
+              <th className="px-6 py-3 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
+                  <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+                  Loading jobs...
+                </td>
+              </tr>
+            ) : jobs?.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
+                  No jobs found
+                </td>
+              </tr>
+            ) : (
+              jobs?.map((job) => (
+                <tr key={job.id} className="hover:bg-muted/50 transition-colors">
+                  <td className="px-6 py-4 font-mono text-xs">
+                    {job.id.slice(0, 8)}...
+                  </td>
+                  <td className="px-6 py-4 font-medium">{job.template_id}</td>
+                  <td className="px-6 py-4">
+                    <Badge variant={statusVariants[job.status] || 'default'}>
+                      {job.status}
+                    </Badge>
+                  </td>
+                  <td className="px-6 py-4 font-mono text-xs">
+                    {formatCost(job.cost)}
+                  </td>
+                  <td className="px-6 py-4 text-muted-foreground">
                     {new Date(job.created_at).toLocaleString()}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Preference: {job.provider_preference || 'auto'} / Type: {job.provider_type ?? 'pending'}
-                  </p>
-                </div>
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    statusColors[job.status]
-                  }`}
-                >
-                  {job.status}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  Est: {formatCost(job.estimated_cost)}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  Actual: {formatCost(job.actual_cost)}
-                </span>
-                {job.status === 'processing' && (
-                  <span className="text-sm text-muted-foreground">
-                    {job.progress}%
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {(job.status === 'failed' || job.status === 'completed') && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      retryMutation.mutate(job.id)
-                    }}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-1" />
-                    Retry
-                  </Button>
-                )}
-                {job.output_path && (
-                  <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
-                    Download
-                  </Button>
-                )}
-                {job.preview_path && (
-                  <Button variant="outline" size="sm" onClick={(e) => e.stopPropagation()}>
-                    Preview
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteMutation.mutate(job.id)
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
-          {(!jobs || jobs.length === 0) && (
-            <p className="p-8 text-center text-muted-foreground">No jobs found</p>
-          )}
-        </div>
-      )}
+                  </td>
+                  <td className="px-6 py-4 text-right space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/jobs/${job.id}`)}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => navigate(`/editor/music/${job.id}`)}
+                    >
+                      Edit
+                    </Button>
+                    {job.status === 'failed' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => retryMutation.mutate(job.id)}
+                        disabled={retryMutation.isPending}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        if (confirm('Are you sure you want to delete this job?')) {
+                          deleteMutation.mutate(job.id)
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

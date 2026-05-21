@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
-  RefreshCw, ChevronLeft, Image, Video, Download, CheckCircle, Clock, AlertCircle 
+  RefreshCw, ChevronLeft, Image, Video, Download, CheckCircle, Clock, AlertCircle, Trash2, Plus
 } from 'lucide-react'
 import { jobsApi, scenesApi, VideoScene, SceneUpdate } from '../api/client'
 import { Button } from '../components/ui/button'
@@ -39,6 +39,7 @@ export default function MusicVideoEditor() {
   const [manualLyrics, setManualLyrics] = useState('')
   const [duration, setDuration] = useState(30)
   const [style, setStyle] = useState('realistic')
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
 
   const { data: job, isLoading: jobLoading } = useQuery({
     queryKey: ['job', jobId],
@@ -52,6 +53,47 @@ export default function MusicVideoEditor() {
       return false
     },
   })
+
+  useEffect(() => {
+    if (job?.input_data?.audio_file && !job?.input_data?.lyrics) {
+      scenesApi.getAudioMetadata(jobId!).then((metadata) => {
+        setDuration(Math.round(metadata.duration))
+      }).catch(() => {})
+    }
+  }, [job?.input_data?.audio_file, job?.input_data?.lyrics, jobId])
+
+  useEffect(() => {
+    let objectUrl: string | null = null
+    
+    if (job?.input_data?.audio_file) {
+      const token = localStorage.getItem('token')
+      fetch(`/api/uploads/stream/${job.input_data.audio_file}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`)
+          }
+          return res.blob()
+        })
+        .then((blob) => {
+          objectUrl = URL.createObjectURL(blob)
+          setAudioUrl(objectUrl)
+        })
+        .catch((err) => {
+          console.error('Failed to load audio:', err)
+          setAudioUrl(null)
+        })
+    } else {
+      setAudioUrl(null)
+    }
+    
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [job?.input_data?.audio_file])
 
   const { data: scenes, isLoading: scenesLoading, refetch: refetchScenes } = useQuery({
     queryKey: ['scenes', jobId],
@@ -141,6 +183,16 @@ export default function MusicVideoEditor() {
       refetchScenes()
       queryClient.invalidateQueries({ queryKey: ['job', jobId] })
     },
+  })
+
+  const createSceneMutation = useMutation({
+    mutationFn: () => scenesApi.createScene(jobId!),
+    onSuccess: () => refetchScenes(),
+  })
+
+  const deleteSceneMutation = useMutation({
+    mutationFn: (sceneId: string) => scenesApi.deleteScene(jobId!, sceneId),
+    onSuccess: () => refetchScenes(),
   })
 
   const handleManualLyricsSubmit = async () => {
@@ -245,7 +297,7 @@ export default function MusicVideoEditor() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <div className="lg:col-span-3 space-y-6">
-          {!scenesLoading && (!scenes || scenes.length === 0) ? (
+          {(job?.stage === 'planning' || (!scenesLoading && (!scenes || scenes.length === 0))) ? (
             <div className="bg-card rounded-lg border p-6">
               <h2 className="text-lg font-semibold mb-4">Create Your Music Video</h2>
               
@@ -363,6 +415,21 @@ export default function MusicVideoEditor() {
                     </p>
                   </div>
                 )}
+                {job?.stage === 'planning' && scenes && scenes.length > 0 && (
+                  <div className="mt-4 p-4 bg-primary/10 rounded-lg border border-primary/20">
+                    <p className="text-sm text-primary mb-2">
+                      You have {scenes.length} scenes already planned. You can continue to the scene editor or regenerate the plan.
+                    </p>
+                    <Button
+                      variant="default"
+                      onClick={() => scenesApi.updateStage(jobId!, 'planned').then(() => {
+                        queryClient.invalidateQueries({ queryKey: ['job', jobId] })
+                      })}
+                    >
+                      Continue to Scene Editor
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -407,6 +474,19 @@ export default function MusicVideoEditor() {
               </div>
 
               <div className="bg-card rounded-lg border p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Scenes ({scenes?.length || 0})</h3>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => createSceneMutation.mutate()}
+                    disabled={createSceneMutation.isPending}
+                    title="Add a new scene at the end"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Scene
+                  </Button>
+                </div>
                 <div className="space-y-4">
                   {scenes?.map((scene: VideoScene, index: number) => (
                     <div key={scene.id} className="flex items-start gap-4 p-4 border rounded-lg">
@@ -446,6 +526,7 @@ export default function MusicVideoEditor() {
                                 size="sm"
                                 onClick={() => generateImageMutation.mutate(scene.id)}
                                 disabled={generateImageMutation.isPending}
+                                title="Generate image for this scene"
                               >
                                 <Image className="h-4 w-4" />
                               </Button>
@@ -456,6 +537,7 @@ export default function MusicVideoEditor() {
                                 size="sm"
                                 onClick={() => generateVideoMutation.mutate(scene.id)}
                                 disabled={generateVideoMutation.isPending}
+                                title="Generate video for this scene"
                               >
                                 <Video className="h-4 w-4" />
                               </Button>
@@ -464,8 +546,23 @@ export default function MusicVideoEditor() {
                               variant="ghost"
                               size="sm"
                               onClick={() => setEditingScene(scene)}
+                              title="Edit scene"
                             >
                               <RefreshCw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (confirm('Are you sure you want to delete this scene?')) {
+                                  deleteSceneMutation.mutate(scene.id)
+                                }
+                              }}
+                              disabled={deleteSceneMutation.isPending}
+                              className="text-destructive hover:text-destructive"
+                              title="Delete scene"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
@@ -506,7 +603,7 @@ export default function MusicVideoEditor() {
                         {scene.reference_image_path && (
                           <div className="mt-2">
                             <img
-                              src={`/api/uploads/${scene.reference_image_path}`}
+                              src={`/api/uploads/stream/${scene.reference_image_path}`}
                               alt={`Scene ${index + 1} reference`}
                               className="h-20 object-cover rounded border"
                             />
@@ -541,11 +638,13 @@ export default function MusicVideoEditor() {
         <div className="space-y-4">
           <div className="bg-card rounded-lg border p-4">
             <h3 className="font-semibold mb-2">Audio</h3>
-            {!!job?.input_data?.audio_file && (
-              <audio controls className="w-full" src={`/api/uploads/${job.input_data.audio_file}`}>
+            {audioUrl ? (
+              <audio key={audioUrl} controls className="w-full" src={audioUrl}>
                 Your browser does not support audio.
               </audio>
-            )}
+            ) : job?.input_data?.audio_file ? (
+              <div className="text-sm text-muted-foreground">Loading audio...</div>
+            ) : null}
           </div>
 
           <div className="bg-card rounded-lg border p-4">

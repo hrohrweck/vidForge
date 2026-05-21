@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Upload, Save } from 'lucide-react'
+import { X, Upload, Save, RefreshCw } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -9,9 +9,10 @@ interface SceneEditModalProps {
   scene: VideoScene
   onClose: () => void
   onSave: (updates: Partial<VideoScene>) => void
+  onRegenerate?: (updates: Partial<VideoScene>) => void
 }
 
-export function SceneEditModal({ scene, onClose, onSave }: SceneEditModalProps) {
+export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEditModalProps) {
   const [imagePrompt, setImagePrompt] = useState(scene.image_prompt || '')
   const [visualDescription, setVisualDescription] = useState(scene.visual_description || '')
   const [lyricsSegment, setLyricsSegment] = useState(scene.lyrics_segment || '')
@@ -179,7 +180,7 @@ export function SceneEditModal({ scene, onClose, onSave }: SceneEditModalProps) 
               <div className="mt-2">
                 <p className="text-sm text-muted-foreground mb-1">Current reference:</p>
                 <img
-                  src={`/api/uploads/${scene.reference_image_path}`}
+                  src={`/api/uploads/stream/${scene.reference_image_path}`}
                   alt="Reference"
                   className="w-32 h-32 object-cover rounded"
                 />
@@ -196,6 +197,28 @@ export function SceneEditModal({ scene, onClose, onSave }: SceneEditModalProps) 
             <Save className="h-4 w-4 mr-2" />
             Save Changes
           </Button>
+          {scene.reference_image_path && onRegenerate && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                onSave({
+                  image_prompt: imagePrompt,
+                  visual_description: visualDescription,
+                  lyrics_segment: lyricsSegment,
+                  mood,
+                  camera_movement: cameraMovement,
+                  start_time: startTime,
+                  end_time: endTime,
+                })
+                onRegenerate({
+                  image_prompt: imagePrompt,
+                })
+              }}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Save & Regenerate
+            </Button>
+          )}
         </div>
       </div>
     </div>

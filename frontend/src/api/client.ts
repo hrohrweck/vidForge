@@ -6,6 +6,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 })
 
 api.interceptors.request.use((config) => {
@@ -192,10 +193,13 @@ export interface Job {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  template_id?: string
+  cost?: number | null
 }
 
 export interface CreateJobRequest {
   template_id?: string
+  project_id?: string
   input_data?: Record<string, unknown>
   auto_start?: boolean
   provider_preference?: string
@@ -388,11 +392,32 @@ export const modelsApi = {
     const response = await api.get<VideoModel>(`/models/${id}`)
     return response.data
   },
+  getAvailableModels: async () => {
+    const response = await api.get<{ image_models: ModelConfig[]; video_models: ModelConfig[]; text_models: ModelConfig[] }>('/models/available')
+    return response.data
+  },
+  getModelPreferences: async () => {
+    const response = await api.get<ModelPreferences>('/models/preferences')
+    return response.data
+  },
+  updateModelPreferences: async (prefs: ModelPreferences) => {
+    const response = await api.put<ModelPreferences>('/models/preferences', prefs)
+    return response.data
+  },
 }
 
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
+}
+
+export const healthApi = {
+  getModels: async () => {
+    const response = await api.get<{ models: Record<string, string>; error?: string }>(
+      '/health/models'
+    )
+    return response.data
+  },
 }
 
 export const adminApi = {
@@ -539,22 +564,43 @@ export interface LyricsData {
     end: number
     text: string
   }>
+  lines?: Array<{
+    start: number
+    end: number
+    text: string
+  }>
+  full_text?: string
   duration: number
-  language: string
+  language?: string
 }
 
 export const scenesApi = {
   extractLyrics: async (jobId: string, request: LyricsExtractRequest) => {
     const response = await api.post<{ lyrics: LyricsData }>(
-      `/scenes/${jobId}/lyrics/extract`,
+      `/jobs/${jobId}/lyrics/extract`,
       request
+    )
+    return response.data
+  },
+
+  getAudioMetadata: async (jobId: string) => {
+    const response = await api.get<{ duration: number; path: string }>(
+      `/jobs/${jobId}/audio-metadata`
     )
     return response.data
   },
 
   setManualLyrics: async (jobId: string, request: ManualLyricsRequest) => {
     const response = await api.post<{ lyrics: LyricsData }>(
-      `/scenes/${jobId}/lyrics/manual`,
+      `/jobs/${jobId}/lyrics/manual`,
+      request
+    )
+    return response.data
+  },
+
+  updateLyrics: async (jobId: string, request: { lyrics_text: string; duration: number; replan?: boolean; style?: string }) => {
+    const response = await api.put<{ lyrics: LyricsData; scenes?: VideoScene[]; summary?: string }>(
+      `/jobs/${jobId}/lyrics`,
       request
     )
     return response.data
@@ -562,27 +608,27 @@ export const scenesApi = {
 
   planScenes: async (jobId: string, request: ScenePlanRequest) => {
     const response = await api.post<{ scenes: VideoScene[] }>(
-      `/scenes/${jobId}/scenes/plan`,
+      `/jobs/${jobId}/scenes/plan`,
       request
     )
     return response.data
   },
 
   listScenes: async (jobId: string) => {
-    const response = await api.get<VideoScene[]>(`/scenes/${jobId}/scenes`)
+    const response = await api.get<VideoScene[]>(`/jobs/${jobId}/scenes`)
     return response.data
   },
 
   getScene: async (jobId: string, sceneId: string) => {
     const response = await api.get<VideoScene>(
-      `/scenes/${jobId}/scenes/${sceneId}`
+      `/jobs/${jobId}/scenes/${sceneId}`
     )
     return response.data
   },
 
   updateScene: async (jobId: string, sceneId: string, data: SceneUpdate) => {
     const response = await api.patch<VideoScene>(
-      `/scenes/${jobId}/scenes/${sceneId}`,
+      `/jobs/${jobId}/scenes/${sceneId}`,
       data
     )
     return response.data
@@ -590,29 +636,39 @@ export const scenesApi = {
 
   reorderScenes: async (jobId: string, sceneIds: string[]) => {
     const response = await api.post<{ scenes: VideoScene[] }>(
-      `/scenes/${jobId}/scenes/reorder`,
+      `/jobs/${jobId}/scenes/reorder`,
       { scene_ids: sceneIds }
     )
     return response.data
   },
 
+  createScene: async (jobId: string) => {
+    const response = await api.post<VideoScene>(`/jobs/${jobId}/scenes`)
+    return response.data
+  },
+
+  deleteScene: async (jobId: string, sceneId: string) => {
+    const response = await api.delete<{ status: string }>(`/jobs/${jobId}/scenes/${sceneId}`)
+    return response.data
+  },
+
   generateImage: async (jobId: string, sceneId: string) => {
     const response = await api.post<{ status: string; scene_id: string; media_type: string }>(
-      `/scenes/${jobId}/scenes/generate-image/${sceneId}`
+      `/jobs/${jobId}/scenes/generate-image/${sceneId}`
     )
     return response.data
   },
 
   generateVideo: async (jobId: string, sceneId: string) => {
     const response = await api.post<{ status: string; scene_id: string; media_type: string }>(
-      `/scenes/${jobId}/scenes/generate-video/${sceneId}`
+      `/jobs/${jobId}/scenes/generate-video/${sceneId}`
     )
     return response.data
   },
 
   generateAllImages: async (jobId: string, request?: SceneGenerateRequest) => {
     const response = await api.post<{ status: string; job_id: string; stage: string }>(
-      `/scenes/${jobId}/scenes/generate-all-images`,
+      `/jobs/${jobId}/scenes/generate-all-images`,
       request || {}
     )
     return response.data
@@ -620,7 +676,7 @@ export const scenesApi = {
 
   generateAllVideos: async (jobId: string, request?: SceneGenerateRequest) => {
     const response = await api.post<{ status: string; job_id: string; stage: string }>(
-      `/scenes/${jobId}/scenes/generate-all-videos`,
+      `/jobs/${jobId}/scenes/generate-all-videos`,
       request || {}
     )
     return response.data
@@ -628,26 +684,55 @@ export const scenesApi = {
 
   export: async (jobId: string, request: ExportRequest) => {
     const response = await api.post<{ status: string; job_id: string; stage: string }>(
-      `/scenes/${jobId}/export`,
+      `/jobs/${jobId}/export`,
       request
     )
     return response.data
   },
 
   getExportOptions: async (jobId: string) => {
-    const response = await api.get<ExportOptions>(`/scenes/${jobId}/export-options`)
+    const response = await api.get<ExportOptions>(`/jobs/${jobId}/export-options`)
     return response.data
   },
 
   getLyrics: async (jobId: string) => {
     const response = await api.get<{ lyrics: LyricsData | null }>(
-      `/scenes/${jobId}/lyrics`
+      `/jobs/${jobId}/lyrics`
     )
     return response.data
   },
 
   getStage: async (jobId: string) => {
-    const response = await api.get<StageUpdate>(`/scenes/${jobId}/stage`)
+    const response = await api.get<StageUpdate>(`/jobs/${jobId}/stage`)
     return response.data
   },
+
+  updateStage: async (jobId: string, stage: string) => {
+    const response = await api.patch<{ job_id: string; stage: string }>(
+      `/jobs/${jobId}/stage`,
+      { stage }
+    )
+    return response.data
+  },
+}
+
+export interface ModelConfig {
+  id: string
+  name: string
+  description: string
+  size_gb: number
+  speed: string
+  quality: string
+  license: string
+  provider: string
+  default: boolean
+}
+
+export interface ModelPreferences {
+  image_model: string
+  video_model: string
+  text_model: string
+  image_provider: string
+  video_provider: string
+  text_provider: string
 }

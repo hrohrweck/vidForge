@@ -1,18 +1,19 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Save, RefreshCw, Trash2, Folder, File, Sun, Moon, Monitor } from 'lucide-react'
-import { storageApi, stylesApi } from '../api/client'
+import { Save, RefreshCw, Trash2, Folder, File, Sun, Moon, Monitor, Cpu } from 'lucide-react'
+import { storageApi, stylesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
+import { Badge } from '../components/ui/badge'
 
 export default function Settings() {
   const { user } = useAuthStore()
   const { theme, setTheme } = useThemeStore()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'account' | 'appearance' | 'storage' | 'styles'>('account')
+  const [activeTab, setActiveTab] = useState<'account' | 'appearance' | 'storage' | 'styles' | 'models'>('account')
   
   const [storageSettings, setStorageSettings] = useState({
     default_style: '',
@@ -40,6 +41,25 @@ export default function Settings() {
     queryKey: ['storage-files'],
     queryFn: () => storageApi.listFiles(''),
     enabled: activeTab === 'storage',
+  })
+
+  const { data: availableModels } = useQuery({
+    queryKey: ['available-models'],
+    queryFn: () => modelsApi.getAvailableModels(),
+    enabled: activeTab === 'models',
+  })
+
+  const { data: modelPreferences } = useQuery({
+    queryKey: ['model-preferences'],
+    queryFn: () => modelsApi.getModelPreferences(),
+    enabled: activeTab === 'models',
+  })
+
+  const updateModelPreferencesMutation = useMutation({
+    mutationFn: modelsApi.updateModelPreferences,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['model-preferences'] })
+    },
   })
 
   const updateSettingsMutation = useMutation({
@@ -87,17 +107,17 @@ export default function Settings() {
       </div>
 
       <div className="flex gap-2 border-b">
-        {(['account', 'appearance', 'storage', 'styles'] as const).map((tab) => (
+        {(['account', 'appearance', 'storage', 'styles', 'models'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
               activeTab === tab
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'models' ? 'AI Models' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -115,15 +135,9 @@ export default function Settings() {
                 <div>
                   <Label>Status</Label>
                   <p className="text-sm mt-1">
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${
-                        user?.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
+                    <Badge variant={user?.is_active ? 'outline' : 'destructive'}>
                       {user?.is_active ? 'Active' : 'Inactive'}
-                    </span>
+                    </Badge>
                   </p>
                 </div>
               </div>
@@ -167,14 +181,14 @@ export default function Settings() {
               <label
                 key={option}
                 className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition ${
-                  theme === option ? 'bg-secondary' : 'hover:bg-gray-50'
+                  theme === option ? 'bg-secondary' : 'hover:bg-muted/50'
                 }`}
                 onClick={() => setTheme(option)}
               >
                 <div className="flex items-center gap-3">
-                  {option === 'light' && <Sun className="h-5 w-5 text-yellow-500" />}
-                  {option === 'dark' && <Moon className="h-5 w-5 text-blue-400" />}
-                  {option === 'system' && <Monitor className="h-5 w-5 text-gray-500" />}
+                  {option === 'light' && <Sun className="h-5 w-5 text-primary" />}
+                  {option === 'dark' && <Moon className="h-5 w-5 text-primary" />}
+                  {option === 'system' && <Monitor className="h-5 w-5 text-muted-foreground" />}
                   <div>
                     <p className="font-medium">{option.charAt(0).toUpperCase() + option.slice(1)}</p>
                     <p className="text-xs text-muted-foreground">
@@ -354,13 +368,13 @@ export default function Settings() {
                 {files.data.files.map((file: any, index: number) => (
                   <div
                     key={index}
-                    className="p-3 flex items-center justify-between hover:bg-gray-50"
+                    className="p-3 flex items-center justify-between hover:bg-muted/50"
                   >
                     <div className="flex items-center gap-3">
                       {file.path.endsWith('/') ? (
-                        <Folder className="h-5 w-5 text-blue-500" />
+                        <Folder className="h-5 w-5 text-primary" />
                       ) : (
-                        <File className="h-5 w-5 text-gray-500" />
+                        <File className="h-5 w-5 text-muted-foreground" />
                       )}
                       <div>
                         <p className="text-sm font-medium">{file.path.split('/').pop()}</p>
@@ -418,6 +432,161 @@ export default function Settings() {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'models' && (
+        <div className="space-y-6">
+          <div className="border rounded-lg p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Cpu className="h-5 w-5" />
+              <h2 className="text-lg font-semibold">AI Model Preferences</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mb-6">
+              Choose which AI models to use for image generation, video generation, and text generation (story creation, scene planning). Local models run on your hardware.
+            </p>
+
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <h3 className="font-medium text-base">Image Generation Model</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {availableModels?.image_models?.map((model) => (
+                    <div
+                      key={model.id}
+                      className={`p-4 border rounded-lg cursor-pointer transition ${
+                        modelPreferences?.image_model === model.id
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                      onClick={() =>
+                        updateModelPreferencesMutation.mutate({
+                          image_model: model.id,
+                          video_model: modelPreferences?.video_model || 'wan2.2-t2v',
+                          text_model: modelPreferences?.text_model || 'qwen3.6:35b',
+                          image_provider: modelPreferences?.image_provider || 'local',
+                          video_provider: modelPreferences?.video_provider || 'local',
+                          text_provider: modelPreferences?.text_provider || 'local',
+                        })
+                      }
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-medium">{model.name}</p>
+                          <p className="text-sm text-muted-foreground mt-1">{model.description}</p>
+                        </div>
+                        {model.default && (
+                          <Badge variant="outline" className="text-xs">Default</Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.speed}</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.quality}</Badge>
+                        {model.provider === 'local' ? (
+                          <Badge variant="outline" className="text-xs text-green-600">Local</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="font-medium text-base">Video Generation Model</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {availableModels?.video_models?.map((model) => (
+                    <div
+                      key={model.id}
+                      className={`p-4 border rounded-lg cursor-pointer transition ${
+                        modelPreferences?.video_model === model.id
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                      onClick={() =>
+                        updateModelPreferencesMutation.mutate({
+                          image_model: modelPreferences?.image_model || 'flux1-schnell',
+                          video_model: model.id,
+                          text_model: modelPreferences?.text_model || 'qwen3.6:35b',
+                          image_provider: modelPreferences?.image_provider || 'local',
+                          video_provider: modelPreferences?.video_provider || 'local',
+                          text_provider: modelPreferences?.text_provider || 'local',
+                        })
+                      }
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-medium">{model.name}</p>
+                          <p className="text-sm text-muted-foreground mt-1">{model.description}</p>
+                        </div>
+                        {model.default && (
+                          <Badge variant="outline" className="text-xs">Default</Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.speed}</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.quality}</Badge>
+                        {model.provider === 'local' ? (
+                          <Badge variant="outline" className="text-xs text-green-600">Local</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="font-medium text-base">Text Generation Model</h3>
+                <p className="text-sm text-muted-foreground">Used for story creation, scene planning, prompt enhancement, and lyrics analysis.</p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {availableModels?.text_models?.map((model) => (
+                    <div
+                      key={model.id}
+                      className={`p-4 border rounded-lg cursor-pointer transition ${
+                        modelPreferences?.text_model === model.id
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                      onClick={() =>
+                        updateModelPreferencesMutation.mutate({
+                          image_model: modelPreferences?.image_model || 'flux1-schnell',
+                          video_model: modelPreferences?.video_model || 'wan2.2-t2v',
+                          text_model: model.id,
+                          image_provider: modelPreferences?.image_provider || 'local',
+                          video_provider: modelPreferences?.video_provider || 'local',
+                          text_provider: modelPreferences?.text_provider || 'local',
+                        })
+                      }
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-medium">{model.name}</p>
+                          <p className="text-sm text-muted-foreground mt-1">{model.description}</p>
+                        </div>
+                        {model.default && (
+                          <Badge variant="outline" className="text-xs">Default</Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.speed}</Badge>
+                        <Badge variant="secondary" className="text-xs">{model.quality}</Badge>
+                        {model.provider === 'local' ? (
+                          <Badge variant="outline" className="text-xs text-green-600">Local</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

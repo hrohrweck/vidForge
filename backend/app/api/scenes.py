@@ -1,14 +1,16 @@
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.config import get_settings
 from app.database import Job, User, VideoScene, get_db
-from app.services.lyrics_extractor import LyricsExtractor
+from app.services.lyrics_extractor import LyricsExtractor, LyricsExtractorError
 from app.services.music_video_planner import MusicVideoPlanner
 
 router = APIRouter(tags=["scenes"])
@@ -71,6 +73,39 @@ class JobStageUpdate(BaseModel):
     stage: str = Field(..., pattern="^(planning|planned|generating_images|images_ready|generating_videos|videos_ready|rendering|completed)$")
 
 
+class AudioMetadataResponse(BaseModel):
+    duration: float
+    path: str
+
+
+@router.get("/{job_id}/audio-metadata", response_model=AudioMetadataResponse)
+async def get_audio_metadata(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AudioMetadataResponse:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    input_data = job.input_data or {}
+    audio_file = input_data.get("audio_file")
+    if not audio_file:
+        raise HTTPException(status_code=404, detail="No audio file for this job")
+
+    settings = get_settings()
+    audio_path = Path(settings.storage_path).resolve() / audio_file
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    extractor = LyricsExtractor()
+    duration = extractor._get_audio_duration(str(audio_path))
+
+    return AudioMetadataResponse(duration=duration, path=str(audio_path))
+
+
 @router.post("/{job_id}/lyrics/extract")
 async def extract_lyrics(
     job_id: UUID,
@@ -83,9 +118,17 @@ async def extract_lyrics(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    settings = get_settings()
+    audio_path = Path(settings.storage_path).resolve() / request.audio_file_path
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
+
     extractor = LyricsExtractor()
     try:
-        lyrics = await extractor.extract_from_audio(request.audio_file_path)
+        lyrics = await extractor.extract_from_audio(str(audio_path))
+    except LyricsExtractorError as e:
+        raise HTTPException(status_code=422, detail=f"Lyrics extraction failed: {e}")
     finally:
         await extractor.close()
 
@@ -117,6 +160,81 @@ async def set_manual_lyrics(
     return {"lyrics": lyrics}
 
 
+class UpdateLyricsRequest(BaseModel):
+    lyrics_text: str
+    duration: float
+    replan: bool = False
+    style: str = "realistic"
+
+
+@router.put("/{job_id}/lyrics")
+async def update_lyrics(
+    job_id: UUID,
+    request: UpdateLyricsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    lyrics = LyricsExtractor.parse_manual_lyrics(request.lyrics_text, request.duration)
+
+    from sqlalchemy import update as sa_update
+    await db.execute(
+        sa_update(Job)
+        .where(Job.id == job_id)
+        .values(
+            input_data={
+                **(job.input_data or {}),
+                "lyrics": lyrics,
+            }
+        )
+    )
+    await db.commit()
+
+    if request.replan:
+        planner = MusicVideoPlanner()
+        try:
+            plan = await planner.plan_music_video(
+                lyrics=lyrics, duration=request.duration, style=request.style
+            )
+        finally:
+            await planner.close()
+
+        await db.execute(
+            delete(VideoScene).where(VideoScene.job_id == job_id)
+        )
+        await db.commit()
+
+        scenes = []
+        for scene_data in plan.get("scenes", []):
+            scene = VideoScene(
+                job_id=job_id,
+                scene_number=scene_data["scene_number"],
+                start_time=scene_data["start_time"],
+                end_time=scene_data["end_time"],
+                lyrics_segment=scene_data.get("lyrics_segment"),
+                visual_description=scene_data.get("visual_description"),
+                image_prompt=scene_data.get("image_prompt"),
+                mood=scene_data.get("mood", "neutral"),
+                camera_movement=scene_data.get("camera_movement", "static"),
+                status="pending",
+            )
+            db.add(scene)
+            scenes.append(scene)
+
+        job.stage = "planned"
+        await db.commit()
+        for scene in scenes:
+            await db.refresh(scene)
+
+        return {"lyrics": lyrics, "scenes": plan.get("scenes", []), "summary": plan.get("summary", "")}
+
+    return {"lyrics": lyrics}
+
+
 @router.post("/{job_id}/scenes/plan")
 async def plan_scenes(
     job_id: UUID,
@@ -129,16 +247,23 @@ async def plan_scenes(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    lyrics_data = request.lyrics_data
+    duration = request.duration
+    if lyrics_data and isinstance(lyrics_data, dict):
+        lyrics_duration = lyrics_data.get("duration")
+        if lyrics_duration and lyrics_duration > 30 and duration <= 30:
+            duration = lyrics_duration
+
     planner = MusicVideoPlanner()
     try:
         plan = await planner.plan_music_video(
-            lyrics=request.lyrics_data, duration=request.duration, style=request.style
+            lyrics=request.lyrics_data, duration=duration, style=request.style
         )
     finally:
         await planner.close()
 
     await db.execute(
-        select(VideoScene).where(VideoScene.job_id == job_id).delete()
+        delete(VideoScene).where(VideoScene.job_id == job_id)
     )
     await db.commit()
 
@@ -159,7 +284,7 @@ async def plan_scenes(
         db.add(scene)
         scenes.append(scene)
 
-    job.stage = "planning"
+    job.stage = "planned"
     await db.commit()
     for scene in scenes:
         await db.refresh(scene)
@@ -184,6 +309,50 @@ async def get_scenes(
     scenes = result.scalars().all()
 
     return list(scenes)
+
+
+@router.post("/{job_id}/scenes", response_model=SceneResponse)
+async def create_scene(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SceneResponse:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = await db.execute(
+        select(VideoScene).where(VideoScene.job_id == job_id).order_by(VideoScene.scene_number.desc())
+    )
+    last_scene = result.scalar_one_or_none()
+
+    if last_scene:
+        scene_number = last_scene.scene_number + 1
+        start_time = last_scene.end_time
+        end_time = start_time + 5.0
+    else:
+        scene_number = 1
+        start_time = 0.0
+        end_time = 5.0
+
+    scene = VideoScene(
+        job_id=job_id,
+        scene_number=scene_number,
+        start_time=start_time,
+        end_time=end_time,
+        lyrics_segment="",
+        visual_description="",
+        image_prompt="",
+        mood="neutral",
+        camera_movement="static",
+        status="pending",
+    )
+    db.add(scene)
+    await db.commit()
+    await db.refresh(scene)
+
+    return scene
 
 
 @router.patch("/{job_id}/scenes/{scene_id}")

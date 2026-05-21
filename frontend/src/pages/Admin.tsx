@@ -16,6 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/auth'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { adminApi, UserDetail,
   DeletePreview,
   UserUpdateRequest,
@@ -125,7 +126,7 @@ export default function Admin() {
   if (!adminUser?.is_superuser) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <AlertCircle className="h-8 w-8 text-red-500 mb-4" />
+        <AlertCircle className="h-8 w-8 text-destructive mb-4" />
         <h2 className="text-xl font-semibold">Access Denied</h2>
         <p className="text-muted-foreground">You need admin privileges to view this page</p>
         <Button className="mt-4" onClick={() => navigate('/')}>
@@ -146,12 +147,12 @@ export default function Admin() {
   const stats = dashboard?.stats
   const recentJobs = dashboard?.recent_jobs || []
 
-  const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
-    cancelled: 'bg-gray-100 text-gray-800',
+  const statusVariants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    pending: 'secondary',
+    processing: 'default',
+    completed: 'outline',
+    failed: 'destructive',
+    cancelled: 'secondary',
   }
 
   const handleToggleAdmin = async (targetUser: AdminUser) => {
@@ -207,8 +208,8 @@ export default function Admin() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <div className="border rounded-lg p-6">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <Users className="h-6 w-6 text-blue-600" />
+            <div className="p-3 bg-primary/10 rounded-lg">
+              <Users className="h-6 w-6 text-primary" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Total Users</p>
@@ -219,8 +220,8 @@ export default function Admin() {
 
         <div className="border rounded-lg p-6">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <Video className="h-6 w-6 text-purple-600" />
+            <div className="p-3 bg-primary/10 rounded-lg">
+              <Video className="h-6 w-6 text-primary" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Total Jobs</p>
@@ -231,8 +232,8 @@ export default function Admin() {
 
         <div className="border rounded-lg p-6">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <CheckCircle className="h-6 w-6 text-green-600" />
+            <div className="p-3 bg-primary/10 rounded-lg">
+              <CheckCircle className="h-6 w-6 text-primary" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Jobs Today</p>
@@ -243,8 +244,8 @@ export default function Admin() {
 
         <div className="border rounded-lg p-6">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-orange-100 rounded-lg">
-              <Clock className="h-6 w-6 text-orange-600" />
+            <div className="p-3 bg-primary/10 rounded-lg">
+              <Clock className="h-6 w-6 text-primary" />
             </div>
             <div>
               <p className="text-sm text-muted-foreground">This Week</p>
@@ -270,35 +271,35 @@ export default function Admin() {
             </thead>
             <tbody>
               {users?.map((u: AdminUser) => (
-                <tr key={u.id} className="border-b hover:bg-gray-50">
+                <tr key={u.id} className="border-b hover:bg-muted/50">
                   <td className="py-3 px-4">{u.email}</td>
                   <td className="py-3 px-4">
                     <div className="flex gap-1">
                       {u.is_superuser && (
-                        <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-800">
+                        <Badge variant="default">
                           Admin
-                        </span>
+                        </Badge>
                       )}
                       {u.is_active ? (
-                        <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                        <Badge variant="outline">
                           Active
-                        </span>
+                        </Badge>
                       ) : (
-                        <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800">
+                        <Badge variant="destructive">
                           Inactive
-                        </span>
+                        </Badge>
                       )}
                     </div>
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex gap-1 flex-wrap">
                       {u.groups?.map((g) => (
-                        <span
+                        <Badge
                           key={g.id}
-                          className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-800"
+                          variant="secondary"
                         >
                           {g.name}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   </td>
@@ -341,7 +342,7 @@ export default function Admin() {
                         disabled={u.id === adminUser?.id}
                         title="Delete User"
                       >
-                        <Trash2 className="h-4 w-4 text-red-500" />
+                        <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
                   </td>
@@ -368,23 +369,21 @@ export default function Admin() {
             </thead>
             <tbody>
               {recentJobs.map((job: Job & { user_email?: string }) => (
-                <tr key={job.id} className="border-b hover:bg-gray-50">
+                <tr key={job.id} className="border-b hover:bg-muted/50">
                   <td className="py-3 px-4 font-mono text-sm">
                     {job.id.slice(0, 8)}...
                   </td>
                   <td className="py-3 px-4">{job.user_email || 'Unknown'}</td>
                   <td className="py-3 px-4">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[job.status]}`}
-                    >
+                    <Badge variant={statusVariants[job.status] || 'secondary'}>
                       {job.status}
-                    </span>
+                    </Badge>
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-20 bg-gray-200 rounded-full h-2">
+                      <div className="w-20 bg-muted rounded-full h-2">
                         <div
-                          className="bg-blue-600 h-2 rounded-full"
+                          className="bg-primary h-2 rounded-full"
                           style={{ width: `${job.progress}%` }}
                         />
                       </div>

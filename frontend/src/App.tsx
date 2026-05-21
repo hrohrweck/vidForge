@@ -11,38 +11,47 @@ import Groups from './pages/Groups'
 import Providers from './pages/Providers'
 import Login from './pages/Login'
 import MusicVideoEditor from './pages/MusicVideoEditor'
+import { MediaLibrary } from './pages/MediaLibrary'
+import { AssetDetail } from './pages/AssetDetail'
+import { ThemeProvider } from './components/ThemeProvider'
 
 function App() {
   const { isAuthenticated } = useAuthStore()
 
   if (!isAuthenticated) {
     return (
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <ThemeProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ThemeProvider>
     )
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="jobs" element={<Jobs />} />
-          <Route path="jobs/:id" element={<JobDetail />} />
-          <Route path="editor/music/:jobId" element={<MusicVideoEditor />} />
-          <Route path="templates" element={<Templates />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="admin" element={<Admin />} />
-          <Route path="admin/providers" element={<Providers />} />
-          <Route path="admin/groups" element={<Groups />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="jobs" element={<Jobs />} />
+            <Route path="jobs/:id" element={<JobDetail />} />
+            <Route path="editor/music/:jobId" element={<MusicVideoEditor />} />
+            <Route path="templates" element={<Templates />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="admin" element={<Admin />} />
+            <Route path="admin/providers" element={<Providers />} />
+            <Route path="admin/groups" element={<Groups />} />
+            <Route path="media" element={<MediaLibrary />} />
+            <Route path="media/asset/:id" element={<AssetDetail />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   )
 }
 

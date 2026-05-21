@@ -41,13 +41,13 @@ export function SceneCard({ scene, onEdit, formatTime }: SceneCardProps) {
       <div className="relative aspect-video bg-muted rounded overflow-hidden">
         {scene.thumbnail_path ? (
           <img
-            src={`/api/uploads/${scene.thumbnail_path}`}
+            src={`/api/uploads/stream/${scene.thumbnail_path}`}
             alt={`Scene ${scene.scene_number}`}
             className="w-full h-full object-cover"
           />
         ) : scene.reference_image_path ? (
           <img
-            src={`/api/uploads/${scene.reference_image_path}`}
+            src={`/api/uploads/stream/${scene.reference_image_path}`}
             alt={`Scene ${scene.scene_number} reference`}
             className="w-full h-full object-cover"
           />

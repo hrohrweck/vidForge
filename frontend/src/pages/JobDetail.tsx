@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Trash2, Download, Play, RefreshCw } from 'lucide-react'
 import { jobsApi, type Job } from '../api/client'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import VideoPlayer from '../components/VideoPlayer'
 interface WebSocketMessage {
   type: 'progress' | 'completed' | 'error' | 'failed'
@@ -105,11 +106,11 @@ export default function JobDetail() {
     )
   }
 
-  const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    processing: 'bg-blue-100 text-blue-800',
-    completed: 'bg-green-100 text-green-800',
-    failed: 'bg-red-100 text-red-800',
+  const statusVariants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+    pending: 'secondary',
+    processing: 'default',
+    completed: 'outline',
+    failed: 'destructive',
   }
 
   const formatCost = (cost: number | null) => {
@@ -133,13 +134,15 @@ export default function JobDetail() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className={`px-3 py-1 rounded-full text-sm font-medium ${
-              statusColors[job.status]
-            }`}
-          >
+          <Badge variant={statusVariants[job.status] || 'secondary'}>
             {job.status}
-          </span>
+          </Badge>
+          <Button
+            variant="default"
+            onClick={() => navigate(`/editor/music/${job.id}`)}
+          >
+            Open in Editor
+          </Button>
           {job.status === 'pending' && (
             <Button onClick={() => startMutation.mutate()}>
               <Play className="h-4 w-4 mr-2" />
@@ -156,9 +159,9 @@ export default function JobDetail() {
       {job.status === 'processing' && (
         <div className="border rounded-lg p-6 space-y-4">
           <h2 className="text-lg font-semibold">Progress</h2>
-          <div className="w-full bg-gray-200 rounded-full h-4">
+          <div className="w-full bg-muted rounded-full h-4">
             <div
-              className="bg-blue-600 h-4 rounded-full transition-all duration-300"
+              className="bg-primary h-4 rounded-full transition-all duration-300"
               style={{ width: `${job.progress}%` }}
             />
           </div>
@@ -169,9 +172,9 @@ export default function JobDetail() {
       )}
 
       {job.error_message && (
-        <div className="border border-red-200 bg-red-50 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-red-800">Error</h2>
-          <p className="text-red-700 mt-2">{job.error_message}</p>
+        <div className="border border-destructive/50 bg-destructive/10 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-destructive">Error</h2>
+          <p className="text-destructive mt-2">{job.error_message}</p>
         </div>
       )}
 
@@ -262,7 +265,7 @@ export default function JobDetail() {
         {job.input_data && Object.keys(job.input_data).length > 0 && (
           <div className="mt-4">
             <p className="text-muted-foreground mb-2">Input Data</p>
-            <pre className="bg-gray-100 p-4 rounded text-xs overflow-auto">
+            <pre className="bg-muted p-4 rounded text-xs overflow-auto">
               {JSON.stringify(job.input_data, null, 2)}
             </pre>
           </div>

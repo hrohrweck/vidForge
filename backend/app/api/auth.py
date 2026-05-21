@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -16,6 +16,8 @@ router = APIRouter()
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
+
+TOKEN_COOKIE_NAME = "vidforge_token"
 
 
 class UserCreate(BaseModel):
@@ -104,6 +106,127 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_from_cookie(
+    token: str | None = Cookie(None, alias=TOKEN_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if token is None:
+        raise credentials_exception
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+        )
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+async def get_current_user_from_bearer_or_cookie(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    logger.info(f"Auth check - cookies: {request.cookies}, token_name: {TOKEN_COOKIE_NAME}")
+    
+    if credentials and credentials.credentials:
+        try:
+            payload = jwt.decode(
+                credentials.credentials,
+                settings.secret_key,
+                algorithms=[settings.algorithm],
+            )
+            user_id: str | None = payload.get("sub")
+            if user_id is None:
+                raise credentials_exception
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError:
+                raise credentials_exception
+            result = await db.execute(select(User).where(User.id == user_uuid))
+            user = result.scalar_one_or_none()
+            if user is None:
+                raise credentials_exception
+            return user
+        except JWTError:
+            pass
+    
+    token = request.cookies.get(TOKEN_COOKIE_NAME)
+    if token:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.secret_key,
+                algorithms=[settings.algorithm],
+            )
+            user_id: str | None = payload.get("sub")
+            if user_id is None:
+                raise credentials_exception
+            try:
+                user_uuid = UUID(user_id)
+            except ValueError:
+                raise credentials_exception
+            result = await db.execute(select(User).where(User.id == user_uuid))
+            user = result.scalar_one_or_none()
+            if user is None:
+                raise credentials_exception
+            return user
+        except JWTError:
+            pass
+    
+    raise credentials_exception
+
+
+async def get_current_user_optional(
+    token: str | None = Cookie(None, alias=TOKEN_COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm],
+        )
+        user_id: str | None = payload.get("sub")
+        if not user_id:
+            return None
+        user_uuid = UUID(user_id)
+        result = await db.execute(select(User).where(User.id == user_uuid))
+        return result.scalar_one_or_none()
+    except JWTError:
+        return None
+
+
 async def require_admin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -152,7 +275,11 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) ->
 
 
 @router.post("/login", response_model=Token)
-async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)) -> dict:
+async def login(
+    response: Response,
+    user_data: UserLogin,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     result = await db.execute(select(User).where(User.email == user_data.email))
     user = result.scalar_one_or_none()
 
@@ -163,7 +290,20 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)) -> dic
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})
+    response.set_cookie(
+        key=TOKEN_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+    )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout")
+async def logout(response: Response) -> dict:
+    response.delete_cookie(key=TOKEN_COOKIE_NAME)
+    return {"message": "Logged out"}
 
 
 @router.get("/me", response_model=UserResponse)

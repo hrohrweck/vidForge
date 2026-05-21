@@ -645,29 +645,32 @@ class VideoGenerator:
             width = self._adjust_dimension_for_ltx(width)
             height = self._adjust_dimension_for_ltx(height)
 
+        clip_text_encodes = [
+            nid for nid, n in workflow.items()
+            if n.get("class_type") == "CLIPTextEncode"
+        ]
+        if len(clip_text_encodes) >= 1:
+            workflow[clip_text_encodes[0]]["inputs"]["text"] = prompt
+        if len(clip_text_encodes) >= 2:
+            workflow[clip_text_encodes[1]]["inputs"]["text"] = negative_prompt
+
         for node_id, node in workflow.items():
             class_type = node.get("class_type")
-            if class_type == "CLIPTextEncode":
-                if node_id == "2":
-                    node["inputs"]["text"] = prompt
-                elif node_id == "3":
-                    node["inputs"]["text"] = negative_prompt
-            elif class_type == "LTXVideoEncodePrompt":
-                node["inputs"]["prompt"] = prompt
-                node["inputs"]["negative_prompt"] = negative_prompt
-            elif class_type == "EmptyHunyuanLatentVideo":
+            if class_type == "EmptyHunyuanLatentVideo":
                 node["inputs"]["width"] = width
                 node["inputs"]["height"] = height
                 node["inputs"]["length"] = video_length
-            elif class_type == "LTXVideoEmptyLatent":
+            elif class_type == "EmptyLTXVLatentVideo":
                 node["inputs"]["width"] = width
                 node["inputs"]["height"] = height
-                node["inputs"]["frames"] = video_length
+                node["inputs"]["length"] = video_length
+            elif class_type == "LTXVImgToVideo":
+                node["inputs"]["width"] = width
+                node["inputs"]["height"] = height
+                node["inputs"]["length"] = video_length
             elif class_type == "CreateVideo":
                 node["inputs"]["fps"] = fps
             elif class_type == "KSampler":
-                node["inputs"]["seed"] = random.randint(0, 2**31 - 1)
-            elif class_type == "LTXVideoSampler":
                 node["inputs"]["seed"] = random.randint(0, 2**31 - 1)
 
         result = await self.comfyui.queue_prompt(workflow)

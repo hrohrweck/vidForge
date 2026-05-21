@@ -37,12 +37,14 @@ export const useAuthStore = create<AuthState>()(
           user,
           isAuthenticated: true,
         }),
-      logout: () =>
+      logout: () => {
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
         set({
           token: null,
           user: null,
           isAuthenticated: false,
-        }),
+        })
+      },
       hasPermission: (permission: string) => {
         const user = get().user
         if (!user) return false

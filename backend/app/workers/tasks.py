@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Optional
 from uuid import UUID
 
 import redis
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -625,6 +628,7 @@ def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
 async def _stage_planning(db: AsyncSession, job: Job) -> dict:
     from app.database import VideoScene
     from app.services.music_video_planner import MusicVideoPlanner
+    from app.services.lyrics_extractor import LyricsExtractor
 
     broadcast_update(str(job.id), {
         "stage": "planning",
@@ -635,16 +639,86 @@ async def _stage_planning(db: AsyncSession, job: Job) -> dict:
     input_data = job.input_data or {}
     audio_file = input_data.get("audio_file")
     style = input_data.get("style", "realistic")
-    duration = input_data.get("duration", 30)
-
+    
     lyrics = input_data.get("lyrics")
+    
+    if lyrics and isinstance(lyrics, dict):
+        duration = lyrics.get("duration", input_data.get("duration", 30))
+    else:
+        duration = input_data.get("duration", 30)
+
+    if isinstance(lyrics, str):
+        lines = [line for line in lyrics.split("\n") if line.strip()]
+        lyrics = {
+            "lyrics": [{"text": line, "start": 0.0, "end": 0.0} for line in lines],
+            "lines": [{"text": line, "start": 0.0, "end": 0.0, "words": []} for line in lines],
+            "full_text": lyrics,
+            "duration": duration,
+        }
+
+    if not lyrics and audio_file:
+        broadcast_update(str(job.id), {
+            "stage": "planning",
+            "progress": 15,
+            "status": "Extracting lyrics from audio...",
+        })
+        extractor = LyricsExtractor()
+        try:
+            from app.config import get_settings
+            settings = get_settings()
+            audio_path = Path(settings.storage_path).resolve() / audio_file
+            lyrics = await extractor.extract_from_audio(str(audio_path))
+        except Exception as e:
+            broadcast_update(str(job.id), {
+                "stage": "planning",
+                "progress": 20,
+                "status": f"Lyrics extraction failed: {e}. Using placeholder...",
+            })
+            lyrics = {
+                "lyrics": [{"text": "Sample", "start": 0.0, "end": 3.0}],
+                "lines": [{"text": "Sample", "start": 0.0, "end": 3.0, "words": []}],
+                "full_text": "Sample",
+                "duration": duration,
+            }
+        finally:
+            await extractor.close()
+
+    if not lyrics and not audio_file:
+        raise RuntimeError(
+            f"No lyrics available for job {job.id}. "
+            "Please provide lyrics manually or ensure audio_file is uploaded."
+        )
+    if not lyrics:
+        lyrics = {"lyrics": [], "lines": [], "full_text": "", "duration": duration}
+
+    from sqlalchemy import update as sa_update
+    await db.execute(
+        sa_update(Job)
+        .where(Job.id == job.id)
+        .values(
+            input_data={
+                **(job.input_data or {}),
+                "lyrics": lyrics,
+            }
+        )
+    )
+    await db.commit()
+    result = await db.execute(select(Job).where(Job.id == job.id))
+    job = result.scalar_one()
 
     planner = MusicVideoPlanner()
-    scenes = await planner.plan_music_video(
-        lyrics=lyrics,
-        duration=duration,
-        style=style,
-    )
+    try:
+        result = await planner.plan_music_video(
+            lyrics=lyrics,
+            duration=duration,
+            style=style,
+        )
+    except Exception as e:
+        await planner.close()
+        raise RuntimeError(f"Scene planning failed: {e}")
+    finally:
+        await planner.close()
+    scenes = result.get("scenes", [])
 
     broadcast_update(str(job.id), {
         "progress": 50,
@@ -731,6 +805,38 @@ async def _stage_generating_images(db: AsyncSession, job: Job) -> dict:
             scene.status = "image_ready"
             scene.image_provider_id = provider_id
 
+            # Create MediaAsset for the generated image
+            try:
+                from app.services.auto_import import _get_or_create_folder, _create_asset_from_file
+                image_full_path = Path(settings.storage_path).resolve() / image_path
+                logger.info(f"Attempting to create MediaAsset: file={image_full_path}, exists={image_full_path.exists()}")
+                if image_full_path.exists():
+                    # Get or create "Generated Images" folder
+                    gen_folder = await _get_or_create_folder(
+                        user_id=job.user_id,
+                        name="Generated Images",
+                        parent_id=None,
+                        db=db,
+                    )
+                    logger.info(f"Using folder: {gen_folder.id} ({gen_folder.name})")
+                    asset = await _create_asset_from_file(
+                        user_id=job.user_id,
+                        folder_id=gen_folder.id,
+                        name=f"Scene {scene.scene_number} - {str(job.id)[:8]}",
+                        file_path=image_full_path,
+                        file_type="image",
+                        source_job_id=job.id,
+                        db=db,
+                        project_id=job.project_id,
+                    )
+                    if asset is None:
+                        logger.error(f"_create_asset_from_file returned None for {image_full_path}")
+                    else:
+                        logger.info(f"Created MediaAsset: {asset.id}")
+            except Exception as e:
+                import traceback
+                logger.error(f"Failed to create MediaAsset for image: {e}\n{traceback.format_exc()}")
+
             thumbnail_dir = Path(settings.storage_path) / "output" / str(job.id) / f"scene_{scene.scene_number:03d}"
             thumbnail_path = thumbnail_dir / "thumbnail.png"
             if thumbnail_path.exists():
@@ -790,7 +896,7 @@ async def _stage_generating_videos(db: AsyncSession, job: Job) -> dict:
 
         try:
             duration = int(scene.end_time - scene.start_time)
-            duration = max(2, min(duration, 30))
+            duration = max(2, min(duration, 5))
 
             prompt = scene.visual_description or scene.lyrics_segment or ""
 
@@ -860,8 +966,9 @@ async def _stage_rendering(db: AsyncSession, job: Job) -> dict:
         return {"status": "failed", "error": "No generated videos to render"}
 
     segment_paths = []
+    storage_path = Path(settings.storage_path).resolve()
     for scene in scenes:
-        full_path = Path(settings.storage_path) / scene.generated_video_path
+        full_path = storage_path / scene.generated_video_path
         if full_path.exists():
             segment_paths.append(str(full_path))
 
@@ -870,7 +977,7 @@ async def _stage_rendering(db: AsyncSession, job: Job) -> dict:
         "status": "Merging scene videos...",
     })
 
-    output_dir = Path(settings.storage_path) / "output" / str(job.id)
+    output_dir = storage_path / "output" / str(job.id)
     merged_path = output_dir / "merged.mp4"
 
     if len(segment_paths) == 1:
@@ -925,8 +1032,8 @@ async def _stage_rendering(db: AsyncSession, job: Job) -> dict:
     except Exception:
         pass
 
-    job.output_path = str(final_path.relative_to(settings.storage_path))
-    job.preview_path = str(preview_path.relative_to(settings.storage_path))
+    job.output_path = str(final_path.relative_to(storage_path))
+    job.preview_path = str(preview_path.relative_to(storage_path))
     job.stage = "completed"
     job.status = "completed"
     await update_job_status(job.id, "completed", 100)
@@ -1007,7 +1114,7 @@ def generate_scene_media(
                     input_data = job.input_data or {}
                     aspect_ratio = input_data.get("aspect_ratio", "16:9")
                     duration = int(scene.end_time - scene.start_time)
-                    duration = max(2, min(duration, 30))
+                    duration = max(2, min(duration, 5))
 
                     prompt = scene.visual_description or scene.lyrics_segment or ""
 
@@ -1095,12 +1202,13 @@ def export_scene_video(
                 return {"status": "failed", "error": "No generated videos to export"}
 
             segment_paths = []
+            storage_path = Path(settings.storage_path).resolve()
             for scene in scenes:
-                full_path = Path(settings.storage_path) / scene.generated_video_path
+                full_path = storage_path / scene.generated_video_path
                 if full_path.exists():
                     segment_paths.append(str(full_path))
 
-            output_dir = Path(settings.storage_path) / "output" / job_id
+            output_dir = storage_path / "output" / job_id
             merged_path = output_dir / "merged.mp4"
 
             broadcast_update(job_id, {"status": "Merging videos..."})
@@ -1122,12 +1230,12 @@ def export_scene_video(
                 audio_streams = []
 
                 if audio_file:
-                    audio_path = Path(settings.storage_path) / audio_file
+                    audio_path = storage_path / audio_file
                     if audio_path.exists():
                         audio_inputs.append(str(audio_path))
 
                 if music_file:
-                    music_path = Path(settings.storage_path) / music_file
+                    music_path = storage_path / music_file
                     if music_path.exists():
                         audio_inputs.append(str(music_path))
 
@@ -1182,8 +1290,8 @@ def export_scene_video(
             except Exception:
                 pass
 
-            job.output_path = str(final_path.relative_to(settings.storage_path))
-            job.preview_path = str(preview_path.relative_to(settings.storage_path))
+            job.output_path = str(final_path.relative_to(storage_path))
+            job.preview_path = str(preview_path.relative_to(storage_path))
             job.export_options = options
             job.stage = "completed"
             job.status = "completed"

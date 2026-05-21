@@ -37,6 +37,7 @@ python-dotenv>=1.0.0
 
 # Video/Audio
 ffmpeg-python>=0.2.0
+openai-whisper>=20231117
 
 # Testing
 pytest>=7.4.0

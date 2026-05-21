@@ -131,7 +131,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
                 )}
               </div>
               {backgroundMusicPath && backgroundMusic && (
-                <p className="text-xs text-green-600 flex items-center gap-1">
+                <p className="text-xs text-primary flex items-center gap-1">
                   <Download className="h-3 w-3" />
                   {backgroundMusic.name} uploaded
                 </p>
@@ -196,7 +196,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
               </div>
               <div className="flex justify-between text-muted-foreground mt-1">
                 <span>Can Export:</span>
-                <span className={exportOptions.can_export ? 'text-green-600' : 'text-yellow-600'}>
+                <span className={exportOptions.can_export ? 'text-primary' : 'text-muted-foreground'}>
                   {exportOptions.can_export ? 'Yes' : 'No (waiting for videos)'}
                 </span>
               </div>

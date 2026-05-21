@@ -49,6 +49,17 @@ class PoeProvider(ComfyUIProvider):
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         raise NotImplementedError("Poe provider uses different method for media generation")
 
+    # Aspect ratio to size mapping for Poe Videos API
+    _ASPECT_RATIO_SIZES: dict[str, str] = {
+        "16:9": "1920x1080",
+        "9:16": "1080x1920",
+        "1:1": "1080x1080",
+        "4:3": "1440x1080",
+        "3:4": "1080x1440",
+        "3:2": "1440x960",
+        "2:3": "960x1440",
+    }
+
     async def generate_video(
         self,
         prompt: str,
@@ -57,39 +68,96 @@ class PoeProvider(ComfyUIProvider):
         aspect_ratio: str = "16:9",
         resolution: str = "1080p",
         negative_prompt: str = "",
+        image_path: str | None = None,
     ) -> tuple[str, bytes | None]:
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
-        extra_body = {
-            "duration": duration,
-            "aspect": aspect_ratio,
-            "resolution": resolution,
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Use Poe Videos API (/v1/videos) for video generation
+        size = self._ASPECT_RATIO_SIZES.get(aspect_ratio, "1920x1080")
+
+        create_body: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "seconds": min(duration, 8),  # Veo models max 8s
+            "size": size,
         }
 
-        messages = [{"role": "user", "content": prompt}]
-        if negative_prompt:
-            messages.append({"role": "user", "content": f"Negative: {negative_prompt}"})
+        # Add reference image as base64 input_image if available
+        if image_path:
+            from pathlib import Path
+            from app.config import get_settings
+            settings = get_settings()
+            full_image_path = Path(settings.storage_path) / image_path
+            if full_image_path.exists():
+                image_bytes = full_image_path.read_bytes()
+                image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                create_body["input_image"] = f"data:image/png;base64,{image_b64}"
 
-        response = await self.client.post(
-            f"{self.base_url}/chat/completions",
-            json={
-                "model": model,
-                "messages": messages,
-                "extra_body": extra_body,
-                "stream": False,
-            },
+        logger.info(f"Poe generate_video: model={model}, size={size}, seconds={create_body['seconds']}, has_image={'input_image' in create_body}")
+
+        # Step 1: Create video
+        create_response = await self.client.post(
+            f"{self.base_url}/videos",
+            json=create_body,
             headers={"Authorization": f"Bearer {self.api_key}"},
         )
 
-        if response.status_code != 200:
-            error_msg = response.text
-            raise RuntimeError(f"Poe API error: {error_msg}")
+        if create_response.status_code not in (200, 201):
+            error_msg = create_response.text
+            raise RuntimeError(f"Poe Videos API create error: {error_msg}")
 
-        result = response.json()
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        video_data = create_response.json()
+        video_id = video_data.get("id", "")
+        status = video_data.get("status", "queued")
 
-        return result.get("id", ""), self._parse_media_content(content)
+        logger.info(f"Poe video created: id={video_id}, status={status}")
+
+        # Step 2: Poll until completed
+        poll_interval = 5.0
+        timeout = 300.0
+        elapsed = 0.0
+
+        while status in ("queued", "in_progress") and elapsed < timeout:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+            poll_response = await self.client.get(
+                f"{self.base_url}/videos/{video_id}",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+
+            if poll_response.status_code != 200:
+                raise RuntimeError(f"Poe Videos API poll error: {poll_response.text}")
+
+            video_data = poll_response.json()
+            status = video_data.get("status", "failed")
+            progress = video_data.get("progress", 0)
+            logger.info(f"Poe video poll: id={video_id}, status={status}, progress={progress}")
+
+        if status == "failed":
+            error = video_data.get("error", {})
+            raise RuntimeError(f"Poe video generation failed: {error}")
+
+        if status != "completed":
+            raise RuntimeError(f"Poe video generation timed out after {timeout}s (status={status})")
+
+        # Step 3: Download video content
+        download_response = await self.client.get(
+            f"{self.base_url}/videos/{video_id}/content",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+
+        if download_response.status_code != 200:
+            raise RuntimeError(f"Poe Videos API download error: {download_response.text}")
+
+        video_bytes = download_response.content
+        logger.info(f"Poe video downloaded: id={video_id}, size={len(video_bytes)} bytes")
+
+        return video_id, video_bytes
 
     async def generate_image(
         self,
@@ -98,27 +166,51 @@ class PoeProvider(ComfyUIProvider):
         aspect_ratio: str = "3:2",
         quality: str = "high",
         negative_prompt: str = "",
+        image_path: str | None = None,
     ) -> tuple[str, bytes | None]:
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
-        extra_body = {
-            "aspect": aspect_ratio,
-            "quality": quality,
-        }
-
-        messages = [{"role": "user", "content": prompt}]
+        # Build message content with optional image (OpenAI vision format)
+        content: list[dict[str, Any]] | str
+        if image_path:
+            from pathlib import Path
+            from app.config import get_settings
+            settings = get_settings()
+            full_image_path = Path(settings.storage_path) / image_path
+            if full_image_path.exists():
+                image_bytes = full_image_path.read_bytes()
+                image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                content = [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_b64}",
+                        },
+                    },
+                    {"type": "text", "text": prompt},
+                ]
+            else:
+                content = prompt
+        else:
+            content = prompt
+        messages = [{"role": "user", "content": content}]
         if negative_prompt:
             messages.append({"role": "user", "content": f"Negative: {negative_prompt}"})
 
+        request_body: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+        }
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Poe generate_image request: model={model}, has_image={image_path is not None}")
+
         response = await self.client.post(
             f"{self.base_url}/chat/completions",
-            json={
-                "model": model,
-                "messages": messages,
-                "extra_body": extra_body,
-                "stream": False,
-            },
+            json=request_body,
             headers={"Authorization": f"Bearer {self.api_key}"},
         )
 

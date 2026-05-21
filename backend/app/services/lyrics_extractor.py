@@ -1,13 +1,12 @@
 import asyncio
-import json
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import httpx
+import whisper
 
-from app.config import get_settings
-
-settings = get_settings()
+WHISPER_MODEL_NAME = "base"
 
 
 class LyricsExtractorError(Exception):
@@ -15,11 +14,22 @@ class LyricsExtractorError(Exception):
 
 
 class LyricsExtractor:
-    def __init__(self):
-        self.client = httpx.AsyncClient(timeout=300.0)
+    """Extract lyrics from audio files using OpenAI Whisper (local)."""
+
+    def __init__(self) -> None:
+        self._model: whisper.Whisper | None = None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
+
+    def _load_model(self) -> whisper.Whisper:
+        if self._model is None:
+            try:
+                self._model = whisper.load_model(WHISPER_MODEL_NAME)
+            except Exception as e:
+                raise LyricsExtractorError(f"Failed to load Whisper model '{WHISPER_MODEL_NAME}': {e}")
+        return self._model
 
     async def close(self) -> None:
-        await self.client.aclose()
+        self._executor.shutdown(wait=False)
 
     async def extract_from_audio(self, audio_path: str) -> dict[str, Any]:
         try:
@@ -29,56 +39,55 @@ class LyricsExtractor:
             raise LyricsExtractorError(f"Failed to extract lyrics: {e}")
 
     async def _run_whisper(self, audio_path: str) -> dict[str, Any]:
-        whisper_url = f"{settings.ollama_url}/api/transcribe"
-
-        try:
-            with open(audio_path, "rb") as audio_file:
-                files = {"file": audio_file}
-                data = {
-                    "model": "whisper-base",
-                    "language": "en",
-                }
-                response = await self.client.post(
-                    whisper_url,
-                    files=files,
-                    data=data,
-                )
-
-            if response.status_code != 200:
-                raise LyricsExtractorError(f"Whisper API error: {response.status_code}")
-
-            result = response.json()
-            return self._parse_transcript_with_timestamps(result, audio_path)
-        except FileNotFoundError:
-            raise LyricsExtractorError(f"Audio file not found: {audio_path}")
-        except httpx.HTTPError as e:
-            raise LyricsExtractorError(f"HTTP error during transcription: {e}")
-
-    def _parse_transcript_with_timestamps(
-        self, transcript: dict, audio_path: str
-    ) -> dict[str, Any]:
-        text = transcript.get("text", "")
-
+        model = self._load_model()
         duration = self._get_audio_duration(audio_path)
 
-        words = transcript.get("words", [])
-        if not words:
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                self._executor,
+                lambda: model.transcribe(audio_path, word_timestamps=True),
+            )
+        except Exception as e:
+            raise LyricsExtractorError(f"Whisper transcription failed: {e}")
+
+        return self._parse_transcript_with_timestamps(result, duration)
+
+    def _parse_transcript_with_timestamps(
+        self, transcript: dict[str, Any], duration: float
+    ) -> dict[str, Any]:
+        text = transcript.get("text", "").strip()
+
+        words: list[dict[str, Any]] = []
+        segments = transcript.get("segments", [])
+
+        for segment in segments:
+            segment_words = segment.get("words", [])
+            if segment_words:
+                for word_info in segment_words:
+                    words.append(
+                        {
+                            "text": word_info.get("word", "").strip(),
+                            "start": word_info.get("start", 0.0),
+                            "end": word_info.get("end", 0.0),
+                        }
+                    )
+            else:
+                words.append(
+                    {
+                        "text": segment.get("text", "").strip(),
+                        "start": segment.get("start", 0.0),
+                        "end": segment.get("end", 0.0),
+                    }
+                )
+
+        if not words and text:
             words = self._approximate_word_timestamps(text, duration)
 
-        lyrics = []
-        for word_info in words:
-            lyrics.append(
-                {
-                    "text": word_info.get("text", ""),
-                    "start": word_info.get("start", 0.0),
-                    "end": word_info.get("end", 0.0),
-                }
-            )
-
-        lines = self._group_into_lines(lyrics)
+        lines = self._group_into_lines(words)
 
         return {
-            "lyrics": lyrics,
+            "lyrics": words,
             "lines": lines,
             "full_text": text,
             "duration": duration,
@@ -141,8 +150,6 @@ class LyricsExtractor:
 
     def _get_audio_duration(self, audio_path: str) -> float:
         try:
-            import subprocess
-
             result = subprocess.run(
                 [
                     "ffprobe",

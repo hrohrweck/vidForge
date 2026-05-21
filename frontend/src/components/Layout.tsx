@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import {
   Video,
@@ -8,15 +9,30 @@ import {
   Shield,
   Users,
   Server,
+  Image,
+  Menu,
+  ChevronLeft,
+  User as UserIcon,
 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import { ThemeToggle } from './ThemeToggle'
 import { cn } from '../lib/utils'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
+import { Avatar, AvatarFallback } from './ui/avatar'
+import { Button } from './ui/button'
 
 const getNavItems = (isSuperuser: boolean) => [
   { to: '/', label: 'Dashboard', icon: Video },
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
+  { to: '/media', label: 'Media Library', icon: Image },
   { to: '/settings', label: 'Settings', icon: Settings },
   ...(isSuperuser
     ? [
@@ -30,54 +46,125 @@ const getNavItems = (isSuperuser: boolean) => [
 export default function Layout() {
   const { user, logout } = useAuthStore()
   const navItems = getNavItems(user?.is_superuser || false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="sticky top-0 z-40 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
         <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Video className="h-6 w-6" />
-            <span className="font-bold text-lg">VidForge</span>
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="md:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <div className="flex items-center gap-2">
+              <Video className="h-6 w-6 text-primary" />
+              <span className="font-bold text-lg tracking-tight">VidForge</span>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <ThemeToggle />
-            <span className="text-sm text-muted-foreground">{user?.email}</span>
-            <button
-              onClick={logout}
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      {user?.email?.charAt(0).toUpperCase() || <UserIcon className="h-4 w-4" />}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">Account</p>
+                    <p className="text-xs leading-none text-muted-foreground">
+                      {user?.email}
+                    </p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive cursor-pointer">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
-      <div className="container mx-auto px-4 py-6 flex gap-6">
-        <nav className="w-48 shrink-0">
-          <ul className="space-y-1">
-            {navItems.map((item) => (
-              <li key={item.to}>
-                <NavLink
-                  to={item.to}
-                  end={item.to === '/'}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
-                      isActive
-                        ? 'bg-secondary text-secondary-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
-                    )
-                  }
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <main className="flex-1">
-          <Outlet />
+      
+      <div className="flex-1 flex overflow-hidden">
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-30 flex flex-col border-r border-sidebar-border bg-sidebar-bg transition-all duration-300 ease-in-out md:relative md:translate-x-0",
+            isSidebarOpen ? "w-64 translate-x-0" : "w-16 -translate-x-full md:translate-x-0"
+          )}
+        >
+          <div className="flex items-center justify-end p-2 md:hidden">
+            <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)}>
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+          </div>
+          <nav className="flex-1 overflow-y-auto py-4">
+            <ul className="space-y-1 px-2">
+              {navItems.map((item) => (
+                <li key={item.to}>
+                  <NavLink
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) =>
+                      cn(
+                        'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                        !isSidebarOpen && 'md:justify-center md:px-0'
+                      )
+                    }
+                    title={!isSidebarOpen ? item.label : undefined}
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <div className={cn(
+                          "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
+                          isActive ? "opacity-100" : "opacity-0"
+                        )} />
+                        <item.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                        <span className={cn(
+                          "transition-all duration-300",
+                          !isSidebarOpen && "md:hidden"
+                        )}>
+                          {item.label}
+                        </span>
+                      </>
+                    )}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          
+          <div className="p-4 border-t border-sidebar-border hidden md:flex justify-center">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className={cn("h-5 w-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
+            </Button>
+          </div>
+        </aside>
+        
+        <main className="flex-1 overflow-y-auto bg-background/50">
+          <div className="container mx-auto p-6 max-w-6xl">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

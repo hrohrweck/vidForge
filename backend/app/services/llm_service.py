@@ -13,10 +13,10 @@ class LLMError(Exception):
 
 
 class LLMClient:
-    def __init__(self, base_url: str | None = None, model: str = "llama3.2"):
+    def __init__(self, base_url: str | None = None, model: str | None = None):
         self.base_url = base_url or settings.ollama_url
-        self.model = model
-        self.client = httpx.AsyncClient(timeout=120.0)
+        self.model = model or settings.llm_model or "qwen3.6:35b"
+        self.client = httpx.AsyncClient(timeout=300.0)
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -27,30 +27,49 @@ class LLMClient:
         system: str | None = None,
         max_tokens: int = 512,
         temperature: float = 0.7,
+        retries: int = 3,
     ) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        try:
-            response = await self.client.post(
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {
-                        "num_predict": max_tokens,
-                        "temperature": temperature,
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                response = await self.client.post(
+                    f"{self.base_url}/api/chat",
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {
+                            "num_predict": max_tokens,
+                            "temperature": temperature,
+                        },
                     },
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("message", {}).get("content", "")
-        except httpx.HTTPError as e:
-            raise LLMError(f"LLM request failed: {e}")
+                )
+                response.raise_for_status()
+                data = response.json()
+                content = data.get("message", {}).get("content", "")
+
+                if not content:
+                    thinking = data.get("message", {}).get("think", "") or data.get("message", {}).get("thinking", "")
+                    if thinking:
+                        content = thinking
+
+                if not content:
+                    raise LLMError(f"Empty response from LLM (model: {self.model})")
+
+                return content
+            except httpx.HTTPError as e:
+                last_error = e
+                if attempt < retries - 1:
+                    wait = 2 ** attempt
+                    await asyncio.sleep(wait)
+                continue
+
+        raise LLMError(f"LLM request failed after {retries} attempts: {last_error}")
 
     async def generate_with_context(
         self,

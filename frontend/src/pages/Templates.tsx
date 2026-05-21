@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Eye, FileText, Loader2 } from 'lucide-react'
 import { templatesApi, type Template } from '../api/client'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import JobCreateModal from '../components/JobCreateModal'
 
 interface TemplateDetailModalProps {
@@ -39,9 +40,9 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
             <div>
               <h2 className="text-xl font-semibold">{template.name}</h2>
               {template.is_builtin && (
-                <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded mt-2 inline-block">
+                <Badge variant="default" className="mt-2">
                   Built-in
-                </span>
+                </Badge>
               )}
               {template.description && (
                 <p className="text-muted-foreground mt-2">{template.description}</p>
@@ -62,7 +63,7 @@ function TemplateDetailModal({ template, onClose, onUse }: TemplateDetailModalPr
                   <div key={idx} className="text-sm border-l-2 border-muted pl-3">
                     <div className="font-medium">
                       {input.name}
-                      {input.required && <span className="text-red-500 ml-1">*</span>}
+                      {input.required && <span className="text-destructive ml-1">*</span>}
                     </div>
                     <div className="text-muted-foreground">
                       {input.type}
@@ -149,11 +150,11 @@ export default function Templates() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-blue-500" />
+                    <FileText className="h-5 w-5 text-primary" />
                     <h3 className="font-semibold text-lg">{template.name}</h3>
                   </div>
                   {template.is_builtin && (
-                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">Built-in</span>
+                    <Badge variant="default">Built-in</Badge>
                   )}
                 </div>
 

@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from app.services.llm_service import LLMClient
@@ -9,43 +10,19 @@ class MusicVideoPlannerError(Exception):
 
 
 class MusicVideoPlanner:
-    SYSTEM_PROMPT = """You are an expert music video director. Your job is to analyze song lyrics and create a compelling visual story with distinct scenes.
+    SYSTEM_PROMPT = """You are a music video director. Analyze lyrics and create a visual story with distinct scenes.
 
-You must output valid JSON only - no explanations or additional text.
-
-For the given lyrics, you need to:
-1. Divide the lyrics into logical scenes (usually verse/chorus changes, or every 10-30 seconds)
-2. For each scene, generate a detailed image generation prompt
-3. Ensure visual continuity across scenes while showing progression
-
-Output format must be:
-{
-  "scenes": [
-    {
-      "scene_number": 1,
-      "start_time": 0.0,
-      "end_time": 10.0,
-      "lyrics_segment": "First few lines of lyrics for this scene",
-      "visual_description": "Detailed description of what to show in this scene",
-      "image_prompt": "A concise prompt for AI image generation (for first frame)",
-      "mood": "energetic|calm|melancholic|happy|mysterious|etc",
-      "camera_movement": "static|pan_left|pan_right|zoom_in|zoom_out|dolly|etc"
-    }
-  ],
-  "total_scenes": N,
-  "summary": "Brief 1-2 sentence summary of the video concept"
-}
+Output ONLY valid JSON:
+{"scenes": [{"scene_number": 1, "start_time": 0.0, "end_time": 10.0, "lyrics_segment": "lyrics", "visual_description": "desc", "image_prompt": "prompt", "mood": "neutral", "camera_movement": "static"}], "total_scenes": 1, "summary": "summary"}
 
 Guidelines:
-- Scene duration: usually 5-15 seconds each
-- Match visual mood to lyrics emotion
-- Use specific camera movements for dynamic feel
-- Image prompts should be 10-30 words, descriptive but not overly complex
-- First scene sets the mood, last scene provides closure
-- Consider beat drops, chorus repetitions, and song structure"""
+- Scene duration: 5-15 seconds each
+- Match mood to lyrics emotion
+- Image prompts: 10-30 words
+- First scene sets mood, last provides closure"""
 
     def __init__(self):
-        self.llm = LLMClient()
+        self.llm = LLMClient(model="huihui_ai/qwen3.6-abliterated:35b-Claude-4.7")
 
     async def close(self) -> None:
         await self.llm.close()
@@ -70,11 +47,205 @@ Guidelines:
             temperature=0.7,
         )
 
+        if not response:
+            raise MusicVideoPlannerError("Empty response from LLM - check Ollama logs")
+
+        return self._parse_response(response, duration)
+
+    def _parse_response(self, response: str, duration: float) -> dict[str, Any]:
         try:
-            parsed = json.loads(response)
+            response = response.strip()
+
+            if not response or response == "null":
+                raise MusicVideoPlannerError(f"Response is null/empty after strip: {repr(response[:100])}")
+
+            if response.startswith("```"):
+                parts = response.split("```")
+                response = parts[1] if len(parts) > 1 and "scenes" in parts[1] else response
+                if len(parts) > 2:
+                    response = parts[2] if "scenes" in parts[2] else parts[1]
+                if response.startswith("json"):
+                    response = response[4:]
+                response = response.strip()
+
+            if not response or response == "null":
+                raise MusicVideoPlannerError(f"Response is null/empty after cleanup: {repr(response[:100])}")
+
+            parsed = None
+
+            # Try 1: Direct JSON parse (works for complete responses)
+            for candidate in [response, response.replace("```json", "").replace("```", "")]:
+                candidate = candidate.strip()
+                if candidate.startswith("{") and "scenes" in candidate:
+                    try:
+                        parsed = json.loads(candidate)
+                        break
+                    except json.JSONDecodeError:
+                        pass
+
+            # Try 2: Regex extraction (for incomplete JSON at the end)
+            if not parsed:
+                json_match = re.search(r'\{.*?"scenes".*?\}', response, re.DOTALL)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+
+            # Try 3: Brace-matching - find largest valid JSON object (handles truncation)
+            if not parsed:
+                parsed = self._extract_json_by_brace_matching(response)
+
+            # Try 4: Extract complete scenes from truncated response
+            if not parsed:
+                parsed = self._extract_complete_scenes(response)
+
+            # Try 5: Repair truncated JSON by closing open strings/brackets
+            if not parsed:
+                repaired = self._repair_truncated_json(response)
+                if repaired:
+                    try:
+                        parsed = json.loads(repaired)
+                    except json.JSONDecodeError:
+                        pass
+
+            if not parsed:
+                raise MusicVideoPlannerError(f"Failed to parse LLM response: {repr(response[:300])}")
+
             return self._validate_and_fix_scenes(parsed, duration)
         except json.JSONDecodeError as e:
-            raise MusicVideoPlannerError(f"Failed to parse LLM response: {e}")
+            raise MusicVideoPlannerError(f"Failed to parse LLM response: {repr(response[:200])}")
+
+    def _extract_json_by_brace_matching(self, response: str) -> dict[str, Any] | None:
+        """Extract JSON by finding balanced braces, handling truncated responses."""
+        start = response.find("{")
+        if start == -1:
+            return None
+
+        # Try progressively larger portions, looking for balanced braces
+        for end in range(start + 1, len(response) + 1):
+            candidate = response[start:end]
+            try:
+                parsed = json.loads(candidate)
+                if "scenes" in parsed or "total_scenes" in parsed:
+                    return parsed
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _extract_complete_scenes(self, response: str) -> dict[str, Any] | None:
+        """Extract individual complete scene objects from a truncated response."""
+        # Find all complete scene objects using regex
+        # A complete scene has all required fields and closes properly
+        scene_pattern = r'\{\s*"scene_number"\s*:\s*\d+\s*,\s*"start_time"\s*:\s*[\d.]+\s*,\s*"end_time"\s*:\s*[\d.]+\s*,\s*"lyrics_segment"\s*:\s*"[^"]*"\s*,\s*"visual_description"\s*:\s*"[^"]*"'
+
+        scenes = []
+        for match in re.finditer(scene_pattern, response):
+            scene_str = match.group(0)
+            # Try to extend to find closing brace
+            start_idx = match.start()
+            brace_count = 1
+            for i in range(start_idx + 1, len(response)):
+                if response[i] == '{':
+                    brace_count += 1
+                elif response[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        try:
+                            scene = json.loads(response[start_idx:i+1])
+                            scenes.append(scene)
+                        except json.JSONDecodeError:
+                            pass
+                        break
+
+        if scenes:
+            return {
+                "scenes": scenes,
+                "total_scenes": len(scenes),
+                "summary": f"Extracted {len(scenes)} scenes from truncated response",
+            }
+
+        return None
+
+    def _repair_truncated_json(self, response: str) -> str | None:
+        """Repair truncated JSON by closing open strings, objects, and arrays."""
+        # Find the start of the JSON
+        start = response.find("{")
+        if start == -1:
+            return None
+
+        json_str = response[start:]
+
+        in_string = False
+        escape_next = False
+        open_braces = 0
+        open_brackets = 0
+        repaired_chars = []
+
+        for char in json_str:
+            if escape_next:
+                repaired_chars.append(char)
+                escape_next = False
+                continue
+
+            if char == '\\':
+                repaired_chars.append(char)
+                escape_next = True
+                continue
+
+            if char == '"' and not in_string:
+                in_string = True
+                repaired_chars.append(char)
+            elif char == '"' and in_string:
+                in_string = False
+                repaired_chars.append(char)
+            elif char == '\n' and in_string:
+                repaired_chars.append('\\')
+                repaired_chars.append('n')
+            elif char == '\n' and not in_string:
+                repaired_chars.append(' ')
+            elif not in_string:
+                if char == '{':
+                    open_braces += 1
+                    repaired_chars.append(char)
+                elif char == '}':
+                    open_braces -= 1
+                    repaired_chars.append(char)
+                elif char == '[':
+                    open_brackets += 1
+                    repaired_chars.append(char)
+                elif char == ']':
+                    open_brackets -= 1
+                    repaired_chars.append(char)
+                else:
+                    repaired_chars.append(char)
+            else:
+                repaired_chars.append(char)
+
+        # If we're in a string, close it
+        if in_string:
+            repaired_chars.append('"')
+
+        # Close any open objects/arrays
+        if open_braces > 0:
+            if open_braces >= 2:
+                repaired_chars.append('}')
+            if open_brackets > 0:
+                repaired_chars.append(']')
+            repaired_chars.append('}')
+
+        repaired = ''.join(repaired_chars)
+
+        # Validate the repaired JSON
+        try:
+            parsed = json.loads(repaired)
+            if "scenes" in parsed and len(parsed.get("scenes", [])) > 0:
+                return repaired
+        except json.JSONDecodeError:
+            pass
+
+        return None
 
     def _build_line_info(self, lines: list[dict[str, Any]]) -> str:
         line_info_parts = []
@@ -99,92 +270,50 @@ Lyrics:
 Timestamped lyrics (for reference):
 {line_info}
 
-Create a detailed scene plan with {max(3, int(duration / 10))}-{min(15, int(duration / 7))} scenes.
-Ensure each scene has:
-- Accurate timing based on the lyrics timestamps
-- A distinct visual concept that matches the lyrics mood
-- An image generation prompt for the first frame
-- Appropriate camera movement for the scene's energy
+Create a detailed scene plan in JSON format."""
 
-Output ONLY valid JSON."""
+    def _validate_and_fix_scenes(self, parsed: dict[str, Any], duration: float) -> dict[str, Any]:
+        if "scenes" not in parsed:
+            parsed["scenes"] = []
+        if "total_scenes" not in parsed:
+            parsed["total_scenes"] = len(parsed["scenes"])
+        if "summary" not in parsed:
+            parsed["summary"] = "Music video plan"
 
-    def _validate_and_fix_scenes(
-        self, parsed: dict[str, Any], total_duration: float
-    ) -> dict[str, Any]:
-        scenes = parsed.get("scenes", [])
-
+        scenes = parsed["scenes"]
         if not scenes:
-            raise MusicVideoPlannerError("LLM returned no scenes")
+            return parsed
+
+        scenes.sort(key=lambda s: s.get("start_time", 0))
 
         fixed_scenes = []
+        expected_start = 0.0
+
         for i, scene in enumerate(scenes):
-            fixed_scene = {
-                "scene_number": scene.get("scene_number", i + 1),
-                "start_time": max(0.0, scene.get("start_time", i * (total_duration / len(scenes)))),
-                "end_time": min(
-                    total_duration,
-                    scene.get("end_time", (i + 1) * (total_duration / len(scenes))),
-                ),
-                "lyrics_segment": scene.get("lyrics_segment", ""),
-                "visual_description": scene.get("visual_description", ""),
-                "image_prompt": scene.get("image_prompt", ""),
-                "mood": scene.get("mood", "neutral"),
-                "camera_movement": scene.get("camera_movement", "static"),
-            }
-            fixed_scenes.append(fixed_scene)
+            scene["start_time"] = max(scene.get("start_time", expected_start), expected_start)
+            
+            if i == len(scenes) - 1:
+                scene["end_time"] = duration
+            else:
+                next_start = scenes[i + 1].get("start_time", duration)
+                scene["end_time"] = min(scene.get("end_time", next_start), next_start)
+            
+            if scene["end_time"] <= scene["start_time"]:
+                scene["end_time"] = scene["start_time"] + 5.0
+            
+            fixed_scenes.append(scene)
+            expected_start = scene["end_time"]
 
-        sorted_scenes = sorted(fixed_scenes, key=lambda s: s["start_time"])
+        if fixed_scenes and fixed_scenes[-1]["end_time"] < duration:
+            fixed_scenes[-1]["end_time"] = duration
 
-        for i in range(len(sorted_scenes) - 1):
-            sorted_scenes[i]["end_time"] = min(
-                sorted_scenes[i]["end_time"], sorted_scenes[i + 1]["start_time"]
-            )
+        if fixed_scenes and fixed_scenes[0]["start_time"] > 0:
+            fixed_scenes[0]["start_time"] = 0.0
 
-        sorted_scenes[-1]["end_time"] = total_duration
-
-        for i, scene in enumerate(sorted_scenes):
+        for i, scene in enumerate(fixed_scenes):
             scene["scene_number"] = i + 1
 
-        return {
-            "scenes": sorted_scenes,
-            "total_scenes": len(sorted_scenes),
-            "summary": parsed.get("summary", ""),
-            "duration": total_duration,
-        }
+        parsed["scenes"] = fixed_scenes
+        parsed["total_scenes"] = len(fixed_scenes)
 
-    async def regenerate_scene_prompt(
-        self,
-        scene: dict[str, Any],
-        lyrics_context: str,
-        style: str = "realistic",
-    ) -> dict[str, Any]:
-        prompt = f"""Regenerate the image prompt for this scene.
-
-Scene details:
-- Start time: {scene.get('start_time')}s
-- End time: {scene.get('end_time')}s
-- Lyrics: {scene.get('lyrics_segment')}
-- Current visual description: {scene.get('visual_description')}
-- Current mood: {scene.get('mood')}
-- Camera movement: {scene.get('camera_movement')}
-- Style: {style}
-
-Provide a new image_prompt that better captures the scene's essence.
-Output ONLY valid JSON with just the updated fields:
-{{
-  "image_prompt": "new prompt here",
-  "visual_description": "updated description",
-  "mood": "updated mood if different"
-}}"""
-
-        response = await self.llm.generate(
-            prompt=prompt,
-            max_tokens=512,
-            temperature=0.7,
-        )
-
-        try:
-            updated = json.loads(response)
-            return {**scene, **updated}
-        except json.JSONDecodeError:
-            return scene
+        return parsed

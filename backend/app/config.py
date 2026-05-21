@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     comfyui_workflows_path: str = "./app/comfyui/workflows"
     comfyui_max_concurrent: int = 1
     ollama_url: str = "http://localhost:11434"
+    llm_model: str = "qwen3.6:35b"
 
     templates_path: str = "./templates"
     styles_path: str = "./styles"

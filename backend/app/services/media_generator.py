@@ -1,4 +1,6 @@
+import json
 import random
+import subprocess
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -7,12 +9,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import Provider, Job
-from app.services.providers import PoeProvider, ComfyUIDirectProvider, RunPodProvider
+from app.database import Job, Provider, UserSettings
 from app.services.job_router import JobRouter
-
+from app.services.model_config import get_model_config, get_default_model_preferences
+from app.services.providers import (
+    ComfyUIDirectProvider,
+    PoeProvider,
+    RunPodProvider,
+)
 
 settings = get_settings()
+
+
+VIDEO_WORKFLOW_MAP: dict[str, str] = {
+    "wan2.2_t2v": "wan_t2v.json",
+    "wan2.2_s2v": "wan_s2v.json",
+    "wan_t2v": "wan_t2v.json",
+    "wan_s2v": "wan_s2v.json",
+    "ltx2.3_t2v": "ltx_t2v.json",
+    "ltx2.3_i2v": "ltx_i2v.json",
+    "ltx_t2v": "ltx_t2v.json",
+    "ltx_i2v": "ltx_i2v.json",
+    "ltx_distilled": "ltx_distilled.json",
+    "ltx2.3_distilled": "ltx_distilled.json",
+}
 
 
 async def get_provider_instance(
@@ -57,7 +77,7 @@ async def get_provider_for_job(
     candidates = []
     async for prov in router.iterate_providers():
         if modality == "image":
-            if prov.provider_type == "poe":
+            if prov.provider_type == "comfyui_direct":
                 candidates.append(prov)
         else:
             if prov.provider_type in ("comfyui_direct", "runpod", "poe"):
@@ -73,8 +93,83 @@ async def get_provider_for_job(
     return None, None
 
 
+async def get_comfyui_direct_provider(
+    db: AsyncSession,
+    provider_id: UUID | None = None,
+) -> tuple[Provider, ComfyUIDirectProvider]:
+    provider: Provider | None = None
+
+    if provider_id:
+        result = await db.execute(
+            select(Provider).where(
+                Provider.id == provider_id,
+                Provider.provider_type == "comfyui_direct",
+                Provider.is_active == True,  # noqa: E712
+            )
+        )
+        provider = result.scalar_one_or_none()
+
+    if not provider:
+        result = await db.execute(
+            select(Provider).where(
+                Provider.provider_type == "comfyui_direct",
+                Provider.is_active == True,  # noqa: E712
+            )
+        )
+        provider = result.scalar_one_or_none()
+
+    if not provider:
+        raise ValueError("No active ComfyUI Direct provider available.")
+
+    instance = await get_provider_instance(db, provider)
+    if not isinstance(instance, ComfyUIDirectProvider):
+        raise ValueError(f"Expected ComfyUI Direct provider, got {provider.provider_type}")
+
+    return provider, instance
+
+
+async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[str, str]:
+    """Get user's model preferences from settings."""
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = result.scalar_one_or_none()
+
+    if not user_settings or not user_settings.preferences:
+        return get_default_model_preferences()
+
+    model_prefs = user_settings.preferences.get("models", {})
+    if not model_prefs:
+        return get_default_model_preferences()
+
+    return {
+        "image_model": model_prefs.get("image_model", "flux1-schnell"),
+        "video_model": model_prefs.get("video_model", "wan2.2-t2v"),
+        "image_provider": model_prefs.get("image_provider", "local"),
+        "video_provider": model_prefs.get("video_provider", "local"),
+    }
+
+
 def get_scene_output_dir(job_id: str, scene_number: int) -> Path:
     return Path(settings.storage_path) / "output" / job_id / f"scene_{scene_number:03d}"
+
+
+def get_comfyui_workflow_path(workflow_name: str) -> Path | None:
+    search_paths = [
+        Path(settings.comfyui_workflows_path) / workflow_name,
+        Path(settings.storage_path).parent / "workflows" / workflow_name,
+        Path(__file__).parent.parent / "comfyui" / "workflows" / workflow_name,
+        Path(__file__).parent.parent.parent / "templates" / "workflows" / workflow_name,
+    ]
+    for workflow_path in search_paths:
+        if workflow_path.exists():
+            return workflow_path
+    return None
+
+
+def load_comfyui_workflow(workflow_name: str) -> dict[str, Any] | None:
+    workflow_path = get_comfyui_workflow_path(workflow_name)
+    if not workflow_path:
+        return None
+    return json.loads(workflow_path.read_text())
 
 
 async def generate_image(
@@ -90,37 +185,44 @@ async def generate_image(
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / "seed_image.png"
 
-    if provider_id:
-        result = await db.execute(select(Provider).where(Provider.id == provider_id))
-        provider = result.scalar_one_or_none()
+    # Get user's model preferences
+    user_prefs = await get_user_model_preferences(db, job.user_id)
+    selected_model = model_preference or user_prefs.get("image_model", "sdxl")
+    model_config = get_model_config(selected_model)
+
+    provider, instance = await get_comfyui_direct_provider(db, provider_id)
+
+    # Use proper image workflow based on selected model
+    if selected_model == "flux1-schnell":
+        workflow = _build_flux_image_workflow(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            provider_config=instance.config,
+        )
     else:
-        result = await db.execute(select(Provider).where(Provider.provider_type == "poe", Provider.is_active == True))  # noqa: E712
-        provider = result.scalar_one_or_none()
+        # Fallback to existing workflow for other models
+        workflow = _build_comfyui_image_workflow(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            model_preference=selected_model,
+            provider_config=instance.config,
+        )
 
-    if not provider:
-        raise ValueError("No image provider available. Please configure a Poe provider.")
+    prompt_id = await instance.queue_prompt(workflow)
+    result = await instance.wait_for_completion(prompt_id)
 
-    instance = await get_provider_instance(db, provider)
+    # Get the image output
+    image_data = await instance.get_output(result)
+    if not image_data:
+        raise ValueError("ComfyUI image generation returned no output data")
 
-    if not isinstance(instance, PoeProvider):
-        raise ValueError(f"Image generation is only supported on Poe providers, got {provider.provider_type}")
+    image_path.write_bytes(image_data)
 
-    model = model_preference or instance.config.get("default_image_model", "GPT-Image-1")
-
-    content, output_data = await instance.generate_image(
-        prompt=prompt,
-        model=model,
-        aspect_ratio=aspect_ratio,
-    )
-
-    if output_data:
-        image_path.write_bytes(output_data)
-    else:
-        raise ValueError("Image generation returned no data")
+    if not image_path.exists():
+        raise ValueError("Failed to save generated image")
 
     relative_path = str(image_path.relative_to(settings.storage_path))
-
-    return relative_path, content, provider.id
+    return relative_path, f"generated_with_{selected_model}", provider.id
 
 
 async def generate_video(
@@ -138,122 +240,68 @@ async def generate_video(
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / "scene_video.mp4"
 
-    if provider_id:
-        result = await db.execute(select(Provider).where(Provider.id == provider_id))
-        provider = result.scalar_one_or_none()
-    else:
-        result = await db.execute(select(Provider).where(Provider.provider_type == "comfyui_direct", Provider.is_active == True))  # noqa: E712
-        provider = result.scalar_one_or_none()
+    provider, instance = await get_comfyui_direct_provider(db, provider_id)
 
-    if not provider:
-        router = JobRouter(db)
-        candidates = []
-        async for prov in router.iterate_providers():
-            if prov.provider_type in ("comfyui_direct", "runpod", "poe"):
-                candidates.append(prov)
-
-        for candidate in candidates:
-            try:
-                instance = await get_provider_instance(db, candidate)
-                if candidate.provider_type == "comfyui_direct":
-                    provider = candidate
-                    break
-                elif candidate.provider_type == "poe":
-                    provider = candidate
-                    break
-            except Exception:
-                continue
-
-    if not provider:
-        raise ValueError("No video provider available. Please configure a provider.")
-
-    instance = await get_provider_instance(db, provider)
-
-    if isinstance(instance, PoeProvider):
-        model = model_preference or instance.config.get("default_video_model", "Veo-3.1")
-        content, output_data = await instance.generate_video(
-            prompt=prompt,
-            model=model,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-        )
-        if output_data:
-            video_path.write_bytes(output_data)
-        else:
-            raise ValueError("Video generation returned no data")
-        return (
-            str(video_path.relative_to(settings.storage_path)),
-            content,
-            provider.id,
-            float(duration),
-        )
-
-    from app.services import ComfyUIClient
-
-    workflow_map: dict[str, str] = {
-        "wan2.2_t2v": "wan_t2v.json",
-        "wan2.2_s2v": "wan_s2v.json",
-        "wan_t2v": "wan_t2v.json",
-        "wan_s2v": "wan_s2v.json",
-        "ltx2.3_t2v": "ltx_t2v.json",
-        "ltx2.3_i2v": "ltx_i2v.json",
-        "ltx_t2v": "ltx_t2v.json",
-        "ltx_i2v": "ltx_i2v.json",
-        "ltx_distilled": "ltx_distilled.json",
-        "ltx2.3_distilled": "ltx_distilled.json",
-    }
-
-    workflow_name = workflow_map.get(model_preference or "", "wan_t2v.json")
-
-    workflow_path = Path(settings.storage_path).parent / "workflows" / workflow_name
-    if not workflow_path.exists():
-        workflow_path = Path(__file__).parent.parent.parent / "templates" / "workflows" / workflow_name
-
-    if workflow_path.exists():
-        import json
-
-        workflow = json.loads(workflow_path.read_text())
-    else:
-        workflow = _build_minimal_workflow(model_preference or "wan2.2_t2v")
+    workflow_name = VIDEO_WORKFLOW_MAP.get(model_preference or "", "wan_t2v.json")
+    workflow = load_comfyui_workflow(workflow_name) or _build_minimal_workflow(
+        model_preference or "wan2.2_t2v"
+    )
 
     seed = random.randint(0, 2**31 - 1)
 
     width, height = _aspect_ratio_to_dimensions(aspect_ratio)
     frames = _duration_to_frames(duration)
 
+    prompt_applied = False
     for node_id, node in workflow.items():
         if isinstance(node, dict) and "inputs" in node:
+            class_type = str(node.get("class_type", ""))
             if node["inputs"].get("text") == "${positive_prompt}":
                 node["inputs"]["text"] = prompt
+                prompt_applied = True
+            elif class_type == "CLIPTextEncode" and not prompt_applied:
+                node["inputs"]["text"] = prompt
+                prompt_applied = True
             elif "prompt" in node["inputs"]:
                 node["inputs"]["prompt"] = prompt
+                prompt_applied = True
             if "width" in node["inputs"]:
                 node["inputs"]["width"] = width
             if "height" in node["inputs"]:
                 node["inputs"]["height"] = height
             if "frames" in node["inputs"]:
                 node["inputs"]["frames"] = frames
+            if "length" in node["inputs"]:
+                node["inputs"]["length"] = frames
             if "batch_size" in node["inputs"]:
                 node["inputs"]["batch_size"] = 1
             if "seed" in node["inputs"]:
                 node["inputs"]["seed"] = seed
+            if "steps" in node["inputs"] and node["inputs"]["steps"] > 5:
+                node["inputs"]["steps"] = 5
 
-    if isinstance(instance, ComfyUIDirectProvider):
-        prompt_id = await instance.queue_prompt(workflow)
-        result = await instance.wait_for_completion(prompt_id)
-        output_data = await instance.get_output(result)
-        if output_data:
-            video_path.write_bytes(output_data)
-        else:
-            raise ValueError("ComfyUI returned no output data")
-        return (
-            str(video_path.relative_to(settings.storage_path)),
-            f"generated_with_{model_preference or 'wan'}",
-            provider.id,
-            float(duration),
-        )
+    if frames > 25:
+        frames = 25
+        for node_id, node in workflow.items():
+            if isinstance(node, dict) and "inputs" in node:
+                if node["inputs"].get("length"):
+                    node["inputs"]["length"] = frames
+                if node["inputs"].get("frames"):
+                    node["inputs"]["frames"] = frames
 
-    raise ValueError(f"Unsupported provider type for video generation: {provider.provider_type}")
+    prompt_id = await instance.queue_prompt(workflow)
+    result = await instance.wait_for_completion(prompt_id)
+    output_data = await instance.get_output(result)
+    if output_data:
+        video_path.write_bytes(output_data)
+    else:
+        raise ValueError("ComfyUI returned no output data")
+    return (
+        str(video_path.relative_to(settings.storage_path)),
+        f"generated_with_{model_preference or 'wan'}",
+        provider.id,
+        float(duration),
+    )
 
 
 def _build_minimal_workflow(model: str) -> dict[str, Any]:
@@ -290,6 +338,265 @@ def _build_minimal_workflow(model: str) -> dict[str, Any]:
     }
 
 
+def _build_wan_video_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    frames: int,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    clip_name = str(provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+    vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
+    unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
+    steps = int(provider_config.get("wan_steps") or 5)
+    cfg = float(provider_config.get("wan_cfg") or 5.0)
+    shift = float(provider_config.get("wan_shift") or 8.0)
+    fps = int(provider_config.get("wan_fps") or 6)
+
+    workflow = {
+        "1": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": clip_name, "type": "wan"},
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt, "clip": ["1", 0]},
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": "", "clip": ["1", 0]},
+        },
+        "4": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae_name},
+        },
+        "5": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
+        },
+        "6": {
+            "class_type": "ModelSamplingSD3",
+            "inputs": {"model": ["5", 0], "shift": shift},
+        },
+        "7": {
+            "class_type": "EmptyHunyuanLatentVideo",
+            "inputs": {"width": width, "height": height, "length": frames, "batch_size": 1},
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["6", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["7", 0],
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": "uni_pc",
+                "scheduler": "simple",
+                "denoise": 1.0,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["8", 0], "vae": ["4", 0]},
+        },
+        "10": {
+            "class_type": "CreateVideo",
+            "inputs": {"images": ["9", 0], "fps": fps},
+        },
+        "11": {
+            "class_type": "SaveVideo",
+            "inputs": {"video": ["10", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
+        },
+    }
+    return workflow
+
+
+def _build_minimal_workflow(model: str) -> dict[str, Any]:
+    return {
+        "1": {
+            "inputs": {
+                "text": "",
+                "clip": ["2", 0],
+            },
+            "class_type": "CLIPTextEncode",
+        },
+        "2": {
+            "inputs": {"clip": []},
+            "class_type": "CLIP",
+        },
+        "3": {
+            "inputs": {
+                "width": 1280,
+                "height": 720,
+                "length": 25,
+                "batch_size": 1,
+            },
+            "class_type": "EmptyHunyuanLatentVideo",
+        },
+        "4": {
+            "inputs": {
+                "model": [],
+                "positive": ["1", 0],
+                "negative": ["1", 0],
+                "latent": ["3", 0],
+            },
+            "class_type": "HunyuanVideoSampler",
+        },
+    }
+
+
+def _build_comfyui_image_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    model_preference: str | None,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    clip_name = str(
+        provider_config.get("wan_clip_name")
+        or provider_config.get("image_clip_name")
+        or "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    )
+    vae_name = str(
+        provider_config.get("wan_vae_name")
+        or provider_config.get("image_vae_name")
+        or "wan2.2_vae.safetensors"
+    )
+    unet_name = _select_wan_image_unet(model_preference, provider_config)
+
+    negative_prompt = str(
+        provider_config.get("image_negative_prompt")
+        or provider_config.get("wan_image_negative_prompt")
+        or ""
+    )
+    steps = int(provider_config.get("image_steps") or provider_config.get("wan_image_steps") or 30)
+    cfg = float(provider_config.get("image_cfg") or provider_config.get("wan_image_cfg") or 5.0)
+    sampler_name = str(
+        provider_config.get("image_sampler") or provider_config.get("wan_image_sampler") or "uni_pc"
+    )
+    scheduler = str(
+        provider_config.get("image_scheduler") or provider_config.get("wan_image_scheduler") or "simple"
+    )
+    shift = float(provider_config.get("wan_image_shift") or 8.0)
+
+    # Wan2.2 is a video-family model.  ComfyUI's Wan pipeline expects the Hunyuan/Wan
+    # video latent shape, even when only one still is requested.  A length of 1 creates
+    # a single decoded frame, which SaveImage can persist directly as a static image.
+    return {
+        "1": {
+            "class_type": "CLIPLoader",
+            "inputs": {
+                "clip_name": clip_name,
+                "type": "wan",
+            },
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": prompt,
+                "clip": ["1", 0],
+            },
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": negative_prompt,
+                "clip": ["1", 0],
+            },
+        },
+        "4": {
+            "class_type": "VAELoader",
+            "inputs": {
+                "vae_name": vae_name,
+            },
+        },
+        "5": {
+            "class_type": "UNETLoader",
+            "inputs": {
+                "unet_name": unet_name,
+                "weight_dtype": str(provider_config.get("wan_unet_weight_dtype") or "default"),
+            },
+        },
+        "6": {
+            "class_type": "ModelSamplingSD3",
+            "inputs": {
+                "model": ["5", 0],
+                "shift": shift,
+            },
+        },
+        "7": {
+            "class_type": "EmptyHunyuanLatentVideo",
+            "inputs": {
+                "width": width,
+                "height": height,
+                "length": 1,
+                "batch_size": 1,
+            },
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["6", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["7", 0],
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler_name,
+                "scheduler": scheduler,
+                "denoise": 1.0,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {
+                "samples": ["8", 0],
+                "vae": ["4", 0],
+            },
+        },
+        "10": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "images": ["9", 0],
+                "filename_prefix": "vidforge_seed_image",
+            },
+        },
+    }
+
+
+def _select_wan_image_unet(
+    model_preference: str | None,
+    provider_config: dict[str, Any],
+) -> str:
+    configured_unet = (
+        provider_config.get("wan_image_unet_name")
+        or provider_config.get("image_unet_name")
+        or provider_config.get("wan_unet_name")
+    )
+    if configured_unet:
+        return str(configured_unet)
+
+    normalized_model = (model_preference or "").lower()
+    if "it2v" in normalized_model:
+        return "wan2.2_it2v_5B_fp16.safetensors"
+
+    return "wan2.2_ti2v_5B_fp16.safetensors"
+
+
+def _next_workflow_node_id(workflow: dict[str, Any]) -> str:
+    numeric_ids = [int(node_id) for node_id in workflow if node_id.isdigit()]
+    if not numeric_ids:
+        return "1"
+    return str(max(numeric_ids) + 1)
+
+
 def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
     ratios = {
         "16:9": (1280, 720),
@@ -302,6 +609,75 @@ def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
     return ratios.get(aspect_ratio, (1280, 720))
 
 
-def _duration_to_frames(duration: int, fps: int = 24) -> int:
+def _duration_to_frames(duration: int, fps: int = 4) -> int:
     frames = duration * fps
     return max(frames - (frames % 8) + 1, 9)
+
+
+def _build_flux_image_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    return {
+        "1": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {
+                "ckpt_name": "flux1-schnell-fp8.safetensors",
+            },
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": prompt,
+                "clip": ["1", 1],
+            },
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": "",
+                "clip": ["1", 1],
+            },
+        },
+        "4": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": 4,
+                "cfg": 1.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["1", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["5", 0]
+            },
+        },
+        "5": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {
+                "width": width,
+                "height": height,
+                "batch_size": 1,
+            },
+        },
+        "6": {
+            "class_type": "VAEDecode",
+            "inputs": {
+                "samples": ["4", 0],
+                "vae": ["1", 2],
+            },
+        },
+        "7": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "images": ["6", 0],
+                "filename_prefix": "vidforge_flux_image",
+            },
+        },
+    }

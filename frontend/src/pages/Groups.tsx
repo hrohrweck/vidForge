@@ -4,6 +4,7 @@ import { Plus, Edit2, Trash2, Shield, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/auth'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { adminApi, Group, Permission } from '../api/client'
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
 
@@ -66,7 +67,7 @@ export default function Groups() {
   if (!user?.is_superuser) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <Shield className="h-8 w-8 text-red-500 mb-4" />
+        <Shield className="h-8 w-8 text-destructive mb-4" />
         <h2 className="text-xl font-semibold">Access Denied</h2>
         <p className="text-muted-foreground">You need admin privileges to view this page</p>
         <Button className="mt-4" onClick={() => navigate('/')}>
@@ -127,7 +128,7 @@ export default function Groups() {
                   onClick={() => handleDeleteClick(group as GroupWithPermissions)}
                   disabled={group.name === 'users' || group.name === 'admins'}
                 >
-                  <Trash2 className="h-4 w-4 text-red-500" />
+                  <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </div>
             </div>
@@ -139,16 +140,13 @@ export default function Groups() {
                     {perms.map((perm) => {
                       const hasPermission = group.permissions?.some((p) => p.id === perm.id)
                       return (
-                        <span
+                        <Badge
                           key={perm.id}
-                          className={`px-2 py-1 rounded text-xs ${
-                            hasPermission
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-gray-100 text-gray-400'
-                          }`}
+                          variant={hasPermission ? 'outline' : 'secondary'}
+                          className={!hasPermission ? 'opacity-50' : ''}
                         >
                           {perm.name}
-                        </span>
+                        </Badge>
                       )
                     })}
                   </div>
@@ -279,8 +277,8 @@ function GroupEditModal({
                         onClick={() => togglePermission(perm.id)}
                         className={`px-2 py-1 rounded text-xs border ${
                           selectedPermissions.has(perm.id)
-                            ? 'bg-green-100 text-green-800 border-green-300'
-                            : 'bg-gray-100 text-gray-600 border-gray-300'
+                            ? 'bg-primary/10 text-primary border-primary/20'
+                            : 'bg-muted text-muted-foreground border-border'
                         }`}
                       >
                         {perm.name}

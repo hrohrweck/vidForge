@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2 } from 'lucide-react'
-import { jobsApi, templatesApi, modelsApi, providersApi, type CreateJobRequest, type Template, type VideoModel, type Provider } from '../api/client'
+import api, { jobsApi, templatesApi, providersApi, type CreateJobRequest, type Template, type Provider } from '../api/client'
+import { projectsApi } from '../api/projects'
+import type { Project } from '../api/types/project'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -29,16 +31,14 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
   const [providerPreference, setProviderPreference] = useState<string>('auto')
-  const [modelPreference, setModelPreference] = useState<string>('')
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [newProjectTitle, setNewProjectTitle] = useState('')
+  const [newProjectDescription, setNewProjectDescription] = useState('')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
     queryFn: () => templatesApi.list(),
-  })
-
-  const { data: models } = useQuery({
-    queryKey: ['models'],
-    queryFn: () => modelsApi.list(),
   })
 
   const { data: providers } = useQuery({
@@ -46,21 +46,12 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     queryFn: () => providersApi.list(),
   })
 
+  const { data: projects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => projectsApi.list(),
+  })
+
   const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
-  
-  const selectedProvider = activeProviders.find((p: Provider) => p.id === providerPreference)
-  
-  const modelProviderType = selectedProvider ? selectedProvider.provider_type : null
-  
-  const filteredModels = models?.filter((m: VideoModel) => {
-    if (!modelProviderType) return true
-    if (modelProviderType === 'poe') {
-      return m.provider === 'poe'
-    }
-    return modelProviderType === 'comfyui_direct' || modelProviderType === 'runpod'
-      ? (m.provider === 'wan' || m.provider === 'ltx')
-      : true
-  }) || []
 
   const selectedTemplate = templates?.data?.find(
     (t: Template) => t.id === selectedTemplateId
@@ -93,18 +84,27 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     },
   })
 
+  const createProjectMutation = useMutation({
+    mutationFn: projectsApi.create,
+    onSuccess: (newProject) => {
+      setSelectedProjectId(newProject.id)
+      setIsCreatingProject(false)
+      setNewProjectTitle('')
+      setNewProjectDescription('')
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    },
+  })
+
   const uploadMutation = useMutation({
     mutationFn: async ({ file, type }: { file: File; type: string }) => {
       const formData = new FormData()
       formData.append('file', file)
-
-      const response = await fetch(`/api/uploads/${type}`, {
-        method: 'POST',
-        body: formData,
+      const response = await api.post(`/uploads/${type}`, formData, {
+        headers: {
+          'Content-Type': undefined,
+        },
       })
-
-      if (!response.ok) throw new Error('Upload failed')
-      return response.json()
+      return response.data
     },
   })
 
@@ -121,9 +121,9 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const handleSubmit = () => {
     createMutation.mutate({
       template_id: selectedTemplateId || undefined,
+      project_id: selectedProjectId || undefined,
       input_data: { ...inputValues, ...uploadedFiles },
       provider_preference: providerPreference,
-      model_preference: modelPreference || undefined,
     })
   }
 
@@ -212,7 +212,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               {uploadedFiles[input.name] ? 'Change File' : 'Upload File'}
             </Button>
             {uploadedFiles[input.name] && (
-              <p className="text-sm text-green-600">
+              <p className="text-sm text-primary">
                 Uploaded: {uploadedFiles[input.name]}
               </p>
             )}
@@ -235,6 +235,69 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         </div>
 
         <div className="p-6 space-y-6">
+          <div className="space-y-2">
+            <Label>Project</Label>
+            {!isCreatingProject ? (
+              <div className="flex gap-2">
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className="flex-1 px-3 py-2 border rounded-md"
+                >
+                  <option value="">Select a project...</option>
+                  {projects?.map((project: Project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.title}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsCreatingProject(true)}
+                >
+                  + New
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2 p-3 border rounded-md bg-muted/50">
+                <Input
+                  placeholder="Project title"
+                  value={newProjectTitle}
+                  onChange={(e) => setNewProjectTitle(e.target.value)}
+                />
+                <Input
+                  placeholder="Description (optional)"
+                  value={newProjectDescription}
+                  onChange={(e) => setNewProjectDescription(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => createProjectMutation.mutate({
+                      title: newProjectTitle,
+                      description: newProjectDescription,
+                    })}
+                    disabled={!newProjectTitle.trim() || createProjectMutation.isPending}
+                  >
+                    {createProjectMutation.isPending ? 'Creating...' : 'Create Project'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setIsCreatingProject(false)
+                      setNewProjectTitle('')
+                      setNewProjectDescription('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="template">Template</Label>
             <select
@@ -270,7 +333,6 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               value={providerPreference}
               onChange={(e) => {
                 setProviderPreference(e.target.value)
-                setModelPreference('')
               }}
             >
               <option value="auto">Auto</option>
@@ -282,30 +344,6 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
             </select>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="modelPreference">Generation Model</Label>
-            <select
-              id="modelPreference"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={modelPreference}
-              onChange={(e) => setModelPreference(e.target.value)}
-            >
-              <option value="">Use template default</option>
-              {filteredModels.map((model: VideoModel) => (
-                <option key={model.id} value={model.id}>
-                  {model.display_name} ({model.provider.toUpperCase()})
-                  {model.distilled ? ' - Fast' : ''}
-                  {model.modality === 'image' ? ' - Image' : ''}
-                </option>
-              ))}
-            </select>
-            {modelPreference && (
-              <p className="text-xs text-muted-foreground">
-                {models?.find((m: VideoModel) => m.id === modelPreference)?.description}
-              </p>
-            )}
-          </div>
-
           {templateInputs.length > 0 && (
             <div className="space-y-4">
               <h3 className="font-medium">Input Parameters</h3>
@@ -313,7 +351,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                 <div key={input.name} className="space-y-2">
                   <Label htmlFor={input.name}>
                     {input.name}
-                    {input.required && <span className="text-red-500 ml-1">*</span>}
+                    {input.required && <span className="text-destructive ml-1">*</span>}
                   </Label>
                   {renderInput(input)}
                   {input.description && input.type !== 'boolean' && (

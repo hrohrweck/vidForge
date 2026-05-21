@@ -61,14 +61,16 @@ class VideoProcessor:
             str(quality),
             "-an",
             "-y",
-            output_path,
+            str(Path(output_path).resolve()),
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg preview failed: {stderr.decode() if stderr else 'Unknown error'}")
         return output_path
 
     @staticmethod
@@ -101,14 +103,16 @@ class VideoProcessor:
             "-c",
             "copy",
             "-y",
-            output_path,
+            str(Path(output_path).resolve()),
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg merge failed: {stderr.decode() if stderr else 'Unknown error'}")
         list_file.unlink()
         return output_path
 
@@ -152,7 +156,7 @@ class VideoProcessor:
                 "-map",
                 "1:a",
                 "-y",
-                output_path,
+                str(Path(output_path).resolve()),
             ]
         )
 
@@ -161,7 +165,9 @@ class VideoProcessor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.communicate()
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg add_audio failed: {stderr.decode() if stderr else 'Unknown error'}")
         return output_path
 
     @staticmethod

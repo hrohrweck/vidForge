@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_cookie, get_current_user_from_bearer_or_cookie, get_current_user_optional
 from app.config import get_settings
 from app.database import User
 from app.services.video_processor import VideoProcessor
@@ -155,7 +155,7 @@ async def download_file(
 @router.get("/stream/{path:path}")
 async def stream_file(
     path: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
 ) -> Response:
     storage = get_storage_backend()
 
@@ -194,7 +194,7 @@ async def get_video_thumbnail(
     timestamp: float = 0.0,
     width: int = 320,
     height: int = 180,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> Response:
     import tempfile
     import uuid
@@ -240,7 +240,7 @@ async def get_video_thumbnails(
     count: int = 5,
     width: int = 320,
     height: int = 180,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> ThumbnailResponse:
     import tempfile
 

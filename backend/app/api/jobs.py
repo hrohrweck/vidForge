@@ -18,6 +18,7 @@ router = APIRouter()
 
 class JobCreate(BaseModel):
     template_id: UUID | None = None
+    project_id: UUID | None = None
     input_data: dict[str, Any] | None = None
     auto_start: bool = True
     provider_preference: str = "auto"
@@ -26,6 +27,7 @@ class JobCreate(BaseModel):
 
 class BatchJobCreate(BaseModel):
     template_id: UUID
+    project_id: UUID | None = None
     jobs: list[dict[str, Any]]
     auto_start: bool = True
     provider_preference: str = "auto"
@@ -68,6 +70,7 @@ def _normalize_provider_preference(value: str) -> str:
 
 class JobResponse(BaseModel):
     id: UUID
+    project_id: UUID | None = None
     status: str
     stage: str
     progress: int
@@ -94,6 +97,7 @@ class JobResponse(BaseModel):
 @router.get("", response_model=list[JobResponse])
 async def list_jobs(
     status: str | None = None,
+    project_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     current_user: User = Depends(get_current_user),
@@ -102,6 +106,8 @@ async def list_jobs(
     query = select(Job).where(Job.user_id == current_user.id).order_by(Job.created_at.desc())
     if status:
         query = query.where(Job.status == status)
+    if project_id:
+        query = query.where(Job.project_id == UUID(project_id))
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -122,6 +128,7 @@ async def create_job(
         input_data=job_data.input_data or {},
         provider_preference=provider_preference,
         model_preference=job_data.model_preference,
+        project_id=job_data.project_id,
     )
     
     if job_data.template_id:
@@ -253,6 +260,7 @@ async def create_batch_jobs(
             input_data=job_input,
             provider_preference=provider_preference,
             model_preference=batch_data.model_preference,
+            project_id=batch_data.project_id,
             workflow_type=workflow_type if is_scene_based else None,
         )
         jobs.append(job)

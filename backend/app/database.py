@@ -120,6 +120,18 @@ class User(Base):
     groups: Mapped[list["Group"]] = relationship(
         secondary="user_groups", back_populates="users", lazy="selectin"
     )
+    media_folders: Mapped[list["MediaFolder"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    media_assets: Mapped[list["MediaAsset"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    media_tags: Mapped[list["MediaTag"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    projects: Mapped[list["Project"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSettings(Base):
@@ -139,12 +151,34 @@ class UserSettings(Base):
     default_style: Mapped["Style | None"] = relationship(back_populates="users_using_default")
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    user: Mapped["User"] = relationship(back_populates="projects")
+    jobs: Mapped[list["Job"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    media_assets: Mapped[list["MediaAsset"]] = relationship(back_populates="project")
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
     )
     template_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("templates.id"), nullable=True
@@ -181,6 +215,7 @@ class Job(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
+    project: Mapped["Project | None"] = relationship(back_populates="jobs")
     template: Mapped["Template | None"] = relationship(back_populates="jobs")
     provider: Mapped["Provider | None"] = relationship(
         back_populates="jobs", foreign_keys=[provider_id]
@@ -372,14 +407,21 @@ async def seed_builtin_data() -> None:
                 existing = result.scalar_one_or_none()
 
                 if not existing:
+                    config = {
+                        "template_file": template_data.get("_source_file", ""),
+                        "inputs": template_data.get("inputs", []),
+                        "pipeline": template_data.get("pipeline", []),
+                    }
+                    # Merge top-level config block (e.g. workflow_type) and stages
+                    if "config" in template_data:
+                        config.update(template_data["config"])
+                    if "stages" in template_data:
+                        config["stages"] = template_data["stages"]
+
                     template = Template(
                         name=template_data["name"],
                         description=template_data.get("description"),
-                        config={
-                            "template_file": template_data.get("_source_file", ""),
-                            "inputs": template_data.get("inputs", []),
-                            "pipeline": template_data.get("pipeline", []),
-                        },
+                        config=config,
                         is_builtin=True,
                         created_by=None,
                     )
