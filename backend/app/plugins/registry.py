@@ -28,6 +28,13 @@ def discover_plugins(plugin_dirs: list[Path] | None = None) -> None:
     """Scan plugin directories and register all found plugins."""
     global _PLUGINS
 
+    # Ensure the backend root (parent of app/ and plugins/) is on sys.path
+    # so that ``import plugins.xxx`` works in Celery workers.
+    import sys
+    backend_root = str(_BUILTIN_DIR.resolve().parent)
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+
     dirs = plugin_dirs or [_BUILTIN_DIR]
     for d in dirs:
         if not d.is_dir():

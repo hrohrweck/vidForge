@@ -43,9 +43,11 @@ celery_app.conf.beat_schedule = {
 # -- Worker lifecycle signals -------------------------------------------
 @worker_process_init.connect
 def _on_worker_process_init(**kwargs):
+    from app.plugins.registry import discover_plugins
     from app.workers.context import ctx
 
     ctx.start()
+    discover_plugins()
 
 
 @worker_process_shutdown.connect
