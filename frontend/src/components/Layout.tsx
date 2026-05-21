@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import {
   Video,
   FileVideo,
@@ -12,6 +12,7 @@ import {
   Image,
   Menu,
   ChevronLeft,
+  ChevronRight,
   User as UserIcon,
 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
@@ -28,7 +29,25 @@ import {
 import { Avatar, AvatarFallback } from './ui/avatar'
 import { Button } from './ui/button'
 
-const getNavItems = (isSuperuser: boolean) => [
+interface NavItem {
+  to: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+interface NavGroup {
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  children: NavItem[]
+}
+
+type NavEntry = NavItem | NavGroup
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return 'children' in entry
+}
+
+const getNavEntries = (isSuperuser: boolean): NavEntry[] => [
   { to: '/', label: 'Dashboard', icon: Video },
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
@@ -36,17 +55,34 @@ const getNavItems = (isSuperuser: boolean) => [
   { to: '/settings', label: 'Settings', icon: Settings },
   ...(isSuperuser
     ? [
-        { to: '/admin', label: 'Admin', icon: Shield },
-        { to: '/admin/providers', label: 'Providers', icon: Server },
-        { to: '/admin/groups', label: 'Groups', icon: Users },
+        {
+          label: 'Admin',
+          icon: Shield,
+          children: [
+            { to: '/admin', label: 'Overview', icon: Users },
+            { to: '/admin/providers', label: 'Providers', icon: Server },
+            { to: '/admin/groups', label: 'Groups', icon: Users },
+          ],
+        } as NavGroup,
       ]
     : []),
 ]
 
 export default function Layout() {
   const { user, logout } = useAuthStore()
-  const navItems = getNavItems(user?.is_superuser || false)
+  const location = useLocation()
+  const navEntries = getNavEntries(user?.is_superuser || false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
+  // Track which groups are expanded — keyed by group label
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+
+  const toggleGroup = (label: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [label]: !prev[label] }))
+  }
+
+  const isGroupActive = (group: NavGroup) =>
+    group.children.some((child) => location.pathname === child.to || location.pathname.startsWith(child.to + '/'))
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -97,7 +133,7 @@ export default function Layout() {
           </div>
         </div>
       </header>
-      
+
       <div className="flex-1 flex overflow-hidden">
         <aside
           className={cn(
@@ -112,47 +148,60 @@ export default function Layout() {
           </div>
           <nav className="flex-1 overflow-y-auto py-4">
             <ul className="space-y-1 px-2">
-              {navItems.map((item) => (
-                <li key={item.to}>
-                  <NavLink
-                    to={item.to}
-                    end={item.to === '/'}
-                    className={({ isActive }) =>
-                      cn(
-                        'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
-                        isActive
-                          ? 'bg-primary/10 text-primary'
-                          : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
-                        !isSidebarOpen && 'md:justify-center md:px-0'
-                      )
-                    }
-                    title={!isSidebarOpen ? item.label : undefined}
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <div className={cn(
-                          "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
-                          isActive ? "opacity-100" : "opacity-0"
-                        )} />
-                        <item.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
-                        <span className={cn(
-                          "transition-all duration-300",
-                          !isSidebarOpen && "md:hidden"
-                        )}>
-                          {item.label}
-                        </span>
-                      </>
-                    )}
-                  </NavLink>
-                </li>
-              ))}
+              {navEntries.map((entry) =>
+                isGroup(entry) ? (
+                  /* ── Collapsible group ─────────────────────────── */
+                  <NavGroupItem
+                    key={entry.label}
+                    group={entry}
+                    expanded={expandedGroups[entry.label] ?? isGroupActive(entry)}
+                    active={isGroupActive(entry)}
+                    collapsed={!isSidebarOpen}
+                    onToggle={() => toggleGroup(entry.label)}
+                  />
+                ) : (
+                  /* ── Flat link ─────────────────────────────────── */
+                  <li key={entry.to}>
+                    <NavLink
+                      to={entry.to}
+                      end={entry.to === '/'}
+                      className={({ isActive }) =>
+                        cn(
+                          'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
+                          isActive
+                            ? 'bg-primary/10 text-primary'
+                            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                          !isSidebarOpen && 'md:justify-center md:px-0'
+                        )
+                      }
+                      title={!isSidebarOpen ? entry.label : undefined}
+                    >
+                      {({ isActive }) => (
+                        <>
+                          <div className={cn(
+                            "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
+                            isActive ? "opacity-100" : "opacity-0"
+                          )} />
+                          <entry.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                          <span className={cn(
+                            "transition-all duration-300",
+                            !isSidebarOpen && "md:hidden"
+                          )}>
+                            {entry.label}
+                          </span>
+                        </>
+                      )}
+                    </NavLink>
+                  </li>
+                )
+              )}
             </ul>
           </nav>
-          
+
           <div className="p-4 border-t border-sidebar-border hidden md:flex justify-center">
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className="text-muted-foreground hover:text-foreground"
             >
@@ -160,7 +209,7 @@ export default function Layout() {
             </Button>
           </div>
         </aside>
-        
+
         <main className="flex-1 overflow-y-auto bg-background/50">
           <div className="container mx-auto p-6 max-w-6xl">
             <Outlet />
@@ -168,5 +217,81 @@ export default function Layout() {
         </main>
       </div>
     </div>
+  )
+}
+
+/* ── Collapsible nav group component ─────────────────────────────── */
+
+interface NavGroupItemProps {
+  group: NavGroup
+  expanded: boolean
+  active: boolean
+  collapsed: boolean
+  onToggle: () => void
+}
+
+function NavGroupItem({ group, expanded, active, collapsed, onToggle }: NavGroupItemProps) {
+  return (
+    <li>
+      {/* Group header — clickable to expand/collapse */}
+      <button
+        onClick={onToggle}
+        className={cn(
+          'group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
+          active
+            ? 'bg-primary/5 text-foreground'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+          collapsed && 'md:justify-center md:px-0'
+        )}
+        title={collapsed ? group.label : undefined}
+      >
+        <group.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+        <span className={cn(
+          "flex-1 text-left transition-all duration-300",
+          collapsed && "md:hidden"
+        )}>
+          {group.label}
+        </span>
+        {!collapsed && (
+          <ChevronRight className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-90"
+          )} />
+        )}
+      </button>
+
+      {/* Sub-items */}
+      <div className={cn(
+        "overflow-hidden transition-all duration-200",
+        expanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
+      )}>
+        <ul className="mt-1 space-y-0.5 pl-3 border-l-2 border-border ml-2.5">
+          {group.children.map((child) => (
+            <li key={child.to}>
+              <NavLink
+                to={child.to}
+                end={child.to === '/admin'}
+                className={({ isActive }) =>
+                  cn(
+                    'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',
+                    isActive
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                    collapsed && 'md:hidden'
+                  )
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                    <span className="text-[0.8125rem]">{child.label}</span>
+                  </>
+                )}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </li>
   )
 }
