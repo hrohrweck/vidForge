@@ -139,7 +139,7 @@ export default function JobDetail() {
           </Badge>
           <Button
             variant="default"
-            onClick={() => navigate(`/editor/music/${job.id}`)}
+            onClick={() => navigate(`/editor/${job.id}`)}
           >
             Open in Editor
           </Button>

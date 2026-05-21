@@ -10,7 +10,7 @@ import Admin from './pages/Admin'
 import Groups from './pages/Groups'
 import Providers from './pages/Providers'
 import Login from './pages/Login'
-import MusicVideoEditor from './pages/MusicVideoEditor'
+import SceneEditor from './pages/SceneEditor'
 import { MediaLibrary } from './pages/MediaLibrary'
 import { AssetDetail } from './pages/AssetDetail'
 import { ThemeProvider } from './components/ThemeProvider'
@@ -39,7 +39,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="jobs" element={<Jobs />} />
             <Route path="jobs/:id" element={<JobDetail />} />
-            <Route path="editor/music/:jobId" element={<MusicVideoEditor />} />
+            <Route path="editor/:jobId" element={<SceneEditor />} />
             <Route path="templates" element={<Templates />} />
             <Route path="settings" element={<Settings />} />
             <Route path="admin" element={<Admin />} />

@@ -13,6 +13,32 @@ from app.database import Template, User, get_db
 router = APIRouter()
 
 
+# ── Plugin info endpoint ────────────────────────────────────────────
+
+
+class PluginInfo(BaseModel):
+    plugin_id: str
+    display_name: str
+    description: str
+    ui_schema: dict[str, Any] = {}
+
+
+@router.get("/plugins/list", response_model=list[PluginInfo])
+async def list_plugins(
+    current_user: User = Depends(get_current_user),
+) -> list[PluginInfo]:
+    from app.plugins.registry import get_all_plugins
+    return [
+        PluginInfo(
+            plugin_id=p.plugin_id,
+            display_name=p.display_name,
+            description=p.description,
+            ui_schema=p.get_ui_schema(),
+        )
+        for p in get_all_plugins().values()
+    ]
+
+
 class TemplateCreate(BaseModel):
     name: str
     description: str | None = None
