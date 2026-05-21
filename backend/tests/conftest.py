@@ -1,15 +1,15 @@
-import pytest
-from httpx import AsyncClient, ASGITransport
 from unittest.mock import MagicMock
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.pool import StaticPool
-from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import JSONB
 from uuid import uuid4
 
-from app.main import app
-from app.database import Base, get_db, User, Job, Template
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import JSON
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
 from app.api.auth import create_access_token
+from app.database import Base, Job, Template, User, get_db
+from app.main import app
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -60,8 +60,11 @@ def mocker():
     patches: list = []
 
     class Mocker:
-        def MagicMock(self, *args, **kwargs):
+        def magic_mock(self, *args, **kwargs):
             return MagicMock(*args, **kwargs)
+
+        # Backward compatibility alias
+        MagicMock = magic_mock
 
         def patch(self, target, *args, **kwargs):
             patcher = patch(target, *args, **kwargs)

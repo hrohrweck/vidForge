@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
-from app.database import User, Job
+from app.database import Job, User
 
 
 class TestAdminAuthorization:

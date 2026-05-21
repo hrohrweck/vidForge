@@ -1,10 +1,11 @@
-import pytest
-from httpx import AsyncClient
-from uuid import uuid4
 import io
 import re
+from uuid import uuid4
 
-from app.database import User, Job, Template
+import pytest
+from httpx import AsyncClient
+
+from app.database import Job, Template
 
 
 class TestJobsAPIAuthorization:

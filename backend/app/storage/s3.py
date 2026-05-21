@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from functools import partial
 from typing import Any
 
 from . import StorageBackend
 
 
 class S3Storage(StorageBackend):
-    """Compatibility wrapper for the S3 storage backend."""
+    """S3-compatible storage backend using async-safe blocking calls."""
 
     def __init__(
         self,
@@ -28,32 +30,39 @@ class S3Storage(StorageBackend):
         )
 
     async def upload(self, path: str, data: bytes) -> None:
-        self._client.put_object(Bucket=self._bucket, Key=path, Body=data)
-
-    async def download(self, path: str) -> bytes:
-        response = self._client.get_object(Bucket=self._bucket, Key=path)
-        body = response["Body"]
-        return body.read()
-
-    async def delete(self, path: str) -> None:
-        self._client.delete_object(Bucket=self._bucket, Key=path)
-
-    async def list_files(self, prefix: str = "") -> list[dict[str, Any]]:
-        result = self._client.list_objects_v2(
-            Bucket=self._bucket,
-            Prefix=prefix,
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            partial(self._client.put_object, Bucket=self._bucket, Key=path, Body=data),
         )
 
-        files: list[dict[str, Any]] = []
-        for item in result.get("Contents", []):
-            files.append(
-                {
-                    "path": item["Key"],
-                    "size": item.get("Size", 0),
-                    "modified": item.get("LastModified").timestamp(),
-                }
-            )
-        return files
+    async def download(self, path: str) -> bytes:
+        def _download() -> bytes:
+            response = self._client.get_object(Bucket=self._bucket, Key=path)
+            return response["Body"].read()
+
+        return await asyncio.get_event_loop().run_in_executor(None, _download)
+
+    async def delete(self, path: str) -> None:
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            partial(self._client.delete_object, Bucket=self._bucket, Key=path),
+        )
+
+    async def list_files(self, prefix: str = "") -> list[dict[str, Any]]:
+        def _list() -> list[dict[str, Any]]:
+            result = self._client.list_objects_v2(Bucket=self._bucket, Prefix=prefix)
+            files: list[dict[str, Any]] = []
+            for item in result.get("Contents", []):
+                files.append(
+                    {
+                        "path": item["Key"],
+                        "size": item.get("Size", 0),
+                        "modified": item.get("LastModified").timestamp(),
+                    }
+                )
+            return files
+
+        return await asyncio.get_event_loop().run_in_executor(None, _list)
 
     async def get_url(self, path: str) -> str:
         return f"/storage/{path}"

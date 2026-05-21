@@ -88,6 +88,25 @@ def get_storage_backend() -> StorageBackend:
         backend = _settings.storage_backend
         if backend == "local":
             _storage_backend = LocalStorage(_settings.storage_path)
+        elif backend == "s3":
+            from .s3 import S3Storage
+
+            _storage_backend = S3Storage(
+                endpoint=_settings.s3_endpoint,
+                access_key=_settings.s3_access_key,
+                secret_key=_settings.s3_secret_key,
+                bucket=_settings.s3_bucket,
+                region=_settings.s3_region,
+            )
+        elif backend == "ssh":
+            from .ssh import SSHStorage
+
+            _storage_backend = SSHStorage(
+                host=_settings.ssh_host,
+                user=_settings.ssh_user,
+                key_path=_settings.ssh_key_path,
+                remote_path=_settings.ssh_remote_path,
+            )
         else:
             logger.warning(f"Storage backend '{backend}' not implemented, using local")
             _storage_backend = LocalStorage(_settings.storage_path)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import posixpath
+from typing import Any
 
 from . import StorageBackend
 
 
 class SSHStorage(StorageBackend):
-    """Compatibility wrapper for the SSH storage backend."""
+    """SSH/SFTP storage backend using async-safe blocking calls."""
 
     def __init__(
         self,
@@ -27,14 +29,14 @@ class SSHStorage(StorageBackend):
         self.remote_path = remote_path.rstrip("/")
         self._client = paramiko.SSHClient()
         self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self._sftp = None
+        self._sftp: Any = None
 
     def _full_remote_path(self, path: str) -> str:
         if path.startswith("/"):
             path = path.lstrip("/")
         return posixpath.join(self.remote_path, path)
 
-    def _connect(self):
+    def _connect(self) -> None:
         if self._sftp is not None:
             return
         self._client.connect(
@@ -46,57 +48,69 @@ class SSHStorage(StorageBackend):
         )
         self._sftp = self._client.open_sftp()
 
-    def _close(self):
+    def _close(self) -> None:
         if self._sftp is not None:
             self._sftp.close()
             self._sftp = None
 
     async def upload(self, path: str, data: bytes) -> None:
-        self._connect()
-        try:
-            remote = self._full_remote_path(path)
-            with self._sftp.file(remote, "wb") as remote_file:
-                remote_file.write(data)
-        finally:
-            self._close()
+        def _upload() -> None:
+            try:
+                self._connect()
+                remote = self._full_remote_path(path)
+                with self._sftp.file(remote, "wb") as remote_file:
+                    remote_file.write(data)
+            finally:
+                self._close()
+
+        await asyncio.get_event_loop().run_in_executor(None, _upload)
 
     async def download(self, path: str) -> bytes:
-        self._connect()
-        try:
-            remote = self._full_remote_path(path)
-            with self._sftp.file(remote, "rb") as remote_file:
-                return remote_file.read()
-        finally:
-            self._close()
+        def _download() -> bytes:
+            try:
+                self._connect()
+                remote = self._full_remote_path(path)
+                with self._sftp.file(remote, "rb") as remote_file:
+                    return remote_file.read()
+            finally:
+                self._close()
+
+        return await asyncio.get_event_loop().run_in_executor(None, _download)
 
     async def delete(self, path: str) -> None:
-        self._connect()
-        try:
-            remote = self._full_remote_path(path)
-            self._sftp.remove(remote)
-        except FileNotFoundError:
-            pass
-        finally:
-            self._close()
+        def _delete() -> None:
+            try:
+                self._connect()
+                remote = self._full_remote_path(path)
+                self._sftp.remove(remote)
+            except FileNotFoundError:
+                pass
+            finally:
+                self._close()
+
+        await asyncio.get_event_loop().run_in_executor(None, _delete)
 
     async def list_files(self, prefix: str = "") -> list[dict[str, str | int]]:
-        self._connect()
-        try:
-            target = self._full_remote_path(prefix)
-            files: list[dict[str, str | int]] = []
-            for entry in self._walk_files(target):
-                files.append(entry)
-            return files
-        finally:
-            self._close()
+        def _list() -> list[dict[str, str | int]]:
+            try:
+                self._connect()
+                target = self._full_remote_path(prefix)
+                results: list[dict[str, str | int]] = []
+                self._walk_files(target, results)
+                return results
+            finally:
+                self._close()
 
-    def _walk_files(self, remote_path: str) -> list[dict[str, str | int]]:
-        results: list[dict[str, str | int]] = []
+        return await asyncio.get_event_loop().run_in_executor(None, _list)
+
+    def _walk_files(
+        self, remote_path: str, results: list[dict[str, str | int]]
+    ) -> None:
         for item in self._sftp.listdir_attr(remote_path):
             name = item.filename
             full = posixpath.join(remote_path, name)
             if item.st_mode is not None and item.st_mode & 0o40000:
-                results.extend(self._walk_files(full))
+                self._walk_files(full, results)
                 continue
             results.append(
                 {
@@ -105,7 +119,6 @@ class SSHStorage(StorageBackend):
                     "modified": item.st_mtime,
                 }
             )
-        return results
 
     async def get_url(self, path: str) -> str:
         return f"/storage/{path}"

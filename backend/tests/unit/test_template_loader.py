@@ -1,8 +1,10 @@
-import pytest
 import tempfile
-import yaml
 from pathlib import Path
-from app.services.template_loader import TemplateLoader, StyleLoader
+
+import pytest
+import yaml
+
+from app.services.template_loader import StyleLoader, TemplateLoader
 
 
 class TestTemplateLoaderValidation:

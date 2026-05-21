@@ -1,4 +1,3 @@
-import pytest
 from app.services.script_parser import ScriptParser, parse_script
 
 

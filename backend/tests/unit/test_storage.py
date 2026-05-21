@@ -1,7 +1,8 @@
-import pytest
 import tempfile
-import os
 from pathlib import Path
+
+import pytest
+
 from app.storage.local import LocalStorage
 
 
