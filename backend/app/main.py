@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     async with async_session() as db:
         result = await db.execute(sa_select(User).where(User.is_superuser))
-        if not result.scalar_one_or_none():
+        if not result.scalars().first():
             admin_user = User(
                 email=settings.admin_email,
                 hashed_password=pwd_context.hash(settings.admin_password),

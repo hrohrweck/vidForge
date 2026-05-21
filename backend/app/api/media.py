@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user_from_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.database import get_db
 from app.models.media import MediaAsset, MediaAssetReference, MediaAssetTag, MediaFolder, MediaTag
 from app.schemas.media import (
@@ -86,7 +86,7 @@ def tag_to_response(tag: MediaTag) -> TagResponse:
 @router.get("/folders", response_model=list[FolderResponse])
 async def list_folders(
     parent_id: str | None = None,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """List folders for the current user, optionally filtered by parent."""
@@ -104,7 +104,7 @@ async def list_folders(
 @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
 async def create_folder(
     payload: FolderCreate,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new folder."""
@@ -135,7 +135,7 @@ async def create_folder(
 async def update_folder(
     folder_id: str,
     payload: FolderUpdate,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a folder (rename or move)."""
@@ -162,7 +162,7 @@ async def update_folder(
 @router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_folder(
     folder_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a folder. Refused if folder is not empty."""
@@ -195,7 +195,7 @@ async def delete_folder(
 
 @router.get("/folders/tree", response_model=list[FolderTreeResponse])
 async def get_folder_tree(
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the full folder tree for the current user."""
@@ -226,7 +226,7 @@ async def get_folder_tree(
 @router.get("/assets", response_model=AssetListResponse)
 async def list_assets(
     query: Annotated[AssetListQuery, Query()],
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """List assets with cursor pagination and filtering."""
@@ -284,7 +284,7 @@ async def list_assets(
 @router.get("/assets/{asset_id}", response_model=AssetResponse)
 async def get_asset(
     asset_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single asset by ID."""
@@ -304,7 +304,7 @@ async def get_asset(
 async def update_asset(
     asset_id: str,
     payload: AssetUpdate,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an asset (rename, move, tags)."""
@@ -340,7 +340,7 @@ async def update_asset(
 @router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_asset(
     asset_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an asset. Refused if referenced in markdown."""
@@ -378,7 +378,7 @@ async def delete_asset(
 
 @router.get("/tags", response_model=list[TagResponse])
 async def list_tags(
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """List all tags for the current user."""
@@ -392,7 +392,7 @@ async def list_tags(
 @router.post("/tags", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
 async def create_tag(
     payload: TagCreate,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new tag."""
@@ -421,7 +421,7 @@ async def create_tag(
 async def update_tag(
     tag_id: str,
     payload: TagUpdate,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a tag."""
@@ -448,7 +448,7 @@ async def update_tag(
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tag(
     tag_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a tag."""
@@ -471,7 +471,7 @@ async def delete_tag(
 @router.post("/assets/bulk/move")
 async def bulk_move_assets(
     request: BulkMoveRequest,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk move assets to a different folder."""
@@ -497,7 +497,7 @@ async def bulk_move_assets(
 @router.post("/assets/bulk/delete")
 async def bulk_delete_assets(
     request: BulkDeleteRequest,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk delete assets."""
@@ -522,7 +522,7 @@ async def bulk_delete_assets(
 @router.post("/assets/bulk/tag")
 async def bulk_tag_assets(
     request: BulkTagRequest,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk tag assets."""
@@ -561,7 +561,7 @@ async def upload_assets(
     files: list[UploadFile] = File(...),
     folder_id: str | None = Form(None),
     project_id: str | None = Form(None),
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload one or more files as assets."""
@@ -640,7 +640,7 @@ async def upload_assets(
 async def regenerate_preview(
     asset_id: str,
     request: PreviewFrameRequest,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Regenerate preview frame for a video asset."""
@@ -679,7 +679,7 @@ async def regenerate_preview(
 @router.get("/assets/raw/{asset_path:path}")
 async def serve_asset_file(
     asset_path: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Serve raw asset file (images, videos, etc.)."""
@@ -711,7 +711,7 @@ async def serve_asset_file(
 @router.get("/assets/{asset_id}/preview")
 async def serve_preview(
     asset_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     """Serve asset preview image."""

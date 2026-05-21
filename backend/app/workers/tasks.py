@@ -879,6 +879,26 @@ async def _stage_generating_videos(db, job) -> dict:
             scene.video_provider_id = provider_id
             scene.duration = actual_duration
 
+            # Create MediaAsset for the generated video
+            try:
+                from app.services.auto_import import _create_asset_from_file, _get_or_create_folder
+
+                video_full_path = Path(settings.storage_path).resolve() / video_path
+                if video_full_path.exists():
+                    vid_folder = await _get_or_create_folder(
+                        user_id=job.user_id, name="Generated Videos",
+                        parent_id=None, db=db,
+                    )
+                    await _create_asset_from_file(
+                        user_id=job.user_id, folder_id=vid_folder.id,
+                        name=f"Scene {scene.scene_number} Video - {str(job.id)[:8]}",
+                        file_path=video_full_path, file_type="video",
+                        source_job_id=job.id, db=db,
+                        project_id=job.project_id,
+                    )
+            except Exception:
+                logger.warning("Failed to create MediaAsset for video", exc_info=True)
+
             if not scene.thumbnail_path:
                 thumbnail_dir = (
                     Path(settings.storage_path) / "output" / str(job.id)
@@ -985,7 +1005,40 @@ async def _stage_rendering(db, job) -> dict:
     job.preview_path = str(preview_path.relative_to(storage_path))
     job.stage = "completed"
     job.status = "completed"
-    await update_job_status(job.id, "completed", 100)
+
+    # Create MediaAsset for the final video
+    try:
+        from app.services.auto_import import _create_asset_from_file, _get_or_create_folder
+
+        if final_path.exists():
+            final_folder = await _get_or_create_folder(
+                user_id=job.user_id, name="Final Exports",
+                parent_id=None, db=db,
+            )
+            await _create_asset_from_file(
+                user_id=job.user_id, folder_id=final_folder.id,
+                name=f"Final Export - {str(job.id)[:8]}",
+                file_path=final_path, file_type="video",
+                source_job_id=job.id, db=db,
+                project_id=job.project_id,
+            )
+    except Exception:
+        logger.warning("Failed to create MediaAsset for final video", exc_info=True)
+
+    await db.commit()
+
+    # Set completed_at timestamp in a separate session
+    try:
+        async with ctx.session_factory() as status_db:
+            status_db_result = await status_db.execute(
+                select(Job).where(Job.id == job.id)
+            )
+            status_job = status_db_result.scalar_one_or_none()
+            if status_job and not status_job.completed_at:
+                status_job.completed_at = datetime.utcnow()
+                await status_db.commit()
+    except Exception:
+        pass
 
     await broadcast_update(str(job.id), {
         "stage": "completed", "progress": 100,
@@ -1216,7 +1269,41 @@ async def _export_scene_video(job_id: str, options: dict) -> dict:
         job.export_options = options
         job.stage = "completed"
         job.status = "completed"
-        await update_job_status(job.id, "completed", 100)
+
+        # Create MediaAsset for the final video
+        try:
+            from app.services.auto_import import _create_asset_from_file, _get_or_create_folder
+
+            if final_path.exists():
+                final_folder = await _get_or_create_folder(
+                    user_id=job.user_id, name="Final Exports",
+                    parent_id=None, db=db,
+                )
+                await _create_asset_from_file(
+                    user_id=job.user_id, folder_id=final_folder.id,
+                    name=f"Final Export - {str(job.id)[:8]}",
+                    file_path=final_path, file_type="video",
+                    source_job_id=job.id, db=db,
+                    project_id=job.project_id,
+                )
+        except Exception:
+            logger.warning("Failed to create MediaAsset for final video", exc_info=True)
+
+        await db.commit()
+
+        # update_job_status opens its own session; we've already committed
+        # the output_path above, so we only need the broadcast side-effect.
+        try:
+            async with ctx.session_factory() as status_db:
+                status_db_result = await status_db.execute(
+                    select(Job).where(Job.id == job.id)
+                )
+                status_job = status_db_result.scalar_one_or_none()
+                if status_job and not status_job.completed_at:
+                    status_job.completed_at = datetime.utcnow()
+                    await status_db.commit()
+        except Exception:
+            pass
 
         await broadcast_update(job_id, {
             "stage": "completed", "status": "Export complete!",

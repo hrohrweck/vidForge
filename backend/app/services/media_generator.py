@@ -618,31 +618,74 @@ def _build_flux_image_workflow(
     aspect_ratio: str,
     provider_config: dict[str, Any],
 ) -> dict[str, Any]:
+    """Build a Flux image generation workflow using UNETLoader.
+
+    Uses UNETLoader + DualCLIPLoader + VAELoader instead of
+    CheckpointLoaderSimple because the flux checkpoint may not
+    be registered in ComfyUI's checkpoints directory.
+    """
     width, height = _aspect_ratio_to_dimensions(aspect_ratio)
     seed = random.randint(0, 2**31 - 1)
 
+    unet_name = str(
+        provider_config.get("flux_unet_name")
+        or "flux1-schnell-fp8.safetensors"
+    )
+    clip_name1 = str(
+        provider_config.get("flux_clip_name1") or "clip_l.safetensors"
+    )
+    clip_name2 = str(
+        provider_config.get("flux_clip_name2") or "t5xxl_fp8_e4m3fn.safetensors"
+    )
+    vae_name = str(
+        provider_config.get("flux_vae_name") or "ae.safetensors"
+    )
+
     return {
         "1": {
-            "class_type": "CheckpointLoaderSimple",
+            "class_type": "UNETLoader",
             "inputs": {
-                "ckpt_name": "flux1-schnell-fp8.safetensors",
+                "unet_name": unet_name,
+                "weight_dtype": "default",
             },
         },
         "2": {
-            "class_type": "CLIPTextEncode",
+            "class_type": "DualCLIPLoader",
             "inputs": {
-                "text": prompt,
-                "clip": ["1", 1],
+                "clip_name1": clip_name1,
+                "clip_name2": clip_name2,
+                "type": "flux",
             },
         },
         "3": {
-            "class_type": "CLIPTextEncode",
+            "class_type": "VAELoader",
             "inputs": {
-                "text": "",
-                "clip": ["1", 1],
+                "vae_name": vae_name,
             },
         },
         "4": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": prompt,
+                "clip": ["2", 0],
+            },
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": "",
+                "clip": ["2", 0],
+            },
+        },
+        "6": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {
+                "width": width,
+                "height": height,
+                "batch_size": 1,
+            },
+        },
+        "7": {
             "class_type": "KSampler",
             "inputs": {
                 "seed": seed,
@@ -652,30 +695,22 @@ def _build_flux_image_workflow(
                 "scheduler": "normal",
                 "denoise": 1.0,
                 "model": ["1", 0],
-                "positive": ["2", 0],
-                "negative": ["3", 0],
-                "latent_image": ["5", 0]
+                "positive": ["4", 0],
+                "negative": ["5", 0],
+                "latent_image": ["6", 0],
             },
         },
-        "5": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {
-                "width": width,
-                "height": height,
-                "batch_size": 1,
-            },
-        },
-        "6": {
+        "8": {
             "class_type": "VAEDecode",
             "inputs": {
-                "samples": ["4", 0],
-                "vae": ["1", 2],
+                "samples": ["7", 0],
+                "vae": ["3", 0],
             },
         },
-        "7": {
+        "9": {
             "class_type": "SaveImage",
             "inputs": {
-                "images": ["6", 0],
+                "images": ["8", 0],
                 "filename_prefix": "vidforge_flux_image",
             },
         },
