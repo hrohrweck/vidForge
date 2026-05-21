@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     runpod_flashboot_enabled: bool = True
     runpod_max_workers: int = 3
 
-    admin_email: str = "admin@vidforge.local"
+    admin_email: str = "admin@vidforge.dev"
     admin_password: str = "admin"
 
 
