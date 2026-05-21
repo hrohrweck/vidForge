@@ -19,6 +19,7 @@ Guidelines:
 - Scene duration: 5-15 seconds each
 - Match mood to lyrics emotion
 - Image prompts: 10-30 words
+- CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - First scene sets mood, last provides closure"""
 
     def __init__(self):

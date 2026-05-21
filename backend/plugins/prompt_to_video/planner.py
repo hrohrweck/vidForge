@@ -23,6 +23,7 @@ Each scene should be 3-6 seconds long. Output ONLY valid JSON:
 
 Guidelines:
 - Image prompts: 10-25 words, highly visual, specific
+- CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - Ensure smooth narrative flow between scenes
 - Match mood to the content
 - Camera movements: static, pan_left, pan_right, zoom_in, zoom_out, tilt_up, orbit

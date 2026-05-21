@@ -268,6 +268,15 @@ async def plan_scenes(
 
     scenes = []
     for scene_data in plan.get("scenes", []):
+        image_prompt = scene_data.get("image_prompt", "")
+        # Enforce style in image prompts
+        if image_prompt and request.style and request.style != "realistic":
+            if not any(w in image_prompt.lower() for w in request.style.lower().split()):
+                image_prompt = f"{request.style} style: {image_prompt}"
+        elif image_prompt and request.style == "realistic":
+            if "realistic" not in image_prompt.lower() and "photorealistic" not in image_prompt.lower():
+                image_prompt = f"Photorealistic: {image_prompt}"
+
         scene = VideoScene(
             job_id=job_id,
             scene_number=scene_data["scene_number"],
@@ -275,7 +284,7 @@ async def plan_scenes(
             end_time=scene_data["end_time"],
             lyrics_segment=scene_data.get("lyrics_segment"),
             visual_description=scene_data.get("visual_description"),
-            image_prompt=scene_data.get("image_prompt"),
+            image_prompt=image_prompt,
             mood=scene_data.get("mood", "neutral"),
             camera_movement=scene_data.get("camera_movement", "static"),
             status="pending",
@@ -600,6 +609,91 @@ async def generate_scene_video(
     await db.commit()
 
     return {"status": "queued", "scene_id": str(scene_id), "media_type": "video"}
+
+
+@router.post("/{job_id}/scenes/regenerate-all")
+async def regenerate_all(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Full regeneration: re-plan scenes, then generate images + videos.
+
+    Resets the job back to ``planned`` and queues the full pipeline:
+    generating_images → generating_videos.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    input_data = job.input_data or {}
+    style = input_data.get("style", "realistic")
+
+    # Re-plan scenes via the plugin dispatcher
+    from app.database import Template
+    from app.plugins.registry import get_plugin, get_plugin_for_template
+
+    plugin = None
+    if job.template_id:
+        tresult = await db.execute(select(Template).where(Template.id == job.template_id))
+        template = tresult.scalar_one_or_none()
+        if template and template.config:
+            pid = template.config.get("plugin_id")
+            if pid:
+                plugin = get_plugin(pid)
+            if not plugin:
+                plugin = get_plugin_for_template(template.config)
+    if not plugin:
+        plugin = get_plugin("music_video")
+
+    context: dict[str, Any] = {}
+
+    # Enrich inputs (re-extract lyrics etc)
+    try:
+        context = await plugin.enrich_inputs(db, job, context)
+        await db.commit()
+    except Exception:
+        pass  # enrichment may already be done
+
+    # Plan scenes
+    await plugin.plan_scenes(db, job, context)
+    await db.commit()
+
+    # Enforce style in image prompts
+    scene_result = await db.execute(
+        select(VideoScene).where(VideoScene.job_id == job_id).order_by(VideoScene.scene_number)
+    )
+    scenes = list(scene_result.scalars().all())
+
+    for scene in scenes:
+        if scene.image_prompt and style and style != "realistic":
+            # Prepend style qualifier if not already present
+            prompt_lower = scene.image_prompt.lower()
+            style_words = style.lower().split()
+            has_style = any(w in prompt_lower for w in style_words)
+            if not has_style:
+                scene.image_prompt = f"{style} style: {scene.image_prompt}"
+        elif scene.image_prompt and style == "realistic":
+            prompt_lower = scene.image_prompt.lower()
+            if "realistic" not in prompt_lower and "photorealistic" not in prompt_lower:
+                scene.image_prompt = f"Photorealistic: {scene.image_prompt}"
+
+    job.status = "pending"
+    job.stage = "planned"
+    job.error_message = None
+    await db.commit()
+
+    # Chain: generating_images → generating_videos
+    from app.workers.tasks import process_scene_video_job
+    process_scene_video_job.delay(str(job_id), "generating_images")
+
+    return {
+        "status": "queued",
+        "job_id": str(job_id),
+        "scene_count": len(scenes),
+        "stage": "generating_images",
+    }
 
 
 @router.post("/{job_id}/scenes/generate-all-images")

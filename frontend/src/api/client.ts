@@ -674,6 +674,18 @@ export const scenesApi = {
     return response.data
   },
 
+  regenerateAll: async (jobId: string) => {
+    const response = await api.post<{
+      status: string
+      job_id: string
+      scene_count: number
+      stage: string
+    }>(
+      `/jobs/${jobId}/scenes/regenerate-all`
+    )
+    return response.data
+  },
+
   generateAllVideos: async (jobId: string, request?: SceneGenerateRequest) => {
     const response = await api.post<{ status: string; job_id: string; stage: string }>(
       `/jobs/${jobId}/scenes/generate-all-videos`,

@@ -6,16 +6,17 @@
  * the common scene grid, workflow progress bar, and export modal.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   RefreshCw, ChevronLeft, Image, Video, Download,
-  CheckCircle, Clock, AlertCircle, Trash2, Plus,
+  CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2,
 } from 'lucide-react'
 import {
   jobsApi, scenesApi, templatesApi, type VideoScene, type SceneUpdate,
 } from '../api/client'
+import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
 import { SceneEditModal } from '../components/SceneEditModal'
 import { ExportModal } from '../components/ExportModal'
@@ -149,6 +150,19 @@ export default function SceneEditor() {
     onSuccess: () => refetchScenes(),
   })
 
+  // ── Full regeneration (re-plan + images + videos) ─────────────────
+
+  const [isRegenerating, setIsRegenerating] = useState(false)
+
+  const regenerateAllMutation = useMutation({
+    mutationFn: () => scenesApi.regenerateAll(jobId!),
+    onSuccess: () => {
+      setIsRegenerating(true)
+      refetchScenes()
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] })
+    },
+  })
+
   // ── Helpers ───────────────────────────────────────────────────────
 
   const getStageIndex = (stage: string) =>
@@ -170,6 +184,15 @@ export default function SceneEditor() {
 
   const isPlanningStage = () =>
     job?.stage === 'planning' || (!scenesLoading && (!scenes || scenes.length === 0))
+
+  // Detect when regeneration pipeline finishes
+  // Clear regenerating overlay when pipeline fully completes
+  useEffect(() => {
+    if (isRegenerating && job?.status === 'completed') {
+      setIsRegenerating(false)
+      refetchScenes()
+    }
+  }, [isRegenerating, job?.status])
 
   // ── Loading state ─────────────────────────────────────────────────
 
@@ -242,7 +265,7 @@ export default function SceneEditor() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main content area */}
-        <div className="lg:col-span-3 space-y-6">
+        <div className={cn("lg:col-span-3 space-y-6", isRegenerating && "pointer-events-none opacity-50")}>
           {isPlanningStage() ? (
             /* Planning phase: delegate to plugin-specific panel */
             renderPlanningPanel(resolvedPluginId)
@@ -461,19 +484,15 @@ export default function SceneEditor() {
               <div className="flex items-center justify-between">
                 <Button
                   variant="outline"
-                  onClick={() =>
-                    scenesApi.planScenes(jobId!, {
-                      lyrics_data: (job?.input_data?.lyrics as Record<string, unknown>) || {},
-                      duration: 30,
-                      style: (job?.input_data?.style as string) || 'realistic',
-                    }).then(() => {
-                      refetchScenes()
-                      queryClient.invalidateQueries({ queryKey: ['job', jobId] })
-                    })
-                  }
+                  onClick={() => {
+                    if (confirm('This will re-plan all scenes and regenerate all images and videos. Continue?')) {
+                      regenerateAllMutation.mutate()
+                    }
+                  }}
+                  disabled={regenerateAllMutation.isPending || isRegenerating}
                 >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Regenerate Prompts
+                  <RefreshCw className={cn("h-4 w-4 mr-2", (regenerateAllMutation.isPending || isRegenerating) && "animate-spin")} />
+                  {isRegenerating ? 'Regenerating...' : 'Regenerate All'}
                 </Button>
                 {allVideosGenerated() && (
                   <Button onClick={() => setShowExportModal(true)}>
@@ -487,7 +506,7 @@ export default function SceneEditor() {
         </div>
 
         {/* Sidebar: plugin-specific panel */}
-        <div className="space-y-4">
+        <div className={cn("space-y-4", isRegenerating && "pointer-events-none opacity-50")}>
           {resolvedPluginId === 'music_video' && (
             <MusicVideoPanel job={job} jobId={jobId!} scenes={scenes} />
           )}
@@ -555,6 +574,44 @@ export default function SceneEditor() {
             queryClient.invalidateQueries({ queryKey: ['job', jobId] })
           }}
         />
+      )}
+
+      {/* Regeneration overlay */}
+      {(isRegenerating || regenerateAllMutation.isPending) && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 p-8 bg-card rounded-2xl border shadow-2xl">
+            <Loader2 className="h-12 w-12 text-primary animate-spin" />
+            <div className="text-center">
+              <h3 className="text-lg font-semibold">Regenerating All Scenes</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                {regenerateAllMutation.isPending
+                  ? 'Re-planning scenes...'
+                  : job?.stage === 'generating_images'
+                    ? `Generating images (0/${scenes?.length || 0})...`
+                    : job?.stage === 'generating_videos'
+                      ? `Generating videos (0/${scenes?.length || 0})...`
+                      : job?.stage === 'images_ready'
+                        ? 'Images done, starting videos...'
+                        : job?.stage === 'rendering'
+                          ? 'Rendering final video...'
+                          : 'Processing...'}
+              </p>
+            </div>
+            <div className="w-48 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500"
+                style={{
+                  width:
+                    job?.stage === 'generating_images' ? '30%'
+                    : job?.stage === 'images_ready' ? '50%'
+                    : job?.stage === 'generating_videos' ? '70%'
+                    : job?.stage === 'rendering' ? '90%'
+                    : '10%',
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
