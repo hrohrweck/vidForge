@@ -84,13 +84,13 @@ export function AssetDetail() {
       <div className="mb-6">
         {asset.file_type === 'video' ? (
           <video
-            src={getAssetUrl(asset.file_path)}
+            src={getAssetUrl(asset)}
             controls
             className="w-full max-h-96 rounded-lg"
           />
         ) : asset.file_type === 'image' ? (
           <img
-            src={getAssetUrl(asset.file_path)}
+            src={getAssetUrl(asset)}
             alt={asset.name}
             className="w-full max-h-96 object-contain rounded-lg"
           />

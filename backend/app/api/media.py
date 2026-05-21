@@ -676,13 +676,48 @@ async def regenerate_preview(
 # ============== RAW ASSET SERVING ==============
 
 
-@router.get("/assets/raw/{asset_path:path}")
+@router.get("/assets/{asset_id}/file")
 async def serve_asset_file(
+    asset_id: str,
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the raw asset file by asset ID.
+
+    Uses cookie-based auth so that browser <img>/<video> tags work
+    automatically (they send cookies but not Authorization headers).
+    """
+    from pathlib import Path
+
+    result = await db.execute(
+        select(MediaAsset).where(
+            MediaAsset.id == UUID(asset_id),
+            MediaAsset.user_id == current_user.id,
+        )
+    )
+    asset = result.scalar_one_or_none()
+
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    file_path = Path(asset.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    return FileResponse(
+        path=file_path,
+        media_type=asset.mime_type or "application/octet-stream",
+        filename=asset.name,
+    )
+
+
+@router.get("/assets/raw/{asset_path:path}")
+async def serve_asset_file_by_path(
     asset_path: str,
     current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve raw asset file (images, videos, etc.)."""
+    """Serve raw asset file by storage path (legacy, kept for backward compat)."""
     from pathlib import Path
 
     # Look up the asset by path to verify ownership

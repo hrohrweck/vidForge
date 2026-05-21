@@ -13,7 +13,7 @@ from app.database import Group, User, UserGroup, get_db
 from app.services.permissions import get_user_permissions
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
 
@@ -73,7 +73,7 @@ def create_access_token(data: dict) -> str:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
@@ -81,6 +81,8 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if not credentials or not credentials.credentials:
+        raise credentials_exception
     try:
         payload = jwt.decode(
             credentials.credentials,

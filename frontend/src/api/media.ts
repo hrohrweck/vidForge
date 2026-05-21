@@ -125,11 +125,11 @@ export async function bulkTagAssets(request: BulkTagRequest): Promise<{ tagged: 
   return response.data
 }
 
-export function getAssetUrl(assetPath: string): string {
-  if (assetPath.startsWith('http')) {
-    return assetPath
+export function getAssetUrl(asset: MediaAsset): string {
+  if (asset.file_path?.startsWith('http')) {
+    return asset.file_path
   }
-  return `/api/media/assets/raw/${assetPath}`
+  return `/api/media/assets/${asset.id}/file`
 }
 
 export function getPreviewUrl(assetId: string): string {

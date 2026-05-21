@@ -51,7 +51,7 @@ export function MediaThumbnail({
   const previewUrl = asset.preview_path
     ? getPreviewUrl(asset.id)
     : asset.file_type === 'image'
-    ? getAssetUrl(asset.file_path)
+    ? getAssetUrl(asset)
     : undefined
 
   return (
@@ -67,7 +67,7 @@ export function MediaThumbnail({
       {asset.file_type === 'video' && isHovered ? (
         <video
           ref={videoRef}
-          src={getAssetUrl(asset.file_path)}
+          src={getAssetUrl(asset)}
           className="w-full h-full object-cover"
           muted
           loop
