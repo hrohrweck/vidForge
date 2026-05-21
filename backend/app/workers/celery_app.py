@@ -1,5 +1,6 @@
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_init, worker_process_shutdown
 
 from app.config import get_settings
 
@@ -37,3 +38,18 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=0, minute=0),
     },
 }
+
+
+# -- Worker lifecycle signals -------------------------------------------
+@worker_init.connect
+def _on_worker_init(**kwargs):
+    from app.workers.context import ctx
+
+    ctx.start()
+
+
+@worker_process_shutdown.connect
+def _on_worker_shutdown(**kwargs):
+    from app.workers.context import ctx
+
+    ctx.stop()
