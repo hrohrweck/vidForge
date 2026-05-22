@@ -171,6 +171,16 @@ def load_comfyui_workflow(workflow_name: str) -> dict[str, Any] | None:
     return json.loads(workflow_path.read_text())
 
 
+async def _upload_image_to_comfyui(
+    instance: ComfyUIDirectProvider,
+    image_path: Path,
+) -> str:
+    """Upload an image to ComfyUI's input directory and return its name."""
+    image_data = image_path.read_bytes()
+    filename = image_path.name
+    return await instance.client.upload_file(filename, image_data)
+
+
 async def _resolve_image_provider(
     db: AsyncSession,
     job: Job,
@@ -335,12 +345,30 @@ async def generate_video(
         return relative_path, f"poe_{selected_model}", resolved_pid, float(duration)
 
     # ComfyUI local provider
-    workflow = _build_wan_video_workflow(
-        prompt=prompt,
-        aspect_ratio=aspect_ratio,
-        frames=_duration_to_frames(duration),
-        provider_config=instance.config,
-    )
+    frames = _duration_to_frames(duration)
+
+    if reference_image_path:
+        # I2V: upload image to ComfyUI and use it as first-frame latent
+        image_path = Path(settings.storage_path) / reference_image_path
+        if image_path.exists():
+            image_name = await _upload_image_to_comfyui(instance, image_path)
+            workflow = _build_wan_i2v_workflow(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                frames=frames,
+                image_name=image_name,
+                provider_config=instance.config,
+            )
+        else:
+            workflow = _build_wan_video_workflow(
+                prompt=prompt, aspect_ratio=aspect_ratio,
+                frames=frames, provider_config=instance.config,
+            )
+    else:
+        workflow = _build_wan_video_workflow(
+            prompt=prompt, aspect_ratio=aspect_ratio,
+            frames=frames, provider_config=instance.config,
+        )
 
     prompt_id = await instance.queue_prompt(workflow)
     result = await instance.wait_for_completion(prompt_id)
@@ -439,6 +467,97 @@ def _build_wan_video_workflow(
         "11": {
             "class_type": "SaveVideo",
             "inputs": {"video": ["10", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
+        },
+    }
+
+
+def _build_wan_i2v_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    frames: int,
+    image_name: str,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a Wan2.2 I2V (image-to-video) workflow.
+
+    Uses the reference image as the first frame latent, producing
+    a video that continues from the seed image.
+    """
+    width, height = _video_generation_resolution(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    clip_name = str(provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+    vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
+    unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
+
+    steps = int(provider_config.get("wan_video_steps") or 30)
+    cfg = float(provider_config.get("wan_video_cfg") or 5.0)
+    shift = float(provider_config.get("wan_video_shift") or 8.0)
+    fps = int(provider_config.get("wan_video_fps") or 16)
+    sampler = str(provider_config.get("wan_video_sampler") or "uni_pc")
+    scheduler = str(provider_config.get("wan_video_scheduler") or "simple")
+    negative_prompt = str(provider_config.get("wan_video_negative_prompt") or "")
+
+    return {
+        "1": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": clip_name, "type": "wan"},
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt, "clip": ["1", 0]},
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": negative_prompt, "clip": ["1", 0]},
+        },
+        "4": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae_name},
+        },
+        "5": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
+        },
+        "6": {
+            "class_type": "ModelSamplingSD3",
+            "inputs": {"model": ["5", 0], "shift": shift},
+        },
+        # Load the seed image and VAE-encode it as the first frame latent
+        "7": {
+            "class_type": "LoadImage",
+            "inputs": {"image": image_name},
+        },
+        "8": {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["7", 0], "vae": ["4", 0]},
+        },
+        "9": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["6", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["8", 0],
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler,
+                "scheduler": scheduler,
+                "denoise": 1.0,
+            },
+        },
+        "10": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["9", 0], "vae": ["4", 0]},
+        },
+        "11": {
+            "class_type": "CreateVideo",
+            "inputs": {"images": ["10", 0], "fps": fps},
+        },
+        "12": {
+            "class_type": "SaveVideo",
+            "inputs": {"video": ["11", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
         },
     }
 

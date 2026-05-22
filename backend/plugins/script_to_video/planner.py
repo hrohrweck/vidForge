@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a video director. Convert script segments into visual scenes for AI video generation.
 
-Each scene should be 3-6 seconds long. Output ONLY valid JSON:
+Each scene should be 3-15 seconds long. Output ONLY valid JSON:
 {"scenes": [{"start_time": 0.0, "end_time": 5.0, "narration": "text", "visual_description": "desc", "image_prompt": "prompt", "mood": "mood", "camera_movement": "movement"}]}
 
 Guidelines:
+- Scene duration: 3-15 seconds each — longer scenes allow for richer visual storytelling
 - Image prompts: 10-25 words, highly visual
 - CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - Narration is the text that will be spoken during this scene

@@ -149,11 +149,18 @@ class PluginBase(ABC):
     ) -> dict[str, Any]:
         """Generate a video clip for each scene.
 
-        The default implementation iterates over *scenes* and calls the
-        core video generator using the scene's reference image and
-        visual description.
+        For scenes ≤ 5s a single clip is generated.
+
+        For scenes > 5s the scene is split into 5s sub-clips with
+        chained last-frame seeding: each sub-clip uses the ~80% frame
+        of the previous clip as its seed image, and the prompts evolve
+        to tell a continuous story.  Sub-clips are merged with a 0.3s
+        crossfade.
         """
         from app.services.media_generator import generate_video
+
+        max_clip_s = 5          # Wan 2.2 practical max per clip
+        crossfade_s = 0.3       # crossfade at sub-clip boundaries
 
         input_data = job.input_data or {}
         aspect_ratio = input_data.get("aspect_ratio", "16:9")
@@ -161,29 +168,180 @@ class PluginBase(ABC):
         for scene in scenes:
             if scene.generated_video_path:
                 continue
-            duration = max(2, min(int(scene.end_time - scene.start_time), 5))
+
+            scene_duration = scene.end_time - scene.start_time
             prompt = scene.visual_description or scene.lyrics_segment or ""
+
             try:
-                video_path, _media_id, _provider_id, actual_duration = (
-                    await generate_video(
-                        db=db,
-                        job=job,
-                        prompt=prompt,
+                if scene_duration <= max_clip_s + 0.5:
+                    # ── Short scene: single clip ──────────────────────
+                    duration = max(2, int(scene_duration))
+                    video_path, _, _, actual_duration = await generate_video(
+                        db=db, job=job, prompt=prompt,
                         scene_number=scene.scene_number,
                         reference_image_path=scene.reference_image_path,
                         provider_id=job.video_provider_id,
-                        duration=duration,
-                        aspect_ratio=aspect_ratio,
+                        duration=duration, aspect_ratio=aspect_ratio,
                     )
-                )
-                scene.generated_video_path = video_path
+                    scene.generated_video_path = video_path
+                    scene.duration = actual_duration
+                else:
+                    # ── Long scene: sub-clip chain ────────────────────
+                    scene.generated_video_path, scene.duration = (
+                        await self._generate_chained_subclips(
+                            db=db, job=job, scene=scene,
+                            scene_duration=scene_duration,
+                            max_clip_s=max_clip_s,
+                            crossfade_s=crossfade_s,
+                            aspect_ratio=aspect_ratio,
+                        )
+                    )
+
                 scene.status = "video_ready"
-                scene.duration = actual_duration
             except Exception as exc:
                 scene.status = "failed"
                 scene.error_message = str(exc)
             await db.commit()
+
         return context
+
+    # ------------------------------------------------------------------
+    # Sub-clip chaining for long scenes
+    # ------------------------------------------------------------------
+
+    async def _generate_chained_subclips(
+        self,
+        db: AsyncSession,
+        job: Job,
+        scene: VideoScene,
+        scene_duration: float,
+        max_clip_s: int,
+        crossfade_s: float,
+        aspect_ratio: str,
+    ) -> tuple[str, float]:
+        """Split a long scene into chained sub-clips.
+
+        Returns (relative_video_path, actual_duration).
+        """
+        import math
+        from pathlib import Path
+
+        from app.config import get_settings
+        from app.services.media_generator import (
+            generate_video,
+            get_scene_output_dir,
+        )
+        from app.services.video_processor import VideoProcessor
+
+        settings = get_settings()
+        storage = Path(settings.storage_path).resolve()
+        output_dir = get_scene_output_dir(str(job.id), scene.scene_number)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        num_clips = math.ceil(scene_duration / max_clip_s)
+        prompts = await self._generate_sub_scene_prompts(
+            db, job, scene, num_clips,
+        )
+
+        sub_clip_paths: list[str] = []
+        current_seed_path: str | None = scene.reference_image_path
+        total_actual_duration = 0.0
+
+        for i in range(num_clips):
+            clip_duration = min(
+                max_clip_s,
+                scene_duration - i * max_clip_s,
+            )
+            clip_duration = max(2, int(clip_duration))
+
+            sub_path, _, _, actual = await generate_video(
+                db=db, job=job,
+                prompt=prompts[i],
+                scene_number=scene.scene_number,
+                reference_image_path=current_seed_path,
+                provider_id=job.video_provider_id,
+                duration=clip_duration,
+                aspect_ratio=aspect_ratio,
+            )
+            sub_clip_paths.append(str(storage / sub_path))
+            total_actual_duration += actual
+
+            # Extract ~80% frame for next clip's seed
+            if i < num_clips - 1:
+                seed_img = output_dir / f"seed_sub_{i + 1}.png"
+                await VideoProcessor.extract_frame(
+                    str(storage / sub_path), str(seed_img), ratio=0.8,
+                )
+                current_seed_path = str(
+                    seed_img.relative_to(storage)
+                )
+
+        # Merge sub-clips with crossfade
+        final_path = output_dir / "scene_video.mp4"
+        if len(sub_clip_paths) == 1:
+            import shutil
+            shutil.copy(sub_clip_paths[0], final_path)
+        else:
+            await VideoProcessor.merge_with_crossfade(
+                sub_clip_paths, str(final_path), crossfade_s,
+            )
+
+        relative = str(final_path.relative_to(storage))
+        return relative, total_actual_duration
+
+    async def _generate_sub_scene_prompts(
+        self,
+        db: AsyncSession,
+        job: Job,
+        scene: VideoScene,
+        num_clips: int,
+    ) -> list[str]:
+        """Use the LLM to decompose a scene into evolving sub-clip prompts.
+
+        Falls back to the original prompt + a continuation suffix if
+        the LLM is unavailable.
+        """
+        original_prompt = scene.visual_description or scene.lyrics_segment or ""
+        image_prompt = scene.image_prompt or original_prompt
+
+        try:
+            from app.services.llm_service import LLMService
+            llm = LLMService()
+
+            system = (
+                "You are a video director. A scene is being split into "
+                f"{num_clips} consecutive sub-clips. Write a brief "
+                "visual prompt for each sub-clip that tells a continuous, "
+                "evolving story. Each prompt should describe what happens "
+                "in that segment and flow naturally into the next. "
+                "Keep each prompt under 100 words. "
+                "Output ONLY a JSON array of strings."
+            )
+            user = (
+                f"Original scene description: {original_prompt}\n"
+                f"Original image prompt: {image_prompt}\n"
+                f"Scene mood: {scene.mood}\n"
+                f"Split into {num_clips} consecutive sub-clips."
+            )
+            response = await llm.generate(user, system=system)
+            import json
+            prompts = json.loads(response)
+            if isinstance(prompts, list) and len(prompts) == num_clips:
+                return [str(p) for p in prompts]
+        except Exception:
+            pass
+
+        # Fallback: reuse original prompt with continuation markers
+        prompts = []
+        for i in range(num_clips):
+            if i == 0:
+                prompts.append(image_prompt)
+            else:
+                prompts.append(
+                    f"Continuation of the scene: {original_prompt}. "
+                    f"Part {i + 1} of {num_clips}."
+                )
+        return prompts
 
     # ------------------------------------------------------------------
     # Stage: render
@@ -213,40 +371,23 @@ class PluginBase(ABC):
         output_dir = storage_path / "output" / str(job.id)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Stretch each scene clip to match its intended duration, then merge.
-        # Video models (Wan2.2, Poe Veo, etc.) produce short clips (3-8s),
-        # but scenes may need much longer (e.g. 115s).  We loop the clip
-        # to fill the scene duration so the final video matches the timeline.
-        stretched_paths: list[str] = []
+        # Collect scene video paths
+        segment_paths: list[str] = []
         for scene in scenes:
             if not scene.generated_video_path:
                 continue
             full = storage_path / scene.generated_video_path
-            if not full.exists():
-                continue
+            if full.exists():
+                segment_paths.append(str(full))
 
-            scene_duration = scene.end_time - scene.start_time
-            clip_duration = scene.duration or scene_duration
-
-            if clip_duration >= scene_duration - 0.5:
-                # Clip is already long enough — use as-is
-                stretched_paths.append(str(full))
-            else:
-                # Stretch (loop) the clip to fill the scene duration
-                stretched = output_dir / f"scene_{scene.scene_number:03d}_stretched.mp4"
-                await VideoProcessor.stretch_to_duration(
-                    str(full), scene_duration, str(stretched),
-                )
-                stretched_paths.append(str(stretched))
-
-        if not stretched_paths:
+        if not segment_paths:
             raise RuntimeError("No scene videos to render")
 
         merged_path = output_dir / "merged.mp4"
-        if len(stretched_paths) == 1:
-            shutil.copy(stretched_paths[0], merged_path)
+        if len(segment_paths) == 1:
+            shutil.copy(segment_paths[0], merged_path)
         else:
-            await VideoProcessor.merge_videos(stretched_paths, str(merged_path))
+            await VideoProcessor.merge_videos(segment_paths, str(merged_path))
 
         # Add audio if available
         final_path = output_dir / "final.mp4"
@@ -353,26 +494,36 @@ class PluginBase(ABC):
         context: dict[str, Any],
     ) -> str | None:
         """Re-generate a single scene's video.  Returns relative path."""
-        from app.services.media_generator import generate_video
+        scene_duration = scene.end_time - scene.start_time
 
-        input_data = job.input_data or {}
-        aspect_ratio = input_data.get("aspect_ratio", "16:9")
-        duration = max(2, min(int(scene.end_time - scene.start_time), 5))
-        prompt = scene.visual_description or scene.lyrics_segment or ""
+        if scene_duration > 5.5:
+            path, duration = await self._generate_chained_subclips(
+                db=db, job=job, scene=scene,
+                scene_duration=scene_duration,
+                max_clip_s=5, crossfade_s=0.3,
+                aspect_ratio=(job.input_data or {}).get("aspect_ratio", "16:9"),
+            )
+            scene.generated_video_path = path
+            scene.duration = duration
+        else:
+            from app.services.media_generator import generate_video
+            duration = max(2, int(scene_duration))
+            prompt = scene.visual_description or scene.lyrics_segment or ""
+            video_path, _mid, _pid, actual_duration = await generate_video(
+                db=db, job=job, prompt=prompt,
+                scene_number=scene.scene_number,
+                reference_image_path=scene.reference_image_path,
+                provider_id=job.video_provider_id,
+                duration=duration,
+                aspect_ratio=(job.input_data or {}).get("aspect_ratio", "16:9"),
+            )
+            scene.generated_video_path = video_path
+            scene.duration = actual_duration
 
-        video_path, _mid, _pid, actual_duration = await generate_video(
-            db=db, job=job, prompt=prompt,
-            scene_number=scene.scene_number,
-            reference_image_path=scene.reference_image_path,
-            provider_id=job.video_provider_id,
-            duration=duration, aspect_ratio=aspect_ratio,
-        )
-        scene.generated_video_path = video_path
         scene.status = "video_ready"
-        scene.duration = actual_duration
         scene.error_message = None
         await db.commit()
-        return video_path
+        return scene.generated_video_path
 
     # ------------------------------------------------------------------
     # UI metadata

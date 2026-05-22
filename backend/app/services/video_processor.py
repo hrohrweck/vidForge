@@ -116,6 +116,94 @@ class VideoProcessor:
         return output_path
 
     @staticmethod
+    async def extract_frame(
+        video_path: str,
+        output_path: str,
+        ratio: float = 0.8,
+    ) -> str:
+        """Extract a single frame from *video_path* at *ratio* (0–1).
+
+        ``ratio=0.8`` grabs a frame at 80 % through the clip, avoiding
+        the often-degraded very last frame.
+        """
+        duration = await VideoProcessor.get_duration(video_path)
+        timestamp = duration * ratio
+
+        cmd = [
+            "ffmpeg",
+            "-ss", str(timestamp),
+            "-i", video_path,
+            "-frames:v", "1",
+            "-y", str(Path(output_path).resolve()),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg extract_frame failed: {stderr.decode()}")
+        return output_path
+
+    @staticmethod
+    async def merge_with_crossfade(
+        video_paths: list[str],
+        output_path: str,
+        crossfade_duration: float = 0.3,
+    ) -> str:
+        """Merge video clips with crossfade transitions.
+
+        Uses FFmpeg's ``xfade`` filter between consecutive clips.
+        """
+        if len(video_paths) == 0:
+            raise ValueError("No videos to merge")
+        if len(video_paths) == 1:
+            shutil.copy(video_paths[0], output_path)
+            return output_path
+
+        durations = []
+        for p in video_paths:
+            durations.append(await VideoProcessor.get_duration(p))
+
+        # Build xfade filter chain
+        # xfade offsets: current_total_duration - crossfade_duration
+        filter_parts: list[str] = []
+        current_total = durations[0]
+        prev_tag = "0:v"
+        for i in range(1, len(video_paths)):
+            offset = current_total - crossfade_duration
+            out_tag = f"v{i:02d}" if i < len(video_paths) - 1 else "vout"
+            filter_parts.append(
+                f"[{prev_tag}][{i}:v]xfade=transition=fade:duration={crossfade_duration}:offset={offset:.3f}[{out_tag}]"
+            )
+            current_total = current_total + durations[i] - crossfade_duration
+            prev_tag = out_tag
+
+        inputs: list[str] = []
+        for p in video_paths:
+            inputs.extend(["-i", p])
+
+        last_out = prev_tag
+        filter_complex = "; ".join(filter_parts)
+
+        cmd = [
+            "ffmpeg",
+            *inputs,
+            "-filter_complex", filter_complex,
+            "-map", f"[{last_out}]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-an",
+            "-y", str(Path(output_path).resolve()),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg crossfade merge failed: {stderr.decode()}")
+        return output_path
+
+    @staticmethod
     async def add_audio(
         video_path: str,
         audio_path: str,
