@@ -237,16 +237,28 @@ class PoeProvider(ComfyUIProvider):
                 elif "video_base64" in data:
                     return base64.b64decode(data["video_base64"])
                 elif "image_url" in data:
-                    return None
+                    # Download image from URL
+                    return self._sync_download(data["image_url"])
                 elif "video_url" in data:
-                    return None
+                    return self._sync_download(data["video_url"])
         except (json.JSONDecodeError, ValueError):
             pass
 
+        # Check for inline data URIs
         if "data:image" in content or "data:video" in content:
             return None
 
         return None
+
+    @staticmethod
+    def _sync_download(url: str) -> bytes | None:
+        """Download content from a URL synchronously."""
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                return resp.read()
+        except Exception:
+            return None
 
     async def wait_for_completion(
         self,

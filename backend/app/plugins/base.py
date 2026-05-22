@@ -131,8 +131,15 @@ class PluginBase(ABC):
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
             except Exception as exc:
+                await db.rollback()
+                # Re-fetch the scene so the ORM object is clean
+                from sqlalchemy import select as sa_select
+                result = await db.execute(
+                    sa_select(VideoScene).where(VideoScene.id == scene.id)
+                )
+                scene = result.scalar_one()
                 scene.status = "failed"
-                scene.error_message = str(exc)
+                scene.error_message = str(exc)[:500]
             await db.commit()
         return context
 
@@ -199,8 +206,14 @@ class PluginBase(ABC):
 
                 scene.status = "video_ready"
             except Exception as exc:
+                await db.rollback()
+                from sqlalchemy import select as sa_select
+                result = await db.execute(
+                    sa_select(VideoScene).where(VideoScene.id == scene.id)
+                )
+                scene = result.scalar_one()
                 scene.status = "failed"
-                scene.error_message = str(exc)
+                scene.error_message = str(exc)[:500]
             await db.commit()
 
         return context
