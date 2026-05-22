@@ -210,6 +210,10 @@ class PluginBase(ABC):
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
             except Exception as exc:
+                logger.error(
+                    "[image-s%s] generate_images failed: %s",
+                    scene.scene_number, exc, exc_info=True,
+                )
                 await db.rollback()
                 from sqlalchemy import select as sa_select
 
@@ -288,6 +292,10 @@ class PluginBase(ABC):
 
                 scene.status = "video_ready"
             except Exception as exc:
+                logger.error(
+                    "[video-s%s] generate_videos failed: %s",
+                    scene.scene_number, exc, exc_info=True,
+                )
                 await db.rollback()
                 from sqlalchemy import select as sa_select
 

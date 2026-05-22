@@ -61,6 +61,16 @@ class PoeProvider(ComfyUIProvider):
         "2:3": "960x1440",
     }
 
+    # Models that use the /v1/videos (async polling) API
+    _VIDEO_API_MODELS = {
+        "veo-3.1", "veo-3.1-fast", "veo-3", "veo-2", "veo-2-video",
+        "veo-v3.1", "veo-v3.1-fast", "veo-3-vfast", "veo-3-fast",
+    }
+
+    def _is_video_api_model(self, model: str) -> bool:
+        """True if the model uses /v1/videos; False means chat-completions style."""
+        return model.lower() in self._VIDEO_API_MODELS
+
     async def generate_video(
         self,
         prompt: str,
@@ -74,20 +84,99 @@ class PoeProvider(ComfyUIProvider):
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
+        if self._is_video_api_model(model):
+            return await self._generate_video_api(
+                prompt, model, duration, aspect_ratio, image_path,
+            )
+        else:
+            return await self._generate_video_chat(
+                prompt, model, duration, aspect_ratio, image_path,
+            )
+
+    async def _generate_video_chat(
+        self,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        image_path: str | None,
+    ) -> tuple[str, bytes | None]:
+        """Generate video via /v1/chat/completions (wan, sora, hunyuan, etc.)."""
         import logging
         logger = logging.getLogger(__name__)
 
-        # Use Poe Videos API (/v1/videos) for video generation
+        # Build message content — optional reference image
+        content: list[dict[str, Any]] | str
+        if image_path:
+            from pathlib import Path
+
+            from app.config import get_settings
+            settings = get_settings()
+            full_image_path = Path(settings.storage_path) / image_path
+            if full_image_path.exists():
+                image_bytes = full_image_path.read_bytes()
+                image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                content = [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ]
+            else:
+                content = prompt
+        else:
+            content = prompt
+
+        logger.info(
+            f"Poe generate_video (chat): model={model}, has_image={image_path is not None}"
+        )
+
+        response = await self.client.post(
+            f"{self.base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": content}],
+                "stream": False,
+            },
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Poe chat video error ({response.status_code}): {response.text[:300]}")
+
+        result = response.json()
+        text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        video_bytes = self._parse_media_content(text)
+        if not video_bytes:
+            raise RuntimeError(
+                f"Poe chat video returned no data (model={model}, text={text[:200]})"
+            )
+
+        logger.info(f"Poe video (chat): downloaded {len(video_bytes)} bytes")
+        return result.get("id", ""), video_bytes
+
+    async def _generate_video_api(
+        self,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        image_path: str | None,
+    ) -> tuple[str, bytes | None]:
+        """Generate video via /v1/videos async polling API (Veo, etc.)."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         size = self._ASPECT_RATIO_SIZES.get(aspect_ratio, "1920x1080")
 
         create_body: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
-            "seconds": min(duration, 8),  # Veo models max 8s
+            "seconds": min(duration, 8),
             "size": size,
         }
 
-        # Add reference image as base64 input_image if available
         if image_path:
             from pathlib import Path
 
@@ -99,7 +188,10 @@ class PoeProvider(ComfyUIProvider):
                 image_b64 = base64.b64encode(image_bytes).decode("ascii")
                 create_body["input_image"] = f"data:image/png;base64,{image_b64}"
 
-        logger.info(f"Poe generate_video: model={model}, size={size}, seconds={create_body['seconds']}, has_image={'input_image' in create_body}")
+        logger.info(
+            f"Poe generate_video (api): model={model}, size={size}, "
+            f"seconds={create_body['seconds']}, has_image={'input_image' in create_body}"
+        )
 
         # Step 1: Create video
         create_response = await self.client.post(
@@ -158,6 +250,8 @@ class PoeProvider(ComfyUIProvider):
 
         video_bytes = download_response.content
         logger.info(f"Poe video downloaded: id={video_id}, size={len(video_bytes)} bytes")
+
+        return video_id, video_bytes
 
         return video_id, video_bytes
 
