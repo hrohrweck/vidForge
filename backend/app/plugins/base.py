@@ -14,8 +14,12 @@ images then per-scene videos then merge).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,6 +104,79 @@ class PluginBase(ABC):
     # Stage: generate images
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Retry helper
+    # ------------------------------------------------------------------
+
+    # Error substrings that indicate a transient / recoverable problem.
+    _RECOVERABLE_MARKERS: tuple[str, ...] = (
+        "overloaded",
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "429",
+        "503",
+        "502",
+        "timeout",
+        "timed out",
+        "connection",
+        "connectionerror",
+        "connection refused",
+        "temporary",
+        "retry",
+        "capacity",
+        "queue is full",
+        "server error",
+        "internal server error",
+        "no output data",
+        "returned no data",
+        "returned no image",
+        "returned no video",
+    )
+
+    @staticmethod
+    def _is_recoverable(exc: Exception) -> bool:
+        """Return True if *exc* looks like a transient error worth retrying."""
+        msg = str(exc).lower()
+        return any(marker in msg for marker in PluginBase._RECOVERABLE_MARKERS)
+
+    @staticmethod
+    async def _retry(
+        fn,
+        *args,
+        max_retries: int = 4,
+        base_delay: float = 10.0,
+        label: str = "operation",
+        **kwargs,
+    ):
+        """Call ``await fn(*args, **kwargs)`` with exponential backoff.
+
+        Retries up to *max_retries* times on recoverable errors.
+        Non-recoverable errors propagate immediately.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+                if not PluginBase._is_recoverable(exc):
+                    raise
+                if attempt >= max_retries:
+                    raise
+                delay = base_delay * (2 ** attempt)  # 10s, 20s, 40s, 80s
+                logger.warning(
+                    "[%s] Attempt %d/%d failed (recoverable): %s — "
+                    "retrying in %.0fs",
+                    label, attempt + 1, max_retries + 1, exc, delay,
+                )
+                await asyncio.sleep(delay)
+        raise last_exc  # should not reach here
+
+    # ------------------------------------------------------------------
+    # Stage: generate images
+    # ------------------------------------------------------------------
+
     async def generate_images(
         self,
         db: AsyncSession,
@@ -121,12 +198,14 @@ class PluginBase(ABC):
             if not prompt:
                 continue
             try:
-                image_path, _media_id, _provider_id = await generate_image(
+                image_path, _media_id, _provider_id = await self._retry(
+                    generate_image,
                     db=db,
                     job=job,
                     prompt=prompt,
                     scene_number=scene.scene_number,
                     provider_id=job.image_provider_id,
+                    label=f"image-s{scene.scene_number}",
                 )
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
@@ -184,12 +263,14 @@ class PluginBase(ABC):
                 if scene_duration <= max_clip_s + 0.5:
                     # ── Short scene: single clip ──────────────────────
                     duration = max(2, int(scene_duration))
-                    video_path, _, _, actual_duration = await generate_video(
+                    video_path, _, _, actual_duration = await self._retry(
+                        generate_video,
                         db=db, job=job, prompt=prompt,
                         scene_number=scene.scene_number,
                         reference_image_path=scene.reference_image_path,
                         provider_id=job.video_provider_id,
                         duration=duration, aspect_ratio=aspect_ratio,
+                        label=f"video-s{scene.scene_number}",
                     )
                     scene.generated_video_path = video_path
                     scene.duration = actual_duration
@@ -270,7 +351,8 @@ class PluginBase(ABC):
             )
             clip_duration = max(2, int(clip_duration))
 
-            sub_path, _, _, actual = await generate_video(
+            sub_path, _, _, actual = await self._retry(
+                generate_video,
                 db=db, job=job,
                 prompt=prompts[i],
                 scene_number=scene.scene_number,
@@ -278,6 +360,7 @@ class PluginBase(ABC):
                 provider_id=job.video_provider_id,
                 duration=clip_duration,
                 aspect_ratio=aspect_ratio,
+                label=f"video-s{scene.scene_number}.{i+1}/{num_clips}",
             )
             sub_clip_paths.append(str(storage / sub_path))
             total_actual_duration += actual
@@ -491,10 +574,12 @@ class PluginBase(ABC):
         prompt = scene.image_prompt or scene.visual_description or ""
         if not prompt:
             return None
-        image_path, _mid, _pid = await generate_image(
+        image_path, _mid, _pid = await self._retry(
+            generate_image,
             db=db, job=job, prompt=prompt,
             scene_number=scene.scene_number,
             provider_id=job.image_provider_id,
+            label=f"rerender-image-s{scene.scene_number}",
         )
         scene.reference_image_path = image_path
         scene.status = "image_ready"
@@ -525,13 +610,15 @@ class PluginBase(ABC):
             from app.services.media_generator import generate_video
             duration = max(2, int(scene_duration))
             prompt = scene.visual_description or scene.lyrics_segment or ""
-            video_path, _mid, _pid, actual_duration = await generate_video(
+            video_path, _mid, _pid, actual_duration = await self._retry(
+                generate_video,
                 db=db, job=job, prompt=prompt,
                 scene_number=scene.scene_number,
                 reference_image_path=scene.reference_image_path,
                 provider_id=job.video_provider_id,
                 duration=duration,
                 aspect_ratio=(job.input_data or {}).get("aspect_ratio", "16:9"),
+                label=f"rerender-video-s{scene.scene_number}",
             )
             scene.generated_video_path = video_path
             scene.duration = actual_duration
