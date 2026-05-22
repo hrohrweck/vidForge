@@ -808,3 +808,57 @@ async def get_export_options(
             "transition_type": "cut",
         },
     }
+
+
+@router.post("/{job_id}/cancel")
+async def cancel_job_operations(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Cancel all pending operations for a job.
+
+    Revoke any in-flight Celery tasks and reset the job to its last
+    stable stage so the user can safely resume.
+    """
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Revoke Celery tasks for this job
+    from app.workers.celery_app import celery_app
+    celery_app.control.revoke(f"job-{job_id}", terminate=True, signal="SIGTERM")
+
+    # Reset scenes that are mid-generation back to their last stable state
+    scene_result = await db.execute(
+        select(VideoScene).where(VideoScene.job_id == job_id)
+    )
+    scenes = scene_result.scalars().all()
+    for scene in scenes:
+        if scene.status == "generating":
+            if scene.generated_video_path:
+                scene.status = "completed"
+            elif scene.reference_image_path:
+                scene.status = "completed"
+            else:
+                scene.status = "pending"
+
+    # Reset job stage to the last stable checkpoint
+    current_stage = job.stage or "planned"
+    if current_stage == "generating_images":
+        job.stage = "planned"
+    elif current_stage == "generating_videos":
+        job.stage = "images_ready"
+    elif current_stage == "rendering":
+        job.stage = "videos_ready"
+
+    job.status = "pending"
+    job.error_message = None
+    await db.commit()
+
+    return {
+        "status": "cancelled",
+        "job_id": str(job_id),
+        "stage": job.stage,
+    }

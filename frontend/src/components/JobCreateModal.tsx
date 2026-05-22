@@ -77,7 +77,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       const workflowType = selectedTemplate?.config?.workflow_type
       if (workflowType === 'scene_based') {
-        navigate(`/editor/music/${job.id}`)
+        navigate(`/editor/${job.id}`)
       } else {
         onClose()
       }

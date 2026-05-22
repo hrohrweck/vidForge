@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { Plus, Video, Clock, CheckCircle, XCircle } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { jobsApi, templatesApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { data: jobs } = useQuery({
     queryKey: ['jobs'],
     queryFn: () => jobsApi.list({ limit: 5 }),
@@ -91,7 +92,11 @@ export default function Dashboard() {
             {jobs?.slice(0, 5).map((job) => {
               const StatusIcon = statusIcons[job.status] || Clock
               return (
-                <div key={job.id} className="p-4 flex items-center justify-between hover:bg-muted/50 transition-colors">
+                <div
+                  key={job.id}
+                  className="p-4 flex items-center justify-between hover:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/jobs/${job.id}`)}
+                >
                   <div className="flex items-center gap-3">
                     <StatusIcon
                       className="h-5 w-5 text-muted-foreground"

@@ -11,7 +11,7 @@ import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   RefreshCw, ChevronLeft, Image, Video, Download,
-  CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2,
+  CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2, XCircle,
 } from 'lucide-react'
 import {
   jobsApi, scenesApi, templatesApi, type VideoScene, type SceneUpdate,
@@ -39,6 +39,10 @@ const WORKFLOW_STAGES = [
   { id: 'rendering', label: 'Rendering', icon: Clock },
   { id: 'completed', label: 'Completed', icon: CheckCircle },
 ] as const
+
+const ACTIVE_STAGES = new Set([
+  'generating_images', 'generating_videos', 'rendering',
+])
 
 function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -106,6 +110,14 @@ export default function SceneEditor() {
     enabled: !!jobId && job?.stage === 'videos_ready',
   })
 
+  // ── Derived state ────────────────────────────────────────────────
+
+  /** True when a background pipeline (images, videos, rendering) is running */
+  const isOperationInProgress = useMemo(() => {
+    const stage = job?.stage || ''
+    return ACTIVE_STAGES.has(stage)
+  }, [job?.stage])
+
   // ── Mutations ─────────────────────────────────────────────────────
 
   const updateSceneMutation = useMutation({
@@ -150,6 +162,14 @@ export default function SceneEditor() {
     onSuccess: () => refetchScenes(),
   })
 
+  const cancelMutation = useMutation({
+    mutationFn: () => scenesApi.cancel(jobId!),
+    onSuccess: () => {
+      refetchScenes()
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] })
+    },
+  })
+
   // ── Full regeneration (re-plan + images + videos) ─────────────────
 
   const [isRegenerating, setIsRegenerating] = useState(false)
@@ -186,7 +206,6 @@ export default function SceneEditor() {
     job?.stage === 'planning' || (!scenesLoading && (!scenes || scenes.length === 0))
 
   // Detect when regeneration pipeline finishes
-  // Clear regenerating overlay when pipeline fully completes
   useEffect(() => {
     if (isRegenerating && job?.status === 'completed') {
       setIsRegenerating(false)
@@ -226,9 +245,22 @@ export default function SceneEditor() {
       <div className="bg-card rounded-lg border p-4 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Workflow Progress</h2>
-          <span className="text-sm font-medium text-primary">
-            Current Stage: {getCurrentStageLabel()}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-primary">
+              Current Stage: {getCurrentStageLabel()}
+            </span>
+            {isOperationInProgress && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => cancelMutation.mutate()}
+                disabled={cancelMutation.isPending}
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                {cancelMutation.isPending ? 'Cancelling…' : 'Cancel'}
+              </Button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 overflow-x-auto">
           {WORKFLOW_STAGES.map((stage, index) => {
@@ -265,7 +297,7 @@ export default function SceneEditor() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main content area */}
-        <div className={cn("lg:col-span-3 space-y-6", isRegenerating && "pointer-events-none opacity-50")}>
+        <div className={cn("lg:col-span-3 space-y-6", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
           {isPlanningStage() ? (
             /* Planning phase: delegate to plugin-specific panel */
             renderPlanningPanel(resolvedPluginId)
@@ -316,7 +348,7 @@ export default function SceneEditor() {
                     variant="outline"
                     size="sm"
                     onClick={() => createSceneMutation.mutate()}
-                    disabled={createSceneMutation.isPending}
+                    disabled={createSceneMutation.isPending || isOperationInProgress}
                     title="Add a new scene at the end"
                   >
                     <Plus className="h-4 w-4 mr-2" />
@@ -360,7 +392,7 @@ export default function SceneEditor() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            {!scene.reference_image_path && canGenerateImages() && (
+                            {!scene.reference_image_path && canGenerateImages() && !isOperationInProgress && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -371,7 +403,7 @@ export default function SceneEditor() {
                                 <Image className="h-4 w-4" />
                               </Button>
                             )}
-                            {scene.reference_image_path && !scene.generated_video_path && canGenerateVideos() && (
+                            {scene.reference_image_path && !scene.generated_video_path && canGenerateVideos() && !isOperationInProgress && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -382,27 +414,31 @@ export default function SceneEditor() {
                                 <Video className="h-4 w-4" />
                               </Button>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditingScene(scene)}
-                              title="Edit scene"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                if (confirm('Delete this scene?'))
-                                  deleteSceneMutation.mutate(scene.id)
-                              }}
-                              disabled={deleteSceneMutation.isPending}
-                              className="text-destructive hover:text-destructive"
-                              title="Delete scene"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {!isOperationInProgress && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setEditingScene(scene)}
+                                title="Edit scene"
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {!isOperationInProgress && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (confirm('Delete this scene?'))
+                                    deleteSceneMutation.mutate(scene.id)
+                                }}
+                                disabled={deleteSceneMutation.isPending}
+                                className="text-destructive hover:text-destructive"
+                                title="Delete scene"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </div>
 
@@ -413,9 +449,9 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Image Ready
                               </span>
-                            ) : scene.status === 'generating_image' ? (
+                            ) : scene.status === 'generating_image' || scene.status === 'generating' ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
-                                <Clock className="h-3 w-3" /> Generating...
+                                <Clock className="h-3 w-3" /> Generating Image…
                               </span>
                             ) : (
                               <span className="text-xs text-muted-foreground">No image</span>
@@ -426,9 +462,9 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Video Ready
                               </span>
-                            ) : scene.status === 'generating_video' ? (
+                            ) : scene.status === 'generating_video' || scene.status === 'generating' ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
-                                <Clock className="h-3 w-3" /> Generating...
+                                <Clock className="h-3 w-3" /> Generating Video…
                               </span>
                             ) : (
                               <span className="text-xs text-muted-foreground">No video</span>
@@ -436,14 +472,14 @@ export default function SceneEditor() {
                           </div>
                         </div>
 
-                        {/* Media preview */}
+                        {/* Media preview — show image AND video side by side */}
                         <div className="mt-3 flex gap-3">
-                          {/* Image thumbnail */}
-                          {scene.reference_image_path && !scene.generated_video_path && (
-                            <div className="relative group/img">
+                          {/* Image thumbnail — always show if available */}
+                          {scene.reference_image_path && (
+                            <div className="relative">
                               <img
                                 src={`/api/uploads/stream/${scene.reference_image_path}`}
-                                alt={`Scene ${index + 1}`}
+                                alt={`Scene ${index + 1} image`}
                                 className="h-24 object-cover rounded-lg border"
                               />
                               <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">
@@ -451,7 +487,7 @@ export default function SceneEditor() {
                               </span>
                             </div>
                           )}
-                          {/* Video player */}
+                          {/* Video player — shown next to image */}
                           {scene.generated_video_path && (
                             <div className="relative">
                               <video
@@ -461,7 +497,6 @@ export default function SceneEditor() {
                                 muted
                                 preload="metadata"
                                 onError={(e) => {
-                                  // Fallback: try with different URL pattern
                                   const vid = e.currentTarget
                                   if (!vid.dataset.retried) {
                                     vid.dataset.retried = '1'
@@ -489,7 +524,7 @@ export default function SceneEditor() {
                       regenerateAllMutation.mutate()
                     }
                   }}
-                  disabled={regenerateAllMutation.isPending || isRegenerating}
+                  disabled={regenerateAllMutation.isPending || isRegenerating || isOperationInProgress}
                 >
                   <RefreshCw className={cn("h-4 w-4 mr-2", (regenerateAllMutation.isPending || isRegenerating) && "animate-spin")} />
                   {isRegenerating ? 'Regenerating...' : 'Regenerate All'}
@@ -506,7 +541,7 @@ export default function SceneEditor() {
         </div>
 
         {/* Sidebar: plugin-specific panel */}
-        <div className={cn("space-y-4", isRegenerating && "pointer-events-none opacity-50")}>
+        <div className={cn("space-y-4", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
           {resolvedPluginId === 'music_video' && (
             <MusicVideoPanel job={job} jobId={jobId!} scenes={scenes} />
           )}

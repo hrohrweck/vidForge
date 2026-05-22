@@ -726,6 +726,13 @@ export const scenesApi = {
     )
     return response.data
   },
+
+  cancel: async (jobId: string) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/jobs/${jobId}/cancel`
+    )
+    return response.data
+  },
 }
 
 export interface ModelConfig {

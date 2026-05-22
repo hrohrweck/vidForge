@@ -116,7 +116,11 @@ export default function Jobs() {
               </tr>
             ) : (
               jobs?.map((job) => (
-                <tr key={job.id} className="hover:bg-muted/50 transition-colors">
+                <tr
+                  key={job.id}
+                  className="hover:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/jobs/${job.id}`)}
+                >
                   <td className="px-6 py-4 font-mono text-xs">
                     {job.id.slice(0, 8)}...
                   </td>
@@ -136,14 +140,17 @@ export default function Jobs() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/jobs/${job.id}`)}
+                      onClick={(e) => { e.stopPropagation(); navigate(`/jobs/${job.id}`) }}
                     >
                       View
                     </Button>
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => navigate(`/editor/music/${job.id}`)}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/editor/${job.id}`)
+                      }}
                     >
                       Edit
                     </Button>
@@ -151,7 +158,7 @@ export default function Jobs() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => retryMutation.mutate(job.id)}
+                        onClick={(e) => { e.stopPropagation(); retryMutation.mutate(job.id) }}
                         disabled={retryMutation.isPending}
                       >
                         <RotateCcw className="h-4 w-4" />
@@ -160,7 +167,8 @@ export default function Jobs() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         if (confirm('Are you sure you want to delete this job?')) {
                           deleteMutation.mutate(job.id)
                         }
