@@ -92,8 +92,7 @@ export default function Jobs() {
         <table className="w-full text-sm text-left">
           <thead className="bg-muted/50 text-muted-foreground">
             <tr>
-              <th className="px-6 py-3 font-medium">ID</th>
-              <th className="px-6 py-3 font-medium">Template</th>
+              <th className="px-6 py-3 font-medium">Title</th>
               <th className="px-6 py-3 font-medium">Status</th>
               <th className="px-6 py-3 font-medium">Cost</th>
               <th className="px-6 py-3 font-medium">Created</th>
@@ -121,10 +120,9 @@ export default function Jobs() {
                   className="hover:bg-muted/50 transition-colors cursor-pointer"
                   onClick={() => navigate(`/jobs/${job.id}`)}
                 >
-                  <td className="px-6 py-4 font-mono text-xs">
-                    {job.id.slice(0, 8)}...
+                  <td className="px-6 py-4 font-medium">
+                    {job.title || job.id.slice(0, 8)}
                   </td>
-                  <td className="px-6 py-4 font-medium">{job.template_id}</td>
                   <td className="px-6 py-4">
                     <Badge variant={statusVariants[job.status] || 'default'}>
                       {job.status}

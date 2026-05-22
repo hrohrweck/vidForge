@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.config import get_settings
 from app.database import Job, Template, User, get_db
 from app.workers.tasks import process_scene_video_job, process_video_job
 
@@ -17,6 +18,7 @@ router = APIRouter()
 
 
 class JobCreate(BaseModel):
+    title: str = "Untitled Video"
     template_id: UUID | None = None
     project_id: UUID | None = None
     input_data: dict[str, Any] | None = None
@@ -70,6 +72,7 @@ def _normalize_provider_preference(value: str) -> str:
 
 class JobResponse(BaseModel):
     id: UUID
+    title: str
     project_id: UUID | None = None
     status: str
     stage: str
@@ -122,6 +125,7 @@ async def create_job(
     provider_preference = _normalize_provider_preference(job_data.provider_preference)
 
     job = Job(
+        title=job_data.title,
         user_id=current_user.id,
         template_id=job_data.template_id,
         input_data=job_data.input_data or {},
@@ -337,3 +341,58 @@ async def create_jobs_from_csv(
                 process_video_job.delay(str(job_id), provider_preference=provider_preference)
 
     return {"created_count": len(jobs), "job_ids": [str(j) for j in job_ids]}
+
+
+@router.get("/{job_id}/download")
+async def download_job_output(
+    job_id: UUID,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the final exported video for a completed job.
+
+    Accepts auth via ``?token=`` query param for browser-initiated downloads.
+    """
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from jose import jwt as pyjwt
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    settings = get_settings()
+    current_user: User | None = None
+
+    try:
+        payload = pyjwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = payload.get("sub")
+        if user_id:
+            result = await db.execute(select(User).where(User.id == UUID(user_id)))
+            current_user = result.scalar_one_or_none()
+    except Exception:
+        pass
+
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.output_path:
+        raise HTTPException(status_code=404, detail="Job has no output file")
+
+    file_path = Path(settings.storage_path) / job.output_path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Output file not found on disk")
+
+    safe_title = "".join(c for c in job.title if c.isalnum() or c in " -_").strip() or "video"
+    ext = file_path.suffix or ".mp4"
+    filename = f"{safe_title}{ext}"
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="video/mp4",
+        filename=filename,
+    )

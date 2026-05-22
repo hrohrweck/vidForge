@@ -27,6 +27,7 @@ interface TemplateInput {
 export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [title, setTitle] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
@@ -119,7 +120,9 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   }
 
   const handleSubmit = () => {
+    if (!title.trim()) return
     createMutation.mutate({
+      title: title.trim(),
       template_id: selectedTemplateId || undefined,
       project_id: selectedProjectId || undefined,
       input_data: { ...inputValues, ...uploadedFiles },
@@ -235,6 +238,17 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         </div>
 
         <div className="p-6 space-y-6">
+          {/* Video Title — mandatory */}
+          <div className="space-y-2">
+            <Label>Video Title <span className="text-destructive">*</span></Label>
+            <Input
+              placeholder="Enter a title for your video"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+
           <div className="space-y-2">
             <Label>Project</Label>
             {!isCreatingProject ? (
@@ -369,7 +383,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMutation.isPending || !selectedTemplateId}
+            disabled={createMutation.isPending || !selectedTemplateId || !title.trim()}
           >
             {createMutation.isPending && (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />

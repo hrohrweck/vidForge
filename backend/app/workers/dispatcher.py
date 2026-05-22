@@ -147,7 +147,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                             )
                             await _create_asset_from_file(
                                 user_id=job.user_id, folder_id=folder.id,
-                                name=f"Final Export - {str(job.id)[:8]}",
+                                name=job.title,
                                 file_path=final_path, file_type="video",
                                 source_job_id=job.id, db=db,
                                 project_id=job.project_id,

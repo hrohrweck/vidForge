@@ -102,7 +102,7 @@ export default function Dashboard() {
                       className="h-5 w-5 text-muted-foreground"
                     />
                     <div>
-                      <p className="font-medium">{job.id.slice(0, 8)}...</p>
+                      <p className="font-medium">{job.title || job.id.slice(0, 8)}</p>
                       <p className="text-sm text-muted-foreground">
                         {new Date(job.created_at).toLocaleDateString()}
                       </p>

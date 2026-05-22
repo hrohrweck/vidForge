@@ -175,6 +175,7 @@ export interface GroupUpdateRequest {
 
 export interface Job {
   id: string
+  title: string
   status: string
   stage: string
   progress: number
@@ -198,6 +199,7 @@ export interface Job {
 }
 
 export interface CreateJobRequest {
+  title?: string
   template_id?: string
   project_id?: string
   input_data?: Record<string, unknown>
@@ -308,6 +310,12 @@ export const jobsApi = {
     return response.data
   },
   delete: (id: string) => api.delete(`/jobs/${id}`),
+
+  downloadUrl: (id: string) => {
+    // Returns a URL that triggers a browser download with Content-Disposition
+    const token = localStorage.getItem('token')
+    return `/api/jobs/${id}/download?token=${token}`
+  },
 }
 
 export const templatesApi = {

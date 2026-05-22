@@ -58,6 +58,7 @@ export default function SceneEditor() {
 
   const [editingScene, setEditingScene] = useState<VideoScene | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [pendingDownload, setPendingDownload] = useState(false)
 
   // ── Data fetching ─────────────────────────────────────────────────
 
@@ -213,6 +214,20 @@ export default function SceneEditor() {
     }
   }, [isRegenerating, job?.status])
 
+  // Auto-download after export completes
+  useEffect(() => {
+    if (pendingDownload && job?.status === 'completed' && job?.output_path) {
+      setPendingDownload(false)
+      const url = jobsApi.downloadUrl(job.id)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = ''
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    }
+  }, [pendingDownload, job?.status, job?.output_path, job?.id])
+
   // ── Loading state ─────────────────────────────────────────────────
 
   if (jobLoading) {
@@ -234,10 +249,12 @@ export default function SceneEditor() {
           Back
         </Button>
         <h1 className="text-2xl font-bold">
-          {resolvedPluginId === 'music_video' && 'Music Video Editor'}
-          {resolvedPluginId === 'prompt_to_video' && 'Prompt to Video Editor'}
-          {resolvedPluginId === 'script_to_video' && 'Script to Video Editor'}
-          {!['music_video', 'prompt_to_video', 'script_to_video'].includes(resolvedPluginId) && 'Scene Editor'}
+          {job?.title || (
+            resolvedPluginId === 'music_video' ? 'Music Video Editor' :
+            resolvedPluginId === 'prompt_to_video' ? 'Prompt to Video Editor' :
+            resolvedPluginId === 'script_to_video' ? 'Script to Video Editor' :
+            'Scene Editor'
+          )}
         </h1>
       </div>
 
@@ -606,6 +623,7 @@ export default function SceneEditor() {
           onClose={() => setShowExportModal(false)}
           onExported={() => {
             setShowExportModal(false)
+            setPendingDownload(true)
             queryClient.invalidateQueries({ queryKey: ['job', jobId] })
           }}
         />
