@@ -11,10 +11,13 @@ VidForge is a web application for automated social media video generation using 
 - **Frontend**: React + TypeScript + Vite
 - **Backend**: FastAPI (Python 3.11+)
 - **Database**: PostgreSQL 16
-- **Queue**: Redis + Celery
-- **Video Generation**: ComfyUI with Wan2.2 model
-- **Audio Generation**: AudioCraft/MusicGen
-- **LLM**: Ollama or lemonade-server
+- **Queue**: Redis + Celery (prefork pool, shared WorkerContext)
+- **Video Generation**: ComfyUI with Wan2.2 model (848×480, 30 steps, 16fps)
+- **Image Generation**: ComfyUI with Flux.1-schnell; Poe (GPT-Image, Wan 2.7 Image)
+- **Audio Generation**: AudioCraft/MusicGen (CPU container)
+- **TTS**: edge-tts for narration
+- **LLM**: Ollama (Qwen 3.6, Llama 3.3) or Poe (GLM 5.1)
+- **Providers**: comfyui_direct, poe, runpod (extensible)
 
 ## Code Style
 
@@ -108,78 +111,105 @@ vidforge/
 │   │   ├── api/        # API client and types
 │   │   ├── components/ # React components
 │   │   ├── pages/      # Page components
+│   │   │   └── editor/ # Plugin-specific editor panels
 │   │   ├── hooks/      # Custom hooks
 │   │   └── stores/     # Zustand stores
+│   ├── e2e/            # Playwright E2E tests
 │   └── package.json
 ├── backend/
 │   ├── app/
 │   │   ├── api/        # FastAPI routers
-│   │   ├── models/     # SQLAlchemy models
-│   │   ├── services/   # Business logic
-│   │   ├── workers/    # Celery tasks
-│   │   └── storage/    # Storage backends
-│   ├── templates/      # Video templates (YAML)
-│   ├── styles/         # Style presets (YAML)
+│   │   ├── comfyui/    # ComfyUI workflow JSON files
+│   │   ├── database.py # SQLAlchemy models + engine
+│   │   ├── plugins/    # Plugin registry and base class
+│   │   │   ├── base.py    # PluginBase ABC
+│   │   │   └── registry.py
+│   │   ├── services/  # Business logic
+│   │   │   ├── media_generator.py  # Image/video generation
+│   │   │   ├── video_processor.py  # FFmpeg operations
+│   │   │   ├── llm_service.py      # LLM client
+│   │   │   ├── model_config.py     # Model preferences
+│   │   │   └── providers/          # AI provider implementations
+│   │   ├── workers/    # Celery tasks + context
+│   │   └── storage/    # Storage backends (local, S3, SSH)
+│   ├── plugins/        # Template plugin packages
+│   │   ├── music_video/
+│   │   ├── prompt_to_video/
+│   │   └── script_to_video/
+│   ├── tests/          # Unit and integration tests
 │   └── requirements.txt
 ├── docker/             # Docker configurations
+│   ├── audiocraft/     # MusicGen container
+│   ├── nginx/         # Reverse proxy config
+│   └── docker-compose.yml
 ├── docs/               # Documentation
+│   ├── CELERY_REFACTOR.md
+│   ├── DEPLOYMENT.md
+│   ├── PLUGIN_ARCHITECTURE.md
+│   ├── WRITING_PLUGINS.md
+│   └── WRITING_PROVIDERS.md
 └── scripts/            # Utility scripts
 ```
 
 ## Key Patterns
+
+### Plugin Pattern
+Every template type is a plugin in `backend/plugins/`. Plugins extend
+`PluginBase` (in `app/plugins/base.py`) and implement pipeline stages:
+
+```python
+class PluginBase(ABC):
+    async def enrich_inputs(self, db, job, context) -> dict: ...
+    async def plan_scenes(self, db, job, context) -> dict: ...
+    async def generate_images(self, db, job, scenes, context) -> dict: ...
+    async def generate_videos(self, db, job, scenes, context) -> dict: ...
+    async def render(self, db, job, scenes, context) -> dict: ...
+```
+
+Sensible defaults are provided — plugins only need to implement
+`plan_scenes()` and `get_template_definition()`. See
+[docs/WRITING_PLUGINS.md](docs/WRITING_PLUGINS.md).
+
+### Celery Task Pattern
+All tasks use `ctx.run()` to execute async code on the shared WorkerContext:
+
+```python
+@celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
+def my_task(self, job_id: str):
+    return ctx.run(_my_task(job_id))
+
+async def _my_task(job_id: str):
+    async with ctx.session_factory() as db:
+        ...  # use shared engine/redis
+```
+
+Never use `asyncio.run()` in tasks. See [docs/CELERY_REFACTOR.md](docs/CELERY_REFACTOR.md).
+
+### Provider Pattern
+AI providers extend `ComfyUIProvider` in `app/services/providers/`:
+
+```python
+class ComfyUIProvider(ABC):
+    async def initialize(self, config: dict) -> None: ...
+    async def queue_prompt(self, workflow: dict) -> str: ...
+    async def wait_for_completion(self, job_id: str) -> dict: ...
+    async def get_output(self, result: dict) -> bytes | None: ...
+```
+
+Direct API providers (like Poe) also implement `generate_image()` and
+`generate_video()`. See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md).
 
 ### Storage Backend Pattern
 ```python
 class StorageBackend(ABC):
     @abstractmethod
     async def upload(self, path: str, data: bytes) -> str: ...
-    
     @abstractmethod
     async def download(self, path: str) -> bytes: ...
-    
     @abstractmethod
     async def delete(self, path: str) -> None: ...
-    
     @abstractmethod
     async def list_files(self, prefix: str) -> list[str]: ...
-```
-
-### Job Processing Pattern
-```python
-@celery_app.task(bind=True)
-def process_video_job(self, job_id: str):
-    job = Job.get(job_id)
-    job.status = "processing"
-    job.save()
-    
-    try:
-        # Process steps
-        for step in pipeline:
-            self.update_state(state='PROGRESS', meta={'step': step.name})
-            execute_step(step)
-        
-        job.status = "completed"
-    except Exception as e:
-        job.status = "failed"
-        job.error_message = str(e)
-    finally:
-        job.save()
-```
-
-### Template Definition Pattern
-```yaml
-name: Template Name
-description: Template description
-inputs:
-  - name: input_name
-    type: file|text|number|select
-    required: true|false
-    default: default_value
-pipeline:
-  - step: step_name
-    model: model_id
-    params:
-      key: value
 ```
 
 ## Environment Variables
@@ -190,7 +220,8 @@ DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/vidforge
 REDIS_URL=redis://localhost:6379/0
 SECRET_KEY=your-secret-key
 COMFYUI_URL=http://comfyui:8188
-OLLAMA_URL=http://localhost:11435  # match OLLAMA_PORT in docker/.env (default 11435; use 11434 for a native install)
+OLLAMA_URL=http://ollama:11434
+AUDIOCRAFT_URL=http://audiocraft:5000
 STORAGE_BACKEND=local|s3|ssh
 # S3 config (if STORAGE_BACKEND=s3)
 S3_ENDPOINT=...
@@ -211,33 +242,44 @@ VITE_WS_URL=ws://localhost:8000
 
 ## Common Tasks
 
-### Adding a New Template
-1. Create YAML file in `backend/templates/`
-2. Define inputs, pipeline steps, and outputs
-3. Register template in template service
-4. Add any new step handlers in workers
-5. Test the template end-to-end with a sample job
+### Adding a New Template Plugin
+1. Create plugin package in `backend/plugins/my_template/`
+2. Implement `MyTemplatePlugin(PluginBase)` with `plugin_id`, `display_name`, `get_template_definition()`, `plan_scenes()`
+3. Add `create_plugin()` to `__init__.py`
+4. (Optional) Add frontend panel in `frontend/src/pages/editor/`
+5. Restart backend — plugin is auto-discovered
+6. Test end-to-end: create job → plan scenes → generate media → export
+See [docs/WRITING_PLUGINS.md](docs/WRITING_PLUGINS.md) for full guide.
+
+### Adding a New AI Provider
+1. Create provider class in `backend/app/services/providers/your_provider.py`
+2. Extend `ComfyUIProvider`, implement `initialize()` + `generate_image()`/`generate_video()`
+3. Register type in `get_provider_instance()` in `media_generator.py`
+4. Add routing logic in `_resolve_image_provider()`/`_resolve_video_provider()`
+5. Add provider via Admin UI, configure models
+6. Test by selecting your model in Settings → AI Models
+See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md) for full guide.
 
 ### Adding a New Storage Backend
 1. Create new class in `backend/app/storage/` extending `StorageBackend`
 2. Register in storage factory
 3. Add configuration schema to settings
 4. Update frontend settings page
-5. Write unit tests for the storage backend (upload, download, delete, list operations)
+5. Write unit tests (upload, download, delete, list operations)
 
 ### Adding a New API Endpoint
 1. Create or update router in `backend/app/api/`
 2. Define Pydantic schemas for request/response
 3. Implement service logic
-4. Write tests if the endpoint has business logic or complex validation
+4. Write tests for business logic or complex validation
 5. Test authentication/authorization requirements
 
 ### Adding a New Frontend Page
 1. Create component in `frontend/src/pages/`
-2. Add route in router configuration
+2. Add route in router configuration (`App.tsx`)
 3. Add navigation item if needed
 4. Implement API integration with React Query
-5. Write component tests for complex user interactions (forms, modals)
+5. Write component tests for complex interactions
 
 ## Testing
 
@@ -413,9 +455,11 @@ Tests should run automatically on:
 
 ## Deployment Notes
 
+- 9 Docker containers: nginx, frontend, backend, worker, postgres, redis, comfyui, ollama, audiocraft
 - ComfyUI runs in a separate container with ROCm support
-- Jobs are processed FIFO by default
-- Previews are generated at 480p 15fps for full renders
+- Wan 2.2 generates ~5s clips at 848×480 16fps; scenes >5s are auto-split into chained sub-clips
+- Jobs are processed FIFO by default; workers can be scaled horizontally
+- All media generation has retry with exponential backoff (4 retries)
 - Use nginx as reverse proxy in production
 - Enable HTTPS with Let's Encrypt
 
@@ -423,5 +467,6 @@ Tests should run automatically on:
 
 - Single GPU constraint requires job queuing
 - AMD ROCm support is evolving; check compatibility
-- Long videos require segment merging
+- Wan 2.2 max ~5s per clip (mitigated by automatic sub-clip chaining)
+- MusicGen runs on CPU — ~30-45s per 5s of audio
 - Preview generation adds processing time

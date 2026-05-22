@@ -5,16 +5,30 @@ This guide covers deploying VidForge to production.
 ## Prerequisites
 
 - Docker and Docker Compose v2+
-- PostgreSQL 16 (or use the included Docker service)
-- Redis 7 (or use the included Docker service)
+- 128GB RAM recommended (for local AI models)
 - (Optional) AMD GPU with ROCm support for ComfyUI
+- (Optional) External AI API keys (Poe, Replicate, etc.)
 - Reverse proxy (nginx, Traefik, or Caddy) for SSL termination
+
+## Architecture
+
+VidForge runs as 9 Docker containers:
+
+| Service | Port | Purpose |
+|---|---|---|
+| `nginx` | 80 | Reverse proxy (frontend + backend) |
+| `frontend` | 3000 | React app (built by Vite) |
+| `backend` | 8000 | FastAPI REST API |
+| `worker` | — | Celery task processor |
+| `postgres` | 5432 | PostgreSQL 16 database |
+| `redis` | 6379 | Task queue + WebSocket pub/sub |
+| `comfyui` | 8188 | ComfyUI image/video generation |
+| `ollama` | 11434 | LLM inference (Qwen, Llama) |
+| `audiocraft` | 5000 | MusicGen audio generation (CPU) |
 
 ## Environment Configuration
 
-### Backend Environment Variables
-
-Create a `.env` file in the `backend/` directory:
+### Backend (`backend/.env`)
 
 ```bash
 # Database
@@ -29,67 +43,49 @@ SECRET_KEY=your-very-secure-secret-key-at-least-32-chars
 # ComfyUI
 COMFYUI_URL=http://comfyui:8188
 
-# Storage (choose one)
+# Storage
 STORAGE_BACKEND=local  # or s3, ssh
 STORAGE_PATH=/app/storage
 
-# S3 Storage (if STORAGE_BACKEND=s3)
+# LLM Service
+# Match OLLAMA_PORT in docker/.env (default 11435; use 11434 for native install)
+OLLAMA_URL=http://ollama:11434
+
+# AudioCraft (MusicGen)
+AUDIOCRAFT_URL=http://audiocraft:5000
+
+# Optional: S3 storage
 S3_ENDPOINT=https://s3.amazonaws.com
 S3_ACCESS_KEY=your-access-key
 S3_SECRET_KEY=your-secret-key
 S3_BUCKET=vidforge-storage
 S3_REGION=us-east-1
 
-# SSH Storage (if STORAGE_BACKEND=ssh)
+# Optional: SSH storage
 SSH_HOST=your-server.com
 SSH_USER=vidforge
 SSH_KEY_PATH=/app/ssh_key
 SSH_REMOTE_PATH=/var/lib/vidforge/storage
-
-# LLM Service
-# Match OLLAMA_PORT in docker/.env (default 11435). Use 11434 only for a native install.
-OLLAMA_URL=http://localhost:11435
 
 # Optional
 DEBUG=false
 ALLOWED_ORIGINS=https://yourdomain.com
 ```
 
-### Frontend Environment Variables
-
-Create a `.env` file in the `frontend/` directory:
+### Frontend (`frontend/.env`)
 
 ```bash
 VITE_API_URL=https://api.yourdomain.com
 VITE_WS_URL=wss://api.yourdomain.com
 ```
 
-### Docker Compose Production Override
+### Docker (`docker/.env`)
 
-Create `docker-compose.prod.yml`:
-
-```yaml
-services:
-  backend:
-    environment:
-      - DEBUG=false
-    restart: always
-    
-  worker:
-    environment:
-      - DEBUG=false
-    restart: always
-    deploy:
-      replicas: 2  # Scale workers
-      
-  frontend:
-    restart: always
-    
-  postgres:
-    restart: always
-    
-  redis:
-    restart: always
+```bash
+COMFYUI_MODELS_PATH=../models/comfyui
+COMFYUI_OUTPUT_PATH=../models/comfyui-output
+OLLAMA_MODELS_PATH=../models/ollama
+OLLAMA_PORT=11435
 ```
 
 ## Deployment Steps
@@ -97,20 +93,15 @@ services:
 ### 1. Prepare Environment
 
 ```bash
-# Clone repository
 git clone <your-repo-url>
 cd vidforge
 
-# Create environment files
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
-
-# Edit environment files with production values
-nano backend/.env
-nano frontend/.env
+# Edit both .env files with production values
 ```
 
-### 2. Build and Start Services
+### 2. Build and Start
 
 ```bash
 cd docker
@@ -121,7 +112,7 @@ docker-compose build
 # Start services
 docker-compose up -d
 
-# Check status
+# Verify all services are healthy
 docker-compose ps
 ```
 
@@ -135,12 +126,26 @@ docker-compose exec backend alembic upgrade head
 docker-compose exec backend python -m app.cli createsuperuser
 ```
 
-### 4. Configure Reverse Proxy
+### 4. Configure AI Models
+
+1. **ComfyUI**: Download model files to the path specified in `COMFYUI_MODELS_PATH`:
+   - Wan 2.2 ti2v model (video generation)
+   - Flux.1-schnell (image generation)
+   - UMT5 CLIP, VAE
+
+2. **Ollama**: Models are auto-pulled on first use, or pre-download:
+   ```bash
+   docker-compose exec ollama ollama pull qwen3:32b
+   ```
+
+3. **Poe** (optional): Add a Poe provider via Admin → Providers with your
+   API key. Configure Poe models in the provider settings.
+
+### 5. Configure Reverse Proxy
 
 #### Nginx Example
 
 ```nginx
-# /etc/nginx/sites-available/vidforge
 server {
     listen 80;
     server_name yourdomain.com;
@@ -153,6 +158,8 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    client_max_body_size 500M;  # Video uploads can be large
 
     # Frontend
     location / {
@@ -168,10 +175,8 @@ server {
     location /api {
         proxy_pass http://localhost:8000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Real-IP $http_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
@@ -183,37 +188,51 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400;
     }
 
-    # Uploads
+    # Uploaded media (direct file access)
     location /uploads {
         proxy_pass http://localhost:8000;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-### 5. SSL Certificates (Let's Encrypt)
+### 6. SSL Certificates
 
 ```bash
-# Install certbot
 sudo apt install certbot python3-certbot-nginx
-
-# Obtain certificates
 sudo certbot --nginx -d yourdomain.com
-
-# Auto-renewal
 sudo certbot renew --dry-run
 ```
 
-### 6. Monitoring and Logs
+## Scaling
+
+### Workers
+
+Scale Celery workers based on CPU cores:
+
+```bash
+docker-compose up -d --scale worker=4
+```
+
+### External Services
+
+For production, consider external managed services:
+
+- **PostgreSQL**: AWS RDS, Cloud SQL, or managed Postgres
+- **Redis**: AWS ElastiCache or Redis Cloud
+- Update `DATABASE_URL` and `REDIS_URL` accordingly
+
+### GPU Support
+
+```bash
+# Start with ComfyUI ROCm support
+docker-compose --profile rocm up -d
+```
+
+## Monitoring
 
 ```bash
 # View logs
@@ -225,151 +244,56 @@ docker-compose ps
 
 # Monitor resource usage
 docker stats
-```
 
-## Scaling
-
-### Horizontal Scaling
-
-```bash
-# Scale workers
-docker-compose up -d --scale worker=4
-
-# Use external PostgreSQL for better performance
-# Update DATABASE_URL to point to external instance
-```
-
-### GPU Support
-
-```bash
-# Start with ComfyUI ROCm support
-docker-compose --profile rocm up -d
+# Health checks
+curl http://localhost:8000/api/health
+docker-compose exec postgres pg_isready -U vidforge
+docker-compose exec redis redis-cli ping
 ```
 
 ## Backup and Recovery
 
-### Database Backup
+### Database
 
 ```bash
-# Create backup
+# Backup
 docker-compose exec postgres pg_dump -U vidforge vidforge > backup_$(date +%Y%m%d).sql
 
-# Restore backup
+# Restore
 cat backup_20240101.sql | docker-compose exec -T postgres psql -U vidforge vidforge
 ```
 
-### Storage Backup
+### Storage
 
 ```bash
 # Backup storage volume
-docker run --rm -v vidforge-storage:/data -v $(pwd):/backup alpine tar czf /backup/storage_backup.tar.gz /data
+docker run --rm \
+  -v vidforge-storage:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/storage_backup.tar.gz /data
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Database connection errors**
-   - Check PostgreSQL is running: `docker-compose ps postgres`
-   - Verify DATABASE_URL is correct
-   - Check PostgreSQL logs: `docker-compose logs postgres`
-
-2. **Worker not processing jobs**
-   - Check Redis connection: `docker-compose exec redis redis-cli ping`
-   - Check worker logs: `docker-compose logs worker`
-   - Verify Celery is running: `docker-compose exec worker celery -A app.workers inspect active`
-
-3. **GPU not detected**
-   - Verify ROCm is installed on host
-   - Check device permissions: `ls -la /dev/kfd /dev/dri`
-   - Use `--profile rocm` flag when starting
-
-### Health Checks
-
-```bash
-# Backend health
-curl http://localhost:8000/api/health
-
-# Database health
-docker-compose exec postgres pg_isready -U vidforge
-
-# Redis health
-docker-compose exec redis redis-cli ping
-```
+| Issue | Solution |
+|---|---|
+| Database connection errors | Check PostgreSQL is running; verify `DATABASE_URL` |
+| Worker not processing | Check Redis: `redis-cli ping`; check worker logs |
+| GPU not detected | Verify ROCm installed; check `/dev/kfd /dev/dri` permissions |
+| Videos too short | Check scene durations; Wan 2.2 maxes at ~5s per clip (auto-chained for longer scenes) |
+| Poe models not showing | Add Poe provider in Admin; configure models; check API key |
+| Out of memory | Reduce `wan_video_steps` in provider config; use shorter scenes |
 
 ## Security Checklist
 
 - [ ] Change all default passwords
-- [ ] Generate secure SECRET_KEY (32+ characters)
+- [ ] Generate secure `SECRET_KEY` (32+ characters)
 - [ ] Enable HTTPS with valid SSL certificate
 - [ ] Configure firewall rules
 - [ ] Set up database backups
-- [ ] Review and update CORS settings
-- [ ] Enable rate limiting
-- [ ] Set up monitoring and alerts
+- [ ] Review CORS settings (`ALLOWED_ORIGINS`)
+- [ ] Set `DEBUG=false` in production
 - [ ] Configure log rotation
 - [ ] Regular security updates
-
-## Performance Tuning
-
-### PostgreSQL
-
-```sql
--- Recommended settings (adjust based on available RAM)
-ALTER SYSTEM SET shared_buffers = '256MB';
-ALTER SYSTEM SET effective_cache_size = '1GB';
-ALTER SYSTEM SET maintenance_work_mem = '64MB';
-ALTER SYSTEM SET checkpoint_completion_target = '0.9';
-ALTER SYSTEM SET wal_buffers = '16MB';
-ALTER SYSTEM SET default_statistics_target = '100';
-ALTER SYSTEM SET random_page_cost = '1.1';
-ALTER SYSTEM SET effective_io_concurrency = '200';
-ALTER SYSTEM SET work_mem = '2621kB';
-ALTER SYSTEM SET min_wal_size = '1GB';
-ALTER SYSTEM SET max_wal_size = '4GB';
-```
-
-### Redis
-
-```bash
-# /etc/redis/redis.conf
-maxmemory 2gb
-maxmemory-policy allkeys-lru
-```
-
-### Celery Workers
-
-```yaml
-# Scale based on CPU cores
-docker-compose up -d --scale worker=$(nproc)
-```
-
-## Maintenance
-
-### Updates
-
-```bash
-# Pull latest changes
-git pull
-
-# Rebuild and restart
-docker-compose build
-docker-compose up -d
-
-# Run migrations
-docker-compose exec backend alembic upgrade head
-```
-
-### Log Rotation
-
-Docker automatically handles log rotation, but you can configure limits:
-
-```yaml
-services:
-  backend:
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
