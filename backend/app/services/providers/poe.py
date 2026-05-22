@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import re
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
@@ -229,6 +230,7 @@ class PoeProvider(ComfyUIProvider):
         if not content:
             return None
 
+        # 1. Try JSON-structured response
         try:
             data = json.loads(content)
             if isinstance(data, dict):
@@ -237,27 +239,52 @@ class PoeProvider(ComfyUIProvider):
                 elif "video_base64" in data:
                     return base64.b64decode(data["video_base64"])
                 elif "image_url" in data:
-                    # Download image from URL
                     return self._sync_download(data["image_url"])
                 elif "video_url" in data:
                     return self._sync_download(data["video_url"])
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # Check for inline data URIs
-        if "data:image" in content or "data:video" in content:
-            return None
+        # 2. Parse Markdown image syntax: ![alt](url)
+        md_match = re.search(r"!\[[^\]]*\]\((https?://[^\s)]+)\)", content)
+        if md_match:
+            result = self._sync_download(md_match.group(1))
+            if result:
+                return result
+
+        # 3. Parse bare URL (poecdn.net, etc.)
+        url_pat = r'(https?://\S+\.(?:png|jpg|jpeg|webp|gif|mp4|webm))'
+        url_match = re.search(url_pat, content, re.IGNORECASE)
+        if not url_match:
+            # Broader: any URL on a known CDN domain
+            url_match = re.search(r'(https?://\S+poecdn\S+)', content)
+        if not url_match:
+            # Even broader: any URL that looks like a media URL
+            url_match = re.search(
+                r'(https?://\S+/(?:image|video|media|base)/\S+)',
+                content, re.IGNORECASE,
+            )
+        if url_match:
+            result = self._sync_download(url_match.group(1))
+            if result:
+                return result
 
         return None
 
     @staticmethod
     def _sync_download(url: str) -> bytes | None:
         """Download content from a URL synchronously."""
+        import logging
+        logger = logging.getLogger(__name__)
         try:
             import urllib.request
-            with urllib.request.urlopen(url, timeout=60) as resp:
-                return resp.read()
-        except Exception:
+            req = urllib.request.Request(url, headers={"User-Agent": "VidForge/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = resp.read()
+                logger.debug(f"Downloaded {len(data)} bytes from {url[:80]}")
+                return data
+        except Exception as e:
+            logger.warning(f"Failed to download {url[:80]}: {e}")
             return None
 
     async def wait_for_completion(
