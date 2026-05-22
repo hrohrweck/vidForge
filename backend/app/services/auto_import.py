@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.media import MediaAsset, MediaFolder
+from app.services.media_metadata import probe_audio, probe_image, probe_video
 from app.services.preview_generator import extract_first_frame
 
 logger = logging.getLogger(__name__)
@@ -206,6 +207,13 @@ async def _create_asset_from_file(
             source_type="generated",
             source_job_id=source_job_id,
         )
+        if file_type == "image":
+            asset.asset_metadata = probe_image(file_path)
+        elif file_type == "video":
+            asset.asset_metadata = probe_video(file_path)
+        elif file_type == "audio":
+            asset.asset_metadata = probe_audio(file_path)
+
         db.add(asset)
         await db.flush()
         logger.info(f"MediaAsset added to DB, id={asset.id}")

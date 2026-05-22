@@ -138,6 +138,10 @@ class BulkTagRequest(BaseModel):
     tag_ids: list[str] = Field(..., min_length=1)
 
 
+class BulkDownloadRequest(BaseModel):
+    asset_ids: list[str] = Field(..., min_length=1)
+
+
 # Upload response
 class UploadResponse(BaseModel):
     assets: list[AssetResponse] = Field(default_factory=list)
@@ -149,3 +153,15 @@ class ReferenceResponse(BaseModel):
     referrer_asset_id: str
     referenced_asset_id: str
     created_at: datetime
+
+
+# Storage stats schemas
+class FileTypeStats(BaseModel):
+    count: int
+    bytes: int
+
+
+class MediaStatsResponse(BaseModel):
+    count: int
+    total_bytes: int
+    by_type: dict[str, FileTypeStats]

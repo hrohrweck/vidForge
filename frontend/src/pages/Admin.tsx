@@ -23,6 +23,7 @@ import { adminApi, UserDetail,
   Job,
 } from '../api/client'
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
+import { MediaSettingsCard } from '../components/admin/MediaSettingsCard'
 
 interface AdminUser extends UserDetail {
   groups: { id: string; name: string }[]
@@ -254,6 +255,8 @@ export default function Admin() {
           </div>
         </div>
       </div>
+
+      <MediaSettingsCard />
 
       <div className="border rounded-lg p-6">
         <h2 className="text-lg font-semibold mb-4">Users</h2>

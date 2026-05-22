@@ -20,6 +20,7 @@ from app.database import (
     UserGroup,
     get_db,
 )
+from app.services.app_settings import get_setting, set_setting
 from app.services.permissions import get_user_permissions
 
 router = APIRouter()
@@ -50,6 +51,14 @@ class RecentJob(BaseModel):
 class AdminDashboard(BaseModel):
     stats: SystemStats
     recent_jobs: list[RecentJob]
+
+
+class MediaSettingsResponse(BaseModel):
+    max_folder_depth: int
+
+
+class MediaSettingsUpdate(BaseModel):
+    max_folder_depth: int
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
@@ -118,6 +127,33 @@ async def get_admin_dashboard(
         },
         "recent_jobs": recent_jobs,
     }
+
+
+@router.get("/settings/media", response_model=MediaSettingsResponse)
+async def get_media_settings(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> MediaSettingsResponse:
+    max_folder_depth = int(await get_setting(db, "media.max_folder_depth", 3))
+    return MediaSettingsResponse(max_folder_depth=max_folder_depth)
+
+
+@router.patch("/settings/media", response_model=MediaSettingsResponse)
+async def update_media_settings(
+    payload: MediaSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> MediaSettingsResponse:
+    if payload.max_folder_depth < 1:
+        raise HTTPException(status_code=400, detail="max_folder_depth must be at least 1")
+
+    setting = await set_setting(
+        db,
+        "media.max_folder_depth",
+        payload.max_folder_depth,
+        updated_by=admin.id,
+    )
+    return MediaSettingsResponse(max_folder_depth=int(setting.value))
 
 
 @router.get("/users")

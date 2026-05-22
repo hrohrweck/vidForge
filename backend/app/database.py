@@ -90,6 +90,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 async def create_tables() -> None:
     # Import media models so their tables are included in Base.metadata
+    import app.models.app_settings  # noqa: F401
     import app.models.media  # noqa: F401
 
     async with engine.begin() as conn:

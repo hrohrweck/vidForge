@@ -1,13 +1,15 @@
 """Media library API router"""
 
+import io
 import logging
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,18 +22,23 @@ from app.schemas.media import (
     AssetResponse,
     AssetUpdate,
     BulkDeleteRequest,
+    BulkDownloadRequest,
     BulkMoveRequest,
     BulkTagRequest,
+    FileTypeStats,
     FolderCreate,
     FolderResponse,
     FolderTreeResponse,
     FolderUpdate,
+    MediaStatsResponse,
     PreviewFrameRequest,
     TagCreate,
     TagResponse,
     TagUpdate,
     UploadResponse,
 )
+from app.services.app_settings import get_setting
+from app.services.media_metadata import probe_audio, probe_image, probe_video
 from app.services.media_path import asset_path
 from app.services.preview_generator import extract_first_frame
 
@@ -83,6 +90,65 @@ def tag_to_response(tag: MediaTag) -> TagResponse:
 
 # ============== FOLDER ENDPOINTS ==============
 
+
+async def _get_folder_or_404(db: AsyncSession, folder_id: UUID, user_id: UUID) -> MediaFolder:
+    result = await db.execute(
+        select(MediaFolder).where(
+            MediaFolder.id == folder_id,
+            MediaFolder.user_id == user_id,
+        )
+    )
+    folder = result.scalar_one_or_none()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folder
+
+
+async def _folder_depth(db: AsyncSession, folder_id: UUID | None, user_id: UUID) -> int:
+    depth = 0
+    seen: set[UUID] = set()
+    current_id = folder_id
+    while current_id is not None:
+        if current_id in seen:
+            raise HTTPException(status_code=400, detail="Folder hierarchy contains a cycle")
+        seen.add(current_id)
+        folder = await _get_folder_or_404(db, current_id, user_id)
+        depth += 1
+        current_id = folder.parent_id
+    return depth
+
+
+async def _assert_folder_depth_allowed(
+    db: AsyncSession,
+    parent_id: UUID | None,
+    user_id: UUID,
+) -> None:
+    max_depth = int(await get_setting(db, "media.max_folder_depth", 3))
+    new_folder_depth = await _folder_depth(db, parent_id, user_id) + 1
+    if new_folder_depth > max_depth:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Folder depth exceeds maximum allowed depth of {max_depth}",
+        )
+
+
+async def _assert_not_descendant(
+    db: AsyncSession,
+    folder_id: UUID,
+    parent_id: UUID | None,
+    user_id: UUID,
+) -> None:
+    current_id = parent_id
+    seen: set[UUID] = set()
+    while current_id is not None:
+        if current_id == folder_id:
+            raise HTTPException(status_code=400, detail="Folder cannot be moved into itself or a descendant")
+        if current_id in seen:
+            raise HTTPException(status_code=400, detail="Folder hierarchy contains a cycle")
+        seen.add(current_id)
+        folder = await _get_folder_or_404(db, current_id, user_id)
+        current_id = folder.parent_id
+
 @router.get("/folders", response_model=list[FolderResponse])
 async def list_folders(
     parent_id: str | None = None,
@@ -110,6 +176,8 @@ async def create_folder(
     """Create a new folder."""
     # Check for duplicate name in same parent
     parent_uuid = UUID(payload.parent_id) if payload.parent_id else None
+    await _assert_folder_depth_allowed(db, parent_uuid, current_user.id)
+
     existing = await db.execute(
         select(MediaFolder).where(
             MediaFolder.user_id == current_user.id,
@@ -151,8 +219,11 @@ async def update_folder(
 
     if payload.name is not None:
         folder.name = payload.name
-    if payload.parent_id is not None:
-        folder.parent_id = UUID(payload.parent_id) if payload.parent_id else None
+    if "parent_id" in payload.model_fields_set:
+        new_parent_id = UUID(payload.parent_id) if payload.parent_id else None
+        await _assert_not_descendant(db, folder.id, new_parent_id, current_user.id)
+        await _assert_folder_depth_allowed(db, new_parent_id, current_user.id)
+        folder.parent_id = new_parent_id
 
     await db.commit()
     await db.refresh(folder)
@@ -554,6 +625,55 @@ async def bulk_tag_assets(
     return {"tagged": tagged}
 
 
+# ============== BULK DOWNLOAD =============
+
+CHUNK_SIZE = 64 * 1024  # 64KB chunks for streaming
+
+
+@router.post("/assets/bulk/download")
+async def bulk_download_assets(
+    request: BulkDownloadRequest,
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download multiple assets as a ZIP stream."""
+    # Fetch assets belonging to current user
+    assets = []
+    for asset_id in request.asset_ids:
+        result = await db.execute(
+            select(MediaAsset).where(
+                MediaAsset.id == UUID(asset_id),
+                MediaAsset.user_id == current_user.id,
+            )
+        )
+        asset = result.scalar_one_or_none()
+        if asset:
+            assets.append(asset)
+
+    if not assets:
+        raise HTTPException(status_code=404, detail="No assets found")
+
+    # Build ZIP in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for asset in assets:
+            file_path = Path(asset.file_path)
+            if not file_path.exists():
+                continue
+            # Prefix with first 8 chars of asset id to avoid name collisions
+            entry_name = f"{asset.id.hex[:8]}_{asset.name}"
+            with open(file_path, "rb") as f:
+                while chunk := f.read(CHUNK_SIZE):
+                    zip_file.writestr(entry_name, chunk)
+
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        iter([zip_buffer.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=assets.zip"},
+    )
+
+
 # ============== UPLOAD ENDPOINT ==============
 
 @router.post("/assets/upload", response_model=UploadResponse)
@@ -609,6 +729,13 @@ async def upload_assets(
             # Update asset with path and size
             asset.file_path = str(file_path)
             asset.size_bytes = len(content)
+
+            if file_type == "image":
+                asset.asset_metadata = probe_image(file_path)
+            elif file_type == "video":
+                asset.asset_metadata = probe_video(file_path)
+            elif file_type == "audio":
+                asset.asset_metadata = probe_audio(file_path)
 
             # Generate preview for videos
             if file_type == "video":
@@ -681,11 +808,13 @@ async def serve_asset_file(
     asset_id: str,
     current_user = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
+    download: str = Query(default=None),
 ):
     """Serve the raw asset file by asset ID.
 
     Uses cookie-based auth so that browser <img>/<video> tags work
     automatically (they send cookies but not Authorization headers).
+    When ?download=1 is present, sets Content-Disposition: attachment.
     """
     from pathlib import Path
 
@@ -704,6 +833,13 @@ async def serve_asset_file(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
+    if download == "1":
+        return FileResponse(
+            path=file_path,
+            media_type=asset.mime_type or "application/octet-stream",
+            filename=Path(asset.file_path).name,
+            headers={"Content-Disposition": f'attachment; filename="{Path(asset.file_path).name}"'},
+        )
     return FileResponse(
         path=file_path,
         media_type=asset.mime_type or "application/octet-stream",
@@ -770,4 +906,38 @@ async def serve_preview(
     return FileResponse(
         path=preview_path,
         media_type="image/jpeg",
+    )
+
+
+@router.get("/stats", response_model=MediaStatsResponse)
+async def get_media_stats(
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(
+            MediaAsset.file_type,
+            func.count(MediaAsset.id).label("count"),
+            func.coalesce(func.sum(MediaAsset.size_bytes), 0).label("bytes"),
+        )
+        .where(MediaAsset.user_id == current_user.id)
+        .group_by(MediaAsset.file_type)
+    )
+    rows = result.all()
+
+    by_type: dict[str, FileTypeStats] = {}
+    total_bytes = 0
+    total_count = 0
+
+    for row in rows:
+        ft_stats = FileTypeStats(count=int(row.count), bytes=int(row.bytes))
+        file_type_key = row.file_type.value if hasattr(row.file_type, 'value') else str(row.file_type)
+        by_type[file_type_key] = ft_stats
+        total_bytes += int(row.bytes)
+        total_count += int(row.count)
+
+    return MediaStatsResponse(
+        count=total_count,
+        total_bytes=total_bytes,
+        by_type=by_type,
     )

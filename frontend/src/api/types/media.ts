@@ -85,10 +85,20 @@ export interface BulkTagRequest {
   tag_ids: string[]
 }
 
+export interface BulkDownloadRequest {
+  asset_ids: string[]
+}
+
 export interface UploadProgress {
   loaded: number
   total: number
   percentage: number
+}
+
+export interface StorageStats {
+  total_assets: number
+  total_size_bytes: number
+  total_folders: number
 }
 
 export interface DeleteRefusedError extends Error {

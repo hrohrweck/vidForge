@@ -12,6 +12,8 @@ import type {
   BulkDeleteRequest,
   BulkTagRequest,
   UploadProgress,
+  BulkDownloadRequest,
+  StorageStats,
 } from './types/media'
 
 export async function listFolders(parentId?: string): Promise<MediaFolder[]> {
@@ -125,6 +127,23 @@ export async function bulkTagAssets(request: BulkTagRequest): Promise<{ tagged: 
   return response.data
 }
 
+export async function bulkDownloadAssets(request: BulkDownloadRequest): Promise<Blob> {
+  const response = await api.post('/media/assets/bulk/download', request, {
+    responseType: 'blob',
+  })
+  return response.data
+}
+
+export async function getStats(): Promise<StorageStats> {
+  const response = await api.get('/media/stats')
+  // Transform backend response to match frontend type
+  return {
+    total_assets: response.data.count,
+    total_size_bytes: response.data.total_bytes,
+    total_folders: 0, // Backend doesn't provide folder count yet
+  }
+}
+
 export function getAssetUrl(asset: MediaAsset): string {
   if (asset.file_path?.startsWith('http')) {
     return asset.file_path
@@ -134,4 +153,8 @@ export function getAssetUrl(asset: MediaAsset): string {
 
 export function getPreviewUrl(assetId: string): string {
   return `/api/media/assets/${assetId}/preview`
+}
+
+export function getDownloadUrl(assetId: string): string {
+  return `/api/media/assets/${assetId}/file?download=1`
 }

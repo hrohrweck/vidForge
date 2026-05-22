@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { MediaGrid } from './MediaGrid'
+import { useAssets } from '../../hooks/useMedia'
+import { MediaTile } from './MediaTile'
 import type { MediaAsset } from '../../api/types/media'
 
 interface AssetPickerModalProps {
@@ -17,6 +18,7 @@ export function AssetPickerModal({
   fileType,
 }: AssetPickerModalProps) {
   const [selectedAsset, setSelectedAsset] = useState<MediaAsset | null>(null)
+  const { data, isLoading } = useAssets({ file_type: fileType, limit: 50 })
 
   if (!isOpen) return null
 
@@ -30,7 +32,6 @@ export function AssetPickerModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-background rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-lg font-semibold">Select Asset</h2>
           <button
@@ -41,15 +42,33 @@ export function AssetPickerModal({
           </button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
-          <MediaGrid
-            query={{ file_type: fileType, limit: 50 }}
-            onAssetClick={(asset) => setSelectedAsset(asset)}
-          />
+          {isLoading ? (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} className="bg-card rounded-lg border border-border overflow-hidden animate-pulse">
+                  <div className="aspect-video bg-muted" />
+                  <div className="p-3 space-y-2">
+                    <div className="h-4 bg-muted rounded w-3/4" />
+                    <div className="h-3 bg-muted rounded w-1/2" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+              {data?.pages.flatMap((page) => page.assets).map((asset) => (
+                <MediaTile
+                  key={asset.id}
+                  asset={asset}
+                  selected={selectedAsset?.id === asset.id}
+                  onSelect={() => setSelectedAsset(asset)}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-end gap-2 p-4 border-t">
           <button
             onClick={onClose}

@@ -7,6 +7,8 @@ from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+import app.models.app_settings  # noqa: F401
+import app.models.media  # noqa: F401
 from app.api.auth import create_access_token
 from app.database import Base, Job, Template, User, get_db
 from app.main import app

@@ -14,6 +14,7 @@ export const mediaKeys = {
   assets: (query: AssetListQuery) => [...mediaKeys.all, 'assets', query] as const,
   asset: (id: string) => [...mediaKeys.all, 'asset', id] as const,
   tags: () => [...mediaKeys.all, 'tags'] as const,
+  stats: () => [...mediaKeys.all, 'stats'] as const,
 }
 
 // Folder hooks
@@ -120,6 +121,7 @@ export function useUploadAssets() {
     }) => mediaApi.uploadAssets(files, folderId, onProgress),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mediaKeys.assets({}) })
+      queryClient.invalidateQueries({ queryKey: mediaKeys.stats() })
     },
   })
 }
@@ -194,6 +196,7 @@ export function useBulkDeleteAssets() {
     mutationFn: mediaApi.bulkDeleteAssets,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mediaKeys.assets({}) })
+      queryClient.invalidateQueries({ queryKey: mediaKeys.stats() })
     },
   })
 }
@@ -206,5 +209,11 @@ export function useBulkTagAssets() {
       queryClient.invalidateQueries({ queryKey: mediaKeys.assets({}) })
       queryClient.invalidateQueries({ queryKey: mediaKeys.tags() })
     },
+  })
+}
+
+export function useBulkDownloadAssets() {
+  return useMutation({
+    mutationFn: mediaApi.bulkDownloadAssets,
   })
 }
