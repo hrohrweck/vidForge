@@ -212,6 +212,69 @@ class VideoProcessor:
         return output_path
 
     @staticmethod
+    async def stretch_to_duration(
+        input_path: str,
+        target_duration: float,
+        output_path: str,
+    ) -> str:
+        """Stretch a video clip to match *target_duration*.
+
+        If the clip is shorter than *target_duration* it is looped
+        (seamlessly via ``stream_loop``).  If it is longer it is
+        truncated.  The output is re-encoded to ensure a clean loop
+        boundary.
+        """
+        clip_duration = await VideoProcessor.get_duration(input_path)
+        if clip_duration <= 0:
+            raise RuntimeError(f"Cannot determine duration of {input_path}")
+
+        if clip_duration >= target_duration - 0.1:
+            # Clip is long enough — just trim
+            cmd = [
+                "ffmpeg", "-i", input_path,
+                "-t", str(target_duration),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac",
+                "-y", str(Path(output_path).resolve()),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"FFmpeg trim failed: {stderr.decode()}")
+            return output_path
+
+        # Loop the clip to fill the target duration
+        # Use -stream_loop -1 (infinite loop) + -t to stop at target
+        loops_needed = int(target_duration / clip_duration) + 1
+
+        # Build concat list for precise looping
+        list_file = Path(output_path).parent / f"loop_{Path(input_path).stem}.txt"
+        with open(list_file, "w") as f:
+            for _ in range(loops_needed):
+                f.write(f"file '{input_path}'\n")
+
+        cmd = [
+            "ffmpeg",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-t", str(target_duration),
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac",
+            "-pix_fmt", "yuv420p",
+            "-y", str(Path(output_path).resolve()),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        list_file.unlink(missing_ok=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg loop-stretch failed: {stderr.decode()}")
+        return output_path
+
+    @staticmethod
     async def extract_audio(video_path: str, audio_path: str) -> str:
         """Extract audio from video file."""
         cmd = [

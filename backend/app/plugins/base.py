@@ -213,22 +213,40 @@ class PluginBase(ABC):
         output_dir = storage_path / "output" / str(job.id)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Collect scene video paths
-        segment_paths: list[str] = []
+        # Stretch each scene clip to match its intended duration, then merge.
+        # Video models (Wan2.2, Poe Veo, etc.) produce short clips (3-8s),
+        # but scenes may need much longer (e.g. 115s).  We loop the clip
+        # to fill the scene duration so the final video matches the timeline.
+        stretched_paths: list[str] = []
         for scene in scenes:
-            if scene.generated_video_path:
-                full = storage_path / scene.generated_video_path
-                if full.exists():
-                    segment_paths.append(str(full))
+            if not scene.generated_video_path:
+                continue
+            full = storage_path / scene.generated_video_path
+            if not full.exists():
+                continue
 
-        if not segment_paths:
+            scene_duration = scene.end_time - scene.start_time
+            clip_duration = scene.duration or scene_duration
+
+            if clip_duration >= scene_duration - 0.5:
+                # Clip is already long enough — use as-is
+                stretched_paths.append(str(full))
+            else:
+                # Stretch (loop) the clip to fill the scene duration
+                stretched = output_dir / f"scene_{scene.scene_number:03d}_stretched.mp4"
+                await VideoProcessor.stretch_to_duration(
+                    str(full), scene_duration, str(stretched),
+                )
+                stretched_paths.append(str(stretched))
+
+        if not stretched_paths:
             raise RuntimeError("No scene videos to render")
 
         merged_path = output_dir / "merged.mp4"
-        if len(segment_paths) == 1:
-            shutil.copy(segment_paths[0], merged_path)
+        if len(stretched_paths) == 1:
+            shutil.copy(stretched_paths[0], merged_path)
         else:
-            await VideoProcessor.merge_videos(segment_paths, str(merged_path))
+            await VideoProcessor.merge_videos(stretched_paths, str(merged_path))
 
         # Add audio if available
         final_path = output_dir / "final.mp4"

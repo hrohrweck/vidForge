@@ -9,9 +9,6 @@ task invocation) — see ``app.workers.context``.
 
 import json
 import logging
-import shutil
-import subprocess
-import tempfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -626,153 +623,22 @@ def export_scene_video(self, job_id: str, options: dict | None = None) -> dict:
 
 
 async def _export_scene_video(job_id: str, options: dict) -> dict:
-    from app.database import VideoScene
-    from app.services.video_processor import VideoProcessor
+    """Export final video using the plugin dispatcher's render pipeline.
 
+    This delegates to ``dispatch_stage('rendering')`` which uses the
+    plugin's ``render()`` method — including clip stretching, audio
+    mixing, preview generation, and MediaAsset creation.
+    """
+    from app.workers.dispatcher import dispatch_stage
+
+    # Apply export options to the job first
     job_uuid = UUID(job_id)
-
     async with ctx.session_factory() as db:
         result = await db.execute(select(Job).where(Job.id == job_uuid))
         job = result.scalar_one_or_none()
         if not job:
             return {"status": "failed", "error": "Job not found"}
-
-        await broadcast_update(job_id, {
-            "stage": "rendering", "status": "Preparing export...",
-        })
-
-        scenes_result = await db.execute(
-            select(VideoScene)
-            .where(VideoScene.job_id == job.id, VideoScene.generated_video_path.isnot(None))
-            .order_by(VideoScene.scene_number)
-        )
-        scenes = list(scenes_result.scalars().all())
-
-        if not scenes:
-            return {"status": "failed", "error": "No generated videos to export"}
-
-        segment_paths = []
-        storage_path = Path(settings.storage_path).resolve()
-        for scene in scenes:
-            full_path = storage_path / scene.generated_video_path
-            if full_path.exists():
-                segment_paths.append(str(full_path))
-
-        output_dir = storage_path / "output" / job_id
-        merged_path = output_dir / "merged.mp4"
-
-        await broadcast_update(job_id, {"status": "Merging videos..."})
-        if len(segment_paths) == 1:
-            shutil.copy(segment_paths[0], merged_path)
-        else:
-            await VideoProcessor.merge_videos(segment_paths, str(merged_path))
-
-        audio_volume = options.get("audio_volume", 1.0)
-        background_music_volume = options.get("background_music_volume", 0.0)
-        audio_file = options.get("audio_file")
-        music_file = options.get("background_music")
-        final_path = output_dir / "final.mp4"
-
-        if audio_file or music_file:
-            audio_inputs = []
-            if audio_file:
-                audio_path = storage_path / audio_file
-                if audio_path.exists():
-                    audio_inputs.append(str(audio_path))
-            if music_file:
-                music_path = storage_path / music_file
-                if music_path.exists():
-                    audio_inputs.append(str(music_path))
-
-            if audio_inputs:
-                await broadcast_update(job_id, {"status": "Mixing audio..."})
-                if len(audio_inputs) == 1:
-                    await VideoProcessor.add_audio(
-                        str(merged_path), audio_inputs[0], str(final_path),
-                        audio_volume=audio_volume,
-                    )
-                else:
-                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                        combined_audio = tmp.name
-                    if len(audio_inputs) == 2:
-                        cmd = [
-                            "ffmpeg", "-y",
-                            "-i", audio_inputs[0], "-i", audio_inputs[1],
-                            "-filter_complex",
-                            (
-                                f"[0:a]volume={audio_volume}[a];"
-                                f"[1:a]volume={background_music_volume}[b];"
-                                f"[a][b]amix=inputs=2:duration=longest[a]"
-                            ),
-                            "-map", "[a]", combined_audio,
-                        ]
-                        subprocess.run(cmd, check=True, capture_output=True)
-
-                    await VideoProcessor.add_audio(
-                        str(merged_path), combined_audio, str(final_path),
-                        audio_volume=1.0,
-                    )
-                    Path(combined_audio).unlink(missing_ok=True)
-        else:
-            shutil.copy(str(merged_path), str(final_path))
-
-        await broadcast_update(job_id, {"status": "Generating preview..."})
-        preview_path = output_dir / "preview.mp4"
-        try:
-            await VideoProcessor.generate_preview(
-                str(final_path), str(preview_path),
-                width=854, height=480, fps=15, quality=28,
-            )
-        except Exception:
-            pass
-
-        job.output_path = str(final_path.relative_to(storage_path))
-        job.preview_path = str(preview_path.relative_to(storage_path))
         job.export_options = options
-        job.stage = "completed"
-        job.status = "completed"
-
-        # Create MediaAsset for the final video
-        try:
-            from app.services.auto_import import _create_asset_from_file, _get_or_create_folder
-
-            if final_path.exists():
-                final_folder = await _get_or_create_folder(
-                    user_id=job.user_id, name="Final Exports",
-                    parent_id=None, db=db,
-                )
-                await _create_asset_from_file(
-                    user_id=job.user_id, folder_id=final_folder.id,
-                    name=f"Final Export - {str(job.id)[:8]}",
-                    file_path=final_path, file_type="video",
-                    source_job_id=job.id, db=db,
-                    project_id=job.project_id,
-                )
-        except Exception:
-            logger.warning("Failed to create MediaAsset for final video", exc_info=True)
-
         await db.commit()
 
-        # update_job_status opens its own session; we've already committed
-        # the output_path above, so we only need the broadcast side-effect.
-        try:
-            async with ctx.session_factory() as status_db:
-                status_db_result = await status_db.execute(
-                    select(Job).where(Job.id == job.id)
-                )
-                status_job = status_db_result.scalar_one_or_none()
-                if status_job and not status_job.completed_at:
-                    status_job.completed_at = datetime.utcnow()
-                    await status_db.commit()
-        except Exception:
-            pass
-
-        await broadcast_update(job_id, {
-            "stage": "completed", "status": "Export complete!",
-            "output_path": job.output_path, "preview_path": job.preview_path,
-        })
-
-        return {
-            "status": "completed", "job_id": job_id,
-            "output_path": job.output_path, "preview_path": job.preview_path,
-        }
+    return await dispatch_stage(job_id, "rendering")
