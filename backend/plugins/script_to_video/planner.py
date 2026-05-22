@@ -113,6 +113,10 @@ def _parse_response(response: str, target_duration: float) -> list[dict[str, Any
         if i == len(scenes) - 1:
             s["end_time"] = target_duration
 
+    # Enforce minimum scene duration
+    from app.services.media_generator import enforce_min_scene_duration
+    scenes = enforce_min_scene_duration(scenes)
+
     return scenes
 
 

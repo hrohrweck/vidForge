@@ -312,6 +312,10 @@ Create a detailed scene plan in JSON format."""
         for i, scene in enumerate(fixed_scenes):
             scene["scene_number"] = i + 1
 
+        # Enforce minimum scene duration
+        from app.services.media_generator import enforce_min_scene_duration
+        fixed_scenes = enforce_min_scene_duration(fixed_scenes)
+
         parsed["scenes"] = fixed_scenes
         parsed["total_scenes"] = len(fixed_scenes)
 

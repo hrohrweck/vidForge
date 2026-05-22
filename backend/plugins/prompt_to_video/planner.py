@@ -177,4 +177,8 @@ def _fix_scene_timing(
         scene.setdefault("mood", "neutral")
         scene.setdefault("camera_movement", "static")
 
+    # Enforce minimum scene duration
+    from app.services.media_generator import enforce_min_scene_duration
+    fixed = enforce_min_scene_duration(fixed)
+
     return fixed

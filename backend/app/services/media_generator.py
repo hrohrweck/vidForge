@@ -147,6 +147,54 @@ async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[st
     }
 
 
+MIN_SCENE_DURATION = 2.0  # Minimum scene duration in seconds
+
+
+def enforce_min_scene_duration(
+    scenes: list[dict[str, Any]], min_duration: float = MIN_SCENE_DURATION,
+) -> list[dict[str, Any]]:
+    """Merge scenes shorter than min_duration into the previous scene.
+
+    If the first scene is too short, merge into the next. If only one
+    scene exists, extend it to min_duration.
+    """
+    if not scenes:
+        return scenes
+
+    merged: list[dict[str, Any]] = []
+    for scene in scenes:
+        duration = scene.get("end_time", 0) - scene.get("start_time", 0)
+        if duration < min_duration and merged:
+            # Too short — merge into previous scene
+            merged[-1]["end_time"] = scene.get("end_time", merged[-1]["end_time"])
+            # Combine descriptions
+            if scene.get("visual_description"):
+                prev = merged[-1].get("visual_description", "")
+                merged[-1]["visual_description"] = (
+                    f"{prev}; {scene['visual_description']}".strip("; ")
+                )
+            if scene.get("image_prompt") and not merged[-1].get("image_prompt"):
+                merged[-1]["image_prompt"] = scene["image_prompt"]
+            if scene.get("lyrics_segment") and not merged[-1].get("lyrics_segment"):
+                merged[-1]["lyrics_segment"] = scene["lyrics_segment"]
+            if scene.get("narration") and not merged[-1].get("narration"):
+                merged[-1]["narration"] = scene["narration"]
+        else:
+            merged.append(scene)
+
+    # Handle single remaining scene that's still too short
+    if len(merged) == 1:
+        dur = merged[0].get("end_time", 0) - merged[0].get("start_time", 0)
+        if dur < min_duration:
+            merged[0]["end_time"] = merged[0]["start_time"] + min_duration
+
+    # Re-number
+    for i, scene in enumerate(merged):
+        scene["scene_number"] = i + 1
+
+    return merged
+
+
 def get_scene_output_dir(job_id: str, scene_number: int) -> Path:
     return Path(settings.storage_path) / "output" / job_id / f"scene_{scene_number:03d}"
 

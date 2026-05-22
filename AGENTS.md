@@ -51,16 +51,19 @@ alembic upgrade head
 alembic revision --autogenerate -m "description"
 
 # Run Celery worker
-celery -A app.workers worker --loglevel=info
+python -m celery -A app.workers worker --loglevel=info
 
-# Run tests
+# Run tests (unit only — default)
 pytest
 
-# Type checking
-mypy app/
+# Run integration tests (requires running PostgreSQL)
+pytest -m integration
 
 # Linting
-ruff check app/
+ruff check app/ plugins/
+
+# Format
+ruff format app/ plugins/
 ```
 
 ### Frontend
@@ -74,11 +77,14 @@ npm run dev
 # Build for production
 npm run build
 
-# Run tests
-npm run test
+# Run unit tests (vitest)
+npx vitest run
+
+# Run E2E tests (playwright)
+npx playwright test
 
 # Type checking
-npm run typecheck
+npx tsc --noEmit
 
 # Linting
 npm run lint
@@ -87,19 +93,25 @@ npm run lint
 ### Docker
 ```bash
 # Start all services
-docker-compose up -d
+cd docker && docker compose up -d
 
-# Start development environment
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-
-# Rebuild containers
-docker-compose up -d --build
+# Rebuild and restart containers
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f backend
+docker compose logs -f backend
 
 # Run backend command
-docker-compose exec backend alembic upgrade head
+docker compose exec backend alembic upgrade head
+```
+
+### Shortcuts
+```bash
+# From project root — quick dev startup
+make dev          # or: scripts/dev.sh
+
+# Run all linters + tests
+make check
 ```
 
 ## Project Structure
@@ -211,6 +223,32 @@ class StorageBackend(ABC):
     @abstractmethod
     async def list_files(self, prefix: str) -> list[str]: ...
 ```
+
+## Video Generation Pipeline
+
+### Scene Constraints
+- **Minimum scene duration**: 2 seconds
+- **Maximum scene duration**: 15 seconds (enforced by planner prompts)
+- **Per-clip max**: ~5 seconds (Wan 2.2 hardware limit)
+
+### Sub-Clip Chaining
+Scenes longer than 5s are automatically decomposed:
+1. Split into N 5s sub-clips
+2. LLM generates evolving prompts for each sub-clip
+3. Sub-clip 1 uses the image model's seed image
+4. Sub-clips 2+ use the ~80% frame of the previous clip as I2V seed
+5. Merged with 0.3s crossfade transitions
+
+### Retry Behavior
+All `generate_image` and `generate_video` calls retry up to 4 times with
+exponential backoff (10s → 20s → 40s → 80s) on recoverable errors:
+- Engine overloaded, capacity, queue full
+- Rate limiting (429), server errors (502, 503)
+- Timeouts, connection failures, empty responses
+
+Non-recoverable errors (invalid prompts, auth failures) fail immediately.
+After retries exhausted, the scene is marked `failed` and the pipeline
+continues to the next scene.
 
 ## Environment Variables
 
@@ -435,23 +473,14 @@ describe('BatchJobModal', () => {
 - **Integration**: Cover critical user flows end-to-end
 
 ### Continuous Integration
-Tests should run automatically on:
-- Pull request creation
-- Push to main/master branch
-- Before deployment
+Tests run automatically via GitHub Actions on push to `main`
+and on pull requests. See `.github/workflows/ci.yml`.
 
-```yaml
-# Example GitHub Actions workflow
-- name: Run backend tests
-  run: |
-    cd backend
-    pytest --cov=app --cov-fail-under=70
-    
-- name: Run frontend tests
-  run: |
-    cd frontend
-    npm run test -- --coverage --watchAll=false
-```
+The CI pipeline runs:
+1. `ruff check` — linting
+2. `pytest -m "not integration"` — unit tests
+3. `npx vitest run` — frontend unit tests
+4. `npx tsc --noEmit` — TypeScript type checking
 
 ## Deployment Notes
 
