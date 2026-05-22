@@ -132,10 +132,11 @@ class PluginBase(ABC):
                 scene.status = "image_ready"
             except Exception as exc:
                 await db.rollback()
-                # Re-fetch the scene so the ORM object is clean
                 from sqlalchemy import select as sa_select
+
+                from app.database import VideoScene as VScene
                 result = await db.execute(
-                    sa_select(VideoScene).where(VideoScene.id == scene.id)
+                    sa_select(VScene).where(VScene.id == scene.id)
                 )
                 scene = result.scalar_one()
                 scene.status = "failed"
@@ -208,8 +209,10 @@ class PluginBase(ABC):
             except Exception as exc:
                 await db.rollback()
                 from sqlalchemy import select as sa_select
+
+                from app.database import VideoScene as VScene
                 result = await db.execute(
-                    sa_select(VideoScene).where(VideoScene.id == scene.id)
+                    sa_select(VScene).where(VScene.id == scene.id)
                 )
                 scene = result.scalar_one()
                 scene.status = "failed"
