@@ -1,9 +1,11 @@
 """Model configuration management for user preferences."""
 
+from __future__ import annotations
+
 from typing import Any
 
-# Available image generation models
-AVAILABLE_IMAGE_MODELS = [
+# Static local models — always available
+AVAILABLE_IMAGE_MODELS: list[dict[str, Any]] = [
     {
         "id": "flux1-schnell",
         "name": "FLUX.1-schnell",
@@ -28,22 +30,9 @@ AVAILABLE_IMAGE_MODELS = [
         "comfyui_workflow": "sdxl_image.json",
         "default": False,
     },
-    {
-        "id": "poe-gpt-image",
-        "name": "GPT-Image-1 (Poe)",
-        "description": "Cloud-based image generation via Poe API.",
-        "size_gb": 0,
-        "speed": "cloud",
-        "quality": "excellent",
-        "license": "Proprietary",
-        "provider": "poe",
-        "comfyui_workflow": None,
-        "default": False,
-    },
 ]
 
-# Available video generation models
-AVAILABLE_VIDEO_MODELS = [
+AVAILABLE_VIDEO_MODELS: list[dict[str, Any]] = [
     {
         "id": "wan2.2-t2v",
         "name": "Wan 2.2 T2V",
@@ -68,22 +57,9 @@ AVAILABLE_VIDEO_MODELS = [
         "comfyui_workflow": "ltx_t2v.json",
         "default": False,
     },
-    {
-        "id": "poe-veo",
-        "name": "Veo-3.1 (Poe)",
-        "description": "Cloud-based video generation via Poe API.",
-        "size_gb": 0,
-        "speed": "cloud",
-        "quality": "excellent",
-        "license": "Proprietary",
-        "provider": "poe",
-        "comfyui_workflow": None,
-        "default": False,
-    },
 ]
 
-# Available text generation models (for story creation, scene planning, etc.)
-AVAILABLE_TEXT_MODELS = [
+AVAILABLE_TEXT_MODELS: list[dict[str, Any]] = [
     {
         "id": "qwen3.6:35b",
         "name": "Qwen 3.6 (35B)",
@@ -136,12 +112,77 @@ AVAILABLE_TEXT_MODELS = [
 
 
 def get_available_models() -> dict[str, list[dict[str, Any]]]:
-    """Get all available models for user selection."""
+    """Get all available models for user selection.
+
+    Returns the static local models **plus** any Poe models registered
+    in the database, merged dynamically so the UI always shows the
+    full list.
+    """
+    image_models = list(AVAILABLE_IMAGE_MODELS)
+    video_models = list(AVAILABLE_VIDEO_MODELS)
+    text_models = list(AVAILABLE_TEXT_MODELS)
+
+    try:
+        poe_image, poe_video, poe_text = _load_poe_models()
+        image_models.extend(poe_image)
+        video_models.extend(poe_video)
+        text_models.extend(poe_text)
+    except Exception:
+        pass  # DB not available (e.g. during tests)
+
     return {
-        "image_models": AVAILABLE_IMAGE_MODELS,
-        "video_models": AVAILABLE_VIDEO_MODELS,
-        "text_models": AVAILABLE_TEXT_MODELS,
+        "image_models": image_models,
+        "video_models": video_models,
+        "text_models": text_models,
     }
+
+
+def _load_poe_models() -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+]:
+    """Load active Poe models from the database (sync, short-lived connection)."""
+    from sqlalchemy import create_engine, text
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    db_url = settings.database_url.replace("+asyncpg", "+psycopg2")
+    if "+psycopg2" not in db_url and "postgresql://" in db_url:
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg2://")
+
+    images: list[dict[str, Any]] = []
+    videos: list[dict[str, Any]] = []
+    texts: list[dict[str, Any]] = []
+
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT model_id, name, modality FROM poe_models WHERE is_active = true")
+            ).fetchall()
+            for model_id, name, modality in rows:
+                entry = {
+                    "id": f"poe:{model_id}",
+                    "name": f"{name} (Poe)",
+                    "description": f"Poe API model: {model_id}",
+                    "size_gb": 0,
+                    "speed": "cloud",
+                    "quality": "good",
+                    "license": "Proprietary",
+                    "provider": "poe",
+                    "poe_model_id": model_id,
+                    "default": False,
+                }
+                if modality == "image":
+                    images.append(entry)
+                elif modality == "video":
+                    videos.append(entry)
+                elif modality == "text":
+                    texts.append(entry)
+    finally:
+        engine.dispose()
+
+    return images, videos, texts
 
 
 def get_default_model_preferences() -> dict[str, str]:
@@ -158,37 +199,52 @@ def get_default_model_preferences() -> dict[str, str]:
 
 def get_model_config(model_id: str) -> dict[str, Any] | None:
     """Get configuration for a specific model."""
-    for model in AVAILABLE_IMAGE_MODELS + AVAILABLE_VIDEO_MODELS + AVAILABLE_TEXT_MODELS:
+    all_models = (
+        AVAILABLE_IMAGE_MODELS + AVAILABLE_VIDEO_MODELS + AVAILABLE_TEXT_MODELS
+    )
+    for model in all_models:
         if model["id"] == model_id:
             return model
+
+    try:
+        poe_img, poe_vid, poe_txt = _load_poe_models()
+        for model in poe_img + poe_vid + poe_txt:
+            if model["id"] == model_id:
+                return model
+    except Exception:
+        pass
+
     return None
 
 
 def validate_model_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
     """Validate and sanitize model preferences."""
     defaults = get_default_model_preferences()
-    validated = {}
+    validated: dict[str, Any] = {}
 
-    image_model = preferences.get("image_model", defaults["image_model"])
-    if get_model_config(image_model):
-        validated["image_model"] = image_model
-    else:
-        validated["image_model"] = defaults["image_model"]
+    all_models = get_available_models()
+    all_ids = (
+        {m["id"] for m in all_models["image_models"]}
+        | {m["id"] for m in all_models["video_models"]}
+        | {m["id"] for m in all_models["text_models"]}
+    )
 
-    video_model = preferences.get("video_model", defaults["video_model"])
-    if get_model_config(video_model):
-        validated["video_model"] = video_model
-    else:
-        validated["video_model"] = defaults["video_model"]
+    for key, default in [
+        ("image_model", defaults["image_model"]),
+        ("video_model", defaults["video_model"]),
+        ("text_model", defaults["text_model"]),
+    ]:
+        val = preferences.get(key, default)
+        validated[key] = val if val in all_ids else default
 
-    text_model = preferences.get("text_model", defaults["text_model"])
-    if get_model_config(text_model):
-        validated["text_model"] = text_model
-    else:
-        validated["text_model"] = defaults["text_model"]
-
-    validated["image_provider"] = preferences.get("image_provider", defaults["image_provider"])
-    validated["video_provider"] = preferences.get("video_provider", defaults["video_provider"])
-    validated["text_provider"] = preferences.get("text_provider", defaults["text_provider"])
+    validated["image_provider"] = preferences.get(
+        "image_provider", defaults["image_provider"]
+    )
+    validated["video_provider"] = preferences.get(
+        "video_provider", defaults["video_provider"]
+    )
+    validated["text_provider"] = preferences.get(
+        "text_provider", defaults["text_provider"]
+    )
 
     return validated
