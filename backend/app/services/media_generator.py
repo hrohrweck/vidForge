@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import Job, Provider, UserSettings
 from app.services.job_router import JobRouter
-from app.services.model_config import get_default_model_preferences, get_model_config
+from app.services.model_config import get_default_model_preferences
 from app.services.providers import (
     ComfyUIDirectProvider,
     PoeProvider,
@@ -171,6 +171,74 @@ def load_comfyui_workflow(workflow_name: str) -> dict[str, Any] | None:
     return json.loads(workflow_path.read_text())
 
 
+async def _resolve_image_provider(
+    db: AsyncSession,
+    job: Job,
+    provider_id: UUID | None,
+    model_preference: str | None,
+) -> tuple[str, UUID | None, str, Any]:
+    """Resolve which provider and model to use for image generation.
+
+    Returns (selected_model_id, resolved_provider_id, provider_type, instance).
+    For Poe models (``poe:*``) the instance is a PoeProvider; for local
+    models it is a ComfyUIDirectProvider.
+    """
+    user_prefs = await get_user_model_preferences(db, job.user_id)
+    selected_model = model_preference or user_prefs.get("image_model", "flux1-schnell")
+
+    # Poe model → use the Poe provider directly
+    if selected_model.startswith("poe:"):
+        poe_model_id = selected_model.removeprefix("poe:")
+        provider, instance = await _get_poe_provider(db)
+        if provider and instance:
+            return poe_model_id, provider.id, "poe", instance
+        # Poe provider not available — fall through to local
+
+    # Local / ComfyUI model
+    provider, instance = await get_comfyui_direct_provider(db, provider_id)
+    return selected_model, provider.id, "comfyui", instance
+
+
+async def _resolve_video_provider(
+    db: AsyncSession,
+    job: Job,
+    provider_id: UUID | None,
+    model_preference: str | None,
+) -> tuple[str, UUID | None, str, Any]:
+    """Resolve which provider and model to use for video generation."""
+    user_prefs = await get_user_model_preferences(db, job.user_id)
+    selected_model = model_preference or user_prefs.get("video_model", "wan2.2-t2v")
+
+    # Poe model → use the Poe provider directly
+    if selected_model.startswith("poe:"):
+        poe_model_id = selected_model.removeprefix("poe:")
+        provider, instance = await _get_poe_provider(db)
+        if provider and instance:
+            return poe_model_id, provider.id, "poe", instance
+        # Poe provider not available — fall through to local
+
+    # Local / ComfyUI model
+    provider, instance = await get_comfyui_direct_provider(db, provider_id)
+    return selected_model, provider.id, "comfyui", instance
+
+
+async def _get_poe_provider(
+    db: AsyncSession,
+) -> tuple[Provider | None, PoeProvider | None]:
+    """Find the first active Poe provider in the DB."""
+    result = await db.execute(
+        select(Provider).where(Provider.provider_type == "poe", Provider.is_active == True)  # noqa: E712
+    )
+    providers = result.scalars().all()
+    for provider in providers:
+        try:
+            instance = await get_provider_instance(db, provider)
+            return provider, instance
+        except Exception:
+            continue
+    return None, None
+
+
 async def generate_image(
     db: AsyncSession,
     job: Job,
@@ -184,14 +252,24 @@ async def generate_image(
     output_dir.mkdir(parents=True, exist_ok=True)
     image_path = output_dir / "seed_image.png"
 
-    # Get user's model preferences
-    user_prefs = await get_user_model_preferences(db, job.user_id)
-    selected_model = model_preference or user_prefs.get("image_model", "sdxl")
-    _ = get_model_config(selected_model)
+    selected_model, resolved_pid, ptype, instance = await _resolve_image_provider(
+        db, job, provider_id, model_preference,
+    )
 
-    provider, instance = await get_comfyui_direct_provider(db, provider_id)
+    if ptype == "poe":
+        # Poe provider — direct API call
+        _poe_id, image_data = await instance.generate_image(
+            prompt=prompt,
+            model=selected_model,
+            aspect_ratio=aspect_ratio,
+        )
+        if not image_data:
+            raise ValueError(f"Poe image generation returned no data (model={selected_model})")
+        image_path.write_bytes(image_data)
+        relative_path = str(image_path.relative_to(settings.storage_path))
+        return relative_path, f"poe_{selected_model}", resolved_pid
 
-    # Use proper image workflow based on selected model
+    # ComfyUI local provider
     if selected_model == "flux1-schnell":
         workflow = _build_flux_image_workflow(
             prompt=prompt,
@@ -199,7 +277,6 @@ async def generate_image(
             provider_config=instance.config,
         )
     else:
-        # Fallback to existing workflow for other models
         workflow = _build_comfyui_image_workflow(
             prompt=prompt,
             aspect_ratio=aspect_ratio,
@@ -210,7 +287,6 @@ async def generate_image(
     prompt_id = await instance.queue_prompt(workflow)
     result = await instance.wait_for_completion(prompt_id)
 
-    # Get the image output
     image_data = await instance.get_output(result)
     if not image_data:
         raise ValueError("ComfyUI image generation returned no output data")
@@ -221,7 +297,7 @@ async def generate_image(
         raise ValueError("Failed to save generated image")
 
     relative_path = str(image_path.relative_to(settings.storage_path))
-    return relative_path, f"generated_with_{selected_model}", provider.id
+    return relative_path, f"generated_with_{selected_model}", resolved_pid
 
 
 async def generate_video(
@@ -239,9 +315,26 @@ async def generate_video(
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / "scene_video.mp4"
 
-    provider, instance = await get_comfyui_direct_provider(db, provider_id)
+    selected_model, resolved_pid, ptype, instance = await _resolve_video_provider(
+        db, job, provider_id, model_preference,
+    )
 
-    # Build a proper Wan2.2 workflow with correct parameters
+    if ptype == "poe":
+        # Poe provider — direct API call
+        _poe_id, video_data = await instance.generate_video(
+            prompt=prompt,
+            model=selected_model,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            image_path=reference_image_path,
+        )
+        if not video_data:
+            raise ValueError(f"Poe video generation returned no data (model={selected_model})")
+        video_path.write_bytes(video_data)
+        relative_path = str(video_path.relative_to(settings.storage_path))
+        return relative_path, f"poe_{selected_model}", resolved_pid, float(duration)
+
+    # ComfyUI local provider
     workflow = _build_wan_video_workflow(
         prompt=prompt,
         aspect_ratio=aspect_ratio,
@@ -258,8 +351,8 @@ async def generate_video(
         raise ValueError("ComfyUI returned no output data")
     return (
         str(video_path.relative_to(settings.storage_path)),
-        f"generated_with_{model_preference or 'wan'}",
-        provider.id,
+        f"generated_with_{selected_model}",
+        resolved_pid,
         float(duration),
     )
 
