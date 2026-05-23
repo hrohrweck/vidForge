@@ -19,7 +19,7 @@ function mapMessage(api: ApiMessage): Message {
 export default function Chat() {
   const selectedConversationId = useChatStore((s) => s.selectedConversationId)
   const messages = useChatStore((s) =>
-    selectedConversationId ? s.messages[selectedConversationId] : []
+    selectedConversationId ? (s.messages[selectedConversationId] || []) : []
   )
   const appendMessage = useChatStore((s) => s.appendMessage)
 
