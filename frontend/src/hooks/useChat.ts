@@ -92,7 +92,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
         for await (const event of events) {
           const eventData = event.data as Record<string, unknown>
           switch (event.event) {
-            case 'message_delta': {
+            case 'token': {
               const delta = (eventData.content as string) ?? ''
               accumulatedDelta += delta
               updateStreamingMessage(conversationId, delta)
@@ -113,7 +113,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
               setToolMessages((prev) => [...prev, toolMsg])
               break
             }
-            case 'tool_result': {
+            case 'tool_call_result': {
               const toolMsg = {
                 id: crypto.randomUUID(),
                 role: 'tool' as const,

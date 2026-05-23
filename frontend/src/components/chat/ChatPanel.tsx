@@ -115,30 +115,33 @@ export function ChatPanel() {
     setStreamError(null)
 
     try {
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        createdAt: new Date().toISOString(),
+      }
+      appendMessage(selectedConversationId, assistantMsg)
+
       const stream = chatApi.streamMessage(
         selectedConversationId,
         text,
         attachmentIds.length > 0 ? attachmentIds : undefined
       )
 
-      let assistantMsg: Message | null = null
       for await (const event of stream) {
-        if (event.event === 'message_start') {
-          assistantMsg = {
-            id: event.data.message_id as string,
-            role: 'assistant',
-            content: '',
-            createdAt: new Date().toISOString(),
-          }
-          appendMessage(selectedConversationId, assistantMsg)
-        } else if (event.event === 'message_delta' && assistantMsg) {
-          assistantMsg.content += event.data.content as string
+        const eventData = event.data as Record<string, unknown>
+        if (event.event === 'token') {
+          const delta = (eventData.content as string) ?? ''
+          assistantMsg.content += delta
         } else if (event.event === 'error') {
-          setStreamError(event.data.error as string)
+          setStreamError((eventData.error as string) ?? 'Stream error')
         }
       }
     } catch (err) {
-      setStreamError(err instanceof Error ? err.message : 'Stream failed')
+      if (err instanceof Error && err.name !== 'AbortError') {
+        setStreamError(err instanceof Error ? err.message : 'Stream failed')
+      }
     } finally {
       setStreaming(false)
     }

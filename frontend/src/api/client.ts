@@ -805,28 +805,16 @@ export interface Message {
 }
 
 export type ChatStreamEventType =
-  | 'message_start'
-  | 'message_end'
-  | 'message_delta'
+  | 'token'
   | 'tool_call_start'
-  | 'tool_call_end'
-  | 'tool_result'
+  | 'tool_call_result'
   | 'error'
+  | 'done'
+  | 'usage'
 
 export interface ChatStreamEvent {
   event: ChatStreamEventType
   data: Record<string, unknown>
-}
-
-export interface ChatStreamMessageStart {
-  event: 'message_start'
-  message_id: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
-}
-
-export interface ChatStreamMessageDelta {
-  event: 'message_delta'
-  content: string
 }
 
 export interface ChatStreamToolCallStart {
@@ -837,7 +825,7 @@ export interface ChatStreamToolCallStart {
 }
 
 export interface ChatStreamToolResult {
-  event: 'tool_result'
+  event: 'tool_call_result'
   tool_call_id: string
   output?: string
   error?: string
@@ -900,7 +888,7 @@ export const chatApi = {
     signal?: AbortSignal
   ): AsyncGenerator<ChatStreamEvent, void, unknown> {
     const token = useAuthStore.getState().token
-    const response = await fetch(`/api/chat/conversations/${conversationId}/stream`, {
+    const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -922,6 +910,7 @@ export const chatApi = {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let currentEvent = ''
 
     try {
       while (true) {
@@ -933,15 +922,18 @@ export const chatApi = {
         buffer = lines.pop() ?? ''
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
             const data = line.slice(6).trim()
             if (data && data !== '[DONE]') {
               try {
-                const parsed = JSON.parse(data) as ChatStreamEvent
-                yield parsed
+                const parsed = JSON.parse(data)
+                yield { event: currentEvent, data: parsed } as ChatStreamEvent
               } catch {
               }
             }
+            currentEvent = ''
           }
         }
       }
