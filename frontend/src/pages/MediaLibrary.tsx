@@ -122,10 +122,9 @@ export function MediaLibrary() {
   }, [])
 
   const handleAssetDoubleClick = useCallback((asset: MediaAsset) => {
-    const index = allAssets.findIndex((a) => a.id === asset.id)
-    setLightboxIndex(index >= 0 ? index : 0)
-    setIsLightboxOpen(true)
-  }, [allAssets])
+    setSelectedAssetForDetails(asset)
+    setIsDetailPanelOpen(true)
+  }, [])
 
   const handleContextMenu = useCallback((asset: MediaAsset, event: React.MouseEvent) => {
     event.preventDefault()
