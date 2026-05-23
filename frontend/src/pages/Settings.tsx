@@ -462,7 +462,7 @@ export default function Settings() {
                       onClick={() =>
                         updateModelPreferencesMutation.mutate({
                           image_model: model.id,
-                          video_model: modelPreferences?.video_model || 'wan2.2-t2v',
+                          video_model: modelPreferences?.video_model || 'wan2.2',
                           text_model: modelPreferences?.text_model || 'qwen3.6:35b',
                           image_provider: modelPreferences?.image_provider || 'local',
                           video_provider: modelPreferences?.video_provider || 'local',
@@ -535,6 +535,15 @@ export default function Settings() {
                           <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
                         )}
                       </div>
+                      {model.variants && (
+                        <div className="flex gap-1 mt-2 flex-wrap">
+                          {Object.entries(model.variants).map(([key, variant]: [string, any]) => (
+                            <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0">
+                              {variant.description}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -555,7 +564,7 @@ export default function Settings() {
                       onClick={() =>
                         updateModelPreferencesMutation.mutate({
                           image_model: modelPreferences?.image_model || 'flux1-schnell',
-                          video_model: modelPreferences?.video_model || 'wan2.2-t2v',
+                          video_model: modelPreferences?.video_model || 'wan2.2',
                           text_model: model.id,
                           image_provider: modelPreferences?.image_provider || 'local',
                           video_provider: modelPreferences?.video_provider || 'local',

@@ -46,7 +46,7 @@ pipeline:
     outputs:
       - enhanced_prompt
   - step: generate_video
-    model: wan2.2_t2v
+    model: wan2.2
     description: "Generate video from prompt"
     inputs:
       - enhanced_prompt

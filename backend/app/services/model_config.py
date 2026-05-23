@@ -34,28 +34,49 @@ AVAILABLE_IMAGE_MODELS: list[dict[str, Any]] = [
 
 AVAILABLE_VIDEO_MODELS: list[dict[str, Any]] = [
     {
-        "id": "wan2.2-t2v",
-        "name": "Wan 2.2 T2V",
-        "description": "Text-to-video generation. Good quality, moderate speed.",
+        "id": "wan2.2",
+        "name": "WAN 2.2",
+        "description": "Versatile video generation with text-to-video, image-to-video, and scene continuation support.",
         "size_gb": 16.7,
         "speed": "moderate",
         "quality": "good",
         "license": "Apache 2.0",
         "provider": "local",
-        "comfyui_workflow": "wan_t2v.json",
         "default": True,
+        "variants": {
+            "t2v": {"workflow": "wan_t2v.json", "description": "Text-to-video"},
+            "i2v": {"workflow": "wan_i2v.json", "description": "Image-to-video"},
+            "s2v": {"workflow": "wan_s2v.json", "description": "Scene continuation"},
+        },
     },
     {
-        "id": "ltx2.3-t2v",
-        "name": "LTX 2.3 T2V",
-        "description": "High-quality video generation. Very large model.",
+        "id": "ltx2.3",
+        "name": "LTX 2.3",
+        "description": "High-quality video generation with native audio support. Best for final output.",
         "size_gb": 43,
         "speed": "slow",
         "quality": "excellent",
         "license": "Proprietary",
         "provider": "local",
-        "comfyui_workflow": "ltx_t2v.json",
         "default": False,
+        "variants": {
+            "t2v": {"workflow": "ltx_t2v.json", "description": "Text-to-video"},
+            "i2v": {"workflow": "ltx_i2v.json", "description": "Image-to-video"},
+        },
+    },
+    {
+        "id": "ltx2.3-fast",
+        "name": "LTX 2.3 Fast",
+        "description": "Distilled 8-step model for rapid iteration. Good quality at 3x speed.",
+        "size_gb": 43,
+        "speed": "fast",
+        "quality": "good",
+        "license": "Proprietary",
+        "provider": "local",
+        "default": False,
+        "variants": {
+            "distilled": {"workflow": "ltx_distilled.json", "description": "Distilled (8-step)"},
+        },
     },
 ]
 
@@ -189,7 +210,7 @@ def get_default_model_preferences() -> dict[str, str]:
     """Get default model preferences."""
     return {
         "image_model": "flux1-schnell",
-        "video_model": "wan2.2-t2v",
+        "video_model": "wan2.2",
         "text_model": "qwen3.6:35b",
         "image_provider": "local",
         "video_provider": "local",
@@ -219,6 +240,8 @@ def get_model_config(model_id: str) -> dict[str, Any] | None:
 
 def validate_model_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
     """Validate and sanitize model preferences."""
+    from app.services.model_resolver import get_family_from_legacy_id
+
     defaults = get_default_model_preferences()
     validated: dict[str, Any] = {}
 
@@ -235,6 +258,8 @@ def validate_model_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
         ("text_model", defaults["text_model"]),
     ]:
         val = preferences.get(key, default)
+        if key == "video_model":
+            val = get_family_from_legacy_id(val)
         validated[key] = val if val in all_ids else default
 
     validated["image_provider"] = preferences.get(

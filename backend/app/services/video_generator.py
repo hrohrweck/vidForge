@@ -16,6 +16,7 @@ from app.services.llm_service import (
     enhance_prompt_for_video,
     segment_script_for_video,
 )
+from app.services.model_resolver import get_family_from_legacy_id, resolve_model_variant
 from app.services.template_loader import (
     StyleLoader,
     TemplateLoader,
@@ -526,7 +527,14 @@ class VideoGenerator:
         aspect_ratio = context.get("aspect_ratio", "16:9")
         width, height = self._get_dimensions(aspect_ratio)
 
-        workflow_name = step.get("model", "wan_s2v")
+        model_name = step.get("model", "wan_s2v")
+        family_id = get_family_from_legacy_id(model_name)
+        variant_id = resolve_model_variant(
+            family_id,
+            has_seed_image=bool(context.get("reference_image_path")),
+            is_scene_continuation=True,
+        )
+        workflow_name = variant_id.replace("_", ".")
         workflow_path = Path(settings.comfyui_workflows_path) / f"{workflow_name}.json"
         if not workflow_path.exists():
             workflow_path = Path(settings.comfyui_workflows_path) / "wan_s2v.json"
@@ -611,11 +619,19 @@ class VideoGenerator:
         self, step: dict, context: dict, style_params: dict
     ) -> dict[str, Any]:
         model_name = step.get("model", "wan_t2v")
+        family_id = get_family_from_legacy_id(model_name)
+        variant_id = resolve_model_variant(
+            family_id,
+            has_seed_image=bool(context.get("reference_image_path")),
+            is_scene_continuation=False,
+        )
         workflow_map = {
             "wan_t2v": "wan_t2v.json",
             "wan_s2v": "wan_s2v.json",
+            "wan_i2v": "wan_i2v.json",
             "wan2.2_t2v": "wan_t2v.json",
             "wan2.2_s2v": "wan_s2v.json",
+            "wan2.2_i2v": "wan_i2v.json",
             "ltx_t2v": "ltx_t2v.json",
             "ltx_i2v": "ltx_i2v.json",
             "ltx_distilled": "ltx_distilled.json",
@@ -623,7 +639,7 @@ class VideoGenerator:
             "ltx2.3_i2v": "ltx_i2v.json",
             "ltx2.3_distilled": "ltx_distilled.json",
         }
-        workflow_file = workflow_map.get(model_name, "wan_t2v.json")
+        workflow_file = workflow_map.get(variant_id, "wan_t2v.json")
         workflow_path = Path(settings.comfyui_workflows_path) / workflow_file
 
         workflow = load_comfyui_workflow(str(workflow_path))

@@ -56,7 +56,7 @@ pipeline:
     outputs:
       - scene_prompts
   - step: generate_scenes
-    model: wan2.2_t2v
+    model: wan2.2
     description: "Generate video for each scene"
     inputs:
       - scene_prompts

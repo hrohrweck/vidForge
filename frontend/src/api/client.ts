@@ -753,6 +753,7 @@ export interface ModelConfig {
   license: string
   provider: string
   default: boolean
+  variants?: Record<string, { workflow: string; description: string }>
 }
 
 export interface ModelPreferences {

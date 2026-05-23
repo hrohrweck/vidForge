@@ -11,6 +11,11 @@ from app.config import get_settings
 from app.database import Job, Provider, UserSettings
 from app.services.job_router import JobRouter
 from app.services.model_config import get_default_model_preferences
+from app.services.model_registry import get_model
+from app.services.model_resolver import (
+    get_family_from_legacy_id,
+    resolve_model_variant,
+)
 from app.services.providers import (
     ComfyUIDirectProvider,
     PoeProvider,
@@ -23,8 +28,10 @@ settings = get_settings()
 VIDEO_WORKFLOW_MAP: dict[str, str] = {
     "wan2.2_t2v": "wan_t2v.json",
     "wan2.2_s2v": "wan_s2v.json",
+    "wan2.2_i2v": "wan_i2v.json",
     "wan_t2v": "wan_t2v.json",
     "wan_s2v": "wan_s2v.json",
+    "wan_i2v": "wan_i2v.json",
     "ltx2.3_t2v": "ltx_t2v.json",
     "ltx2.3_i2v": "ltx_i2v.json",
     "ltx_t2v": "ltx_t2v.json",
@@ -141,7 +148,7 @@ async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[st
 
     return {
         "image_model": model_prefs.get("image_model", "flux1-schnell"),
-        "video_model": model_prefs.get("video_model", "wan2.2-t2v"),
+        "video_model": model_prefs.get("video_model", "wan2.2"),
         "image_provider": model_prefs.get("image_provider", "local"),
         "video_provider": model_prefs.get("video_provider", "local"),
     }
@@ -265,7 +272,8 @@ async def _resolve_video_provider(
 ) -> tuple[str, UUID | None, str, Any]:
     """Resolve which provider and model to use for video generation."""
     user_prefs = await get_user_model_preferences(db, job.user_id)
-    selected_model = model_preference or user_prefs.get("video_model", "wan2.2-t2v")
+    selected_model = model_preference or user_prefs.get("video_model", "wan2.2")
+    selected_model = get_family_from_legacy_id(selected_model)
 
     # Poe model → use the Poe provider directly
     if selected_model.startswith("poe:"):
@@ -395,28 +403,48 @@ async def generate_video(
     # ComfyUI local provider
     frames = _duration_to_frames(duration)
 
-    if reference_image_path:
-        # I2V: upload image to ComfyUI and use it as first-frame latent
-        image_path = Path(settings.storage_path) / reference_image_path
-        if image_path.exists():
-            image_name = await _upload_image_to_comfyui(instance, image_path)
-            workflow = _build_wan_i2v_workflow(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-                frames=frames,
-                image_name=image_name,
-                provider_config=instance.config,
-            )
+    variant_id = resolve_model_variant(
+        selected_model,
+        has_seed_image=bool(reference_image_path),
+        is_scene_continuation=False,
+    )
+    model_info = get_model(variant_id)
+    if not model_info:
+        raise ValueError(f"Unknown model variant: {variant_id}")
+
+    if variant_id.startswith("wan"):
+        if reference_image_path:
+            image_path = Path(settings.storage_path) / reference_image_path
+            if image_path.exists():
+                image_name = await _upload_image_to_comfyui(instance, image_path)
+                workflow = _build_wan_i2v_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    frames=frames,
+                    image_name=image_name,
+                    provider_config=instance.config,
+                )
+            else:
+                workflow = _build_wan_video_workflow(
+                    prompt=prompt, aspect_ratio=aspect_ratio,
+                    frames=frames, provider_config=instance.config,
+                )
         else:
             workflow = _build_wan_video_workflow(
                 prompt=prompt, aspect_ratio=aspect_ratio,
                 frames=frames, provider_config=instance.config,
             )
-    else:
-        workflow = _build_wan_video_workflow(
-            prompt=prompt, aspect_ratio=aspect_ratio,
-            frames=frames, provider_config=instance.config,
+    elif variant_id.startswith("ltx"):
+        workflow = await _build_ltx_workflow(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            frames=frames,
+            variant_id=variant_id,
+            reference_image_path=reference_image_path,
+            instance=instance,
         )
+    else:
+        raise ValueError(f"Unsupported model variant: {variant_id}")
 
     prompt_id = await instance.queue_prompt(workflow)
     result = await instance.wait_for_completion(prompt_id)
@@ -427,7 +455,7 @@ async def generate_video(
         raise ValueError("ComfyUI returned no output data")
     return (
         str(video_path.relative_to(settings.storage_path)),
-        f"generated_with_{selected_model}",
+        f"generated_with_{variant_id}",
         resolved_pid,
         float(duration),
     )
@@ -608,6 +636,81 @@ def _build_wan_i2v_workflow(
             "inputs": {"video": ["11", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
         },
     }
+
+
+async def _build_ltx_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    frames: int,
+    variant_id: str,
+    reference_image_path: str | None,
+    instance: ComfyUIDirectProvider,
+) -> dict[str, Any]:
+    """Load and parameterise an LTX workflow JSON for the requested variant."""
+    from pathlib import Path
+
+    workflow_file = VIDEO_WORKFLOW_MAP.get(variant_id)
+    if not workflow_file:
+        raise ValueError(f"No workflow file mapped for variant {variant_id}")
+
+    workflow_path = Path(__file__).resolve().parent.parent / "comfyui" / "workflows" / workflow_file
+    if not workflow_path.exists():
+        raise ValueError(f"LTX workflow file not found: {workflow_path}")
+
+    with workflow_path.open("r", encoding="utf-8") as f:
+        workflow: dict[str, Any] = json.load(f)
+
+    width, height = _video_generation_resolution(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    text_encode_nodes: list[str] = []
+    latent_node: str | None = None
+    sampler_node: str | None = None
+    video_node: str | None = None
+    image_node: str | None = None
+
+    for node_id, node in workflow.items():
+        class_type = node.get("class_type", "")
+        if class_type == "CLIPTextEncode":
+            text_encode_nodes.append(node_id)
+        elif class_type in ("EmptyLTXVLatentVideo", "LTXVImgToVideo"):
+            latent_node = node_id
+        elif class_type == "KSampler":
+            sampler_node = node_id
+        elif class_type == "CreateVideo":
+            video_node = node_id
+        elif class_type == "LoadImage":
+            image_node = node_id
+
+    if len(text_encode_nodes) < 2:
+        raise ValueError("LTX workflow must contain at least two CLIPTextEncode nodes")
+    if not latent_node:
+        raise ValueError("LTX workflow missing latent node")
+    if not sampler_node:
+        raise ValueError("LTX workflow missing KSampler node")
+    if not video_node:
+        raise ValueError("LTX workflow missing CreateVideo node")
+
+    workflow[text_encode_nodes[0]]["inputs"]["text"] = prompt
+    workflow[text_encode_nodes[1]]["inputs"]["text"] = ""
+
+    workflow[latent_node]["inputs"]["width"] = width
+    workflow[latent_node]["inputs"]["height"] = height
+    workflow[latent_node]["inputs"]["length"] = frames
+
+    workflow[sampler_node]["inputs"]["seed"] = seed
+    workflow[sampler_node]["inputs"]["steps"] = 30
+    workflow[sampler_node]["inputs"]["cfg"] = 3.0
+
+    workflow[video_node]["inputs"]["fps"] = 16
+
+    if image_node and reference_image_path:
+        image_path = Path(settings.storage_path) / reference_image_path
+        if image_path.exists():
+            image_name = await _upload_image_to_comfyui(instance, image_path)
+            workflow[image_node]["inputs"]["image"] = image_name
+
+    return workflow
 
 
 def _build_comfyui_image_workflow(

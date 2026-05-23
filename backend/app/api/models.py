@@ -27,7 +27,7 @@ class ModelDetailResponse(dict):
 
 class ModelPreferences(BaseModel):
     image_model: str = "flux1-schnell"
-    video_model: str = "wan2.2-t2v"
+    video_model: str = "wan2.2"
     text_model: str = "qwen3.6:35b"
     image_provider: str = "local"
     video_provider: str = "local"
