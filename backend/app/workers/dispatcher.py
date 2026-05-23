@@ -174,7 +174,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
             job.status = "failed"
             job.error_message = str(exc)
             await db.commit()
-            return {"status": "failed", "error": str(exc), "job_id": job_id}
+            raise
 
 
 async def dispatch_scene_rerender(

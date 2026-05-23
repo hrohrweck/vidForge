@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     admin,
+    admin_mcp,
     audio,
     auth,
+    chat,
     jobs,
     media,
     models,
@@ -104,11 +106,13 @@ app.include_router(styles.router, prefix="/api/styles", tags=["styles"])
 app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(admin_mcp.router, prefix="/api/admin", tags=["admin"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(scenes.router, prefix="/api/jobs", tags=["scenes"])
 app.include_router(media.router, prefix="/api/media", tags=["media"])
 app.include_router(audio.router, prefix="/api/audio", tags=["audio"])
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 
 

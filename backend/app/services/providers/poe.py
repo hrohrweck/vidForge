@@ -2,15 +2,35 @@ import asyncio
 import base64
 import json
 import re
+from collections.abc import AsyncIterator
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 import httpx
 
+from app.services.llm_service import LLMChunk, LLMError
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 
 
 class PoeProvider(ComfyUIProvider):
+    _TOOL_CAPABLE_TEXT_MODELS = {
+        "claude-opus-4.7",
+        "claude-sonnet-4.6",
+        "gemini-3.1-pro",
+        "gpt-5.4",
+        "o3-mini",
+    }
+
+    _POE_TEXT_MODELS = (
+        "claude",
+        "gemini",
+        "gpt",
+        "o1",
+        "o3",
+        "o4",
+        "qwen",
+    )
+
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
         self.config = config
@@ -49,6 +69,128 @@ class PoeProvider(ComfyUIProvider):
 
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         raise NotImplementedError("Poe provider uses different method for media generation")
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        """Stream Poe chat completions as the shared LLMChunk contract."""
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools is not None:
+            payload["tools"] = tools
+
+        tool_calls: list[dict[str, Any]] = []
+        usage: dict[str, Any] | None = None
+
+        try:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+
+                    data = self._parse_stream_line(line)
+                    if data is None:
+                        if tool_calls:
+                            yield LLMChunk(type="tool_call", tool_calls=tool_calls)
+                        if usage:
+                            yield LLMChunk(
+                                type="usage",
+                                tokens_in=usage.get("prompt_tokens"),
+                                tokens_out=usage.get("completion_tokens"),
+                            )
+                        yield LLMChunk(type="done")
+                        return
+
+                    if error := data.get("error"):
+                        if isinstance(error, dict):
+                            raise LLMError(str(error.get("message") or error))
+                        raise LLMError(str(error))
+
+                    if data.get("usage"):
+                        usage = data["usage"]
+
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+
+                    delta = choices[0].get("delta") or {}
+                    content = delta.get("content")
+                    if content:
+                        yield LLMChunk(type="text", content=content)
+
+                    incoming_tool_calls = delta.get("tool_calls")
+                    if incoming_tool_calls:
+                        self._merge_tool_call_deltas(tool_calls, incoming_tool_calls)
+        except LLMError:
+            raise
+        except Exception as exc:
+            raise LLMError(f"Poe stream failed: {type(exc).__name__}: {exc}") from exc
+
+        raise LLMError("Poe stream ended without a done chunk")
+
+    @staticmethod
+    def _parse_stream_line(line: str) -> dict[str, Any] | None:
+        data = line.strip()
+        if data.startswith("data:"):
+            data = data.removeprefix("data:").strip()
+        if data == "[DONE]":
+            return None
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"Invalid streamed Poe response: {line}") from exc
+        if not isinstance(parsed, dict):
+            raise LLMError(f"Invalid streamed Poe response: {line}")
+        return parsed
+
+    @staticmethod
+    def _merge_tool_call_deltas(
+        accumulated: list[dict[str, Any]],
+        incoming: list[dict[str, Any]],
+    ) -> None:
+        for position, tool_call in enumerate(incoming):
+            index = tool_call.get("index", position) if isinstance(tool_call, dict) else position
+            if not isinstance(index, int):
+                index = position
+
+            while len(accumulated) <= index:
+                accumulated.append({})
+
+            PoeProvider._merge_tool_call_delta(accumulated[index], tool_call)
+
+    @staticmethod
+    def _merge_tool_call_delta(target: dict[str, Any], delta: dict[str, Any]) -> None:
+        for key, value in delta.items():
+            if key == "index" or value is None:
+                continue
+
+            existing = target.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                PoeProvider._merge_tool_call_delta(existing, value)
+            elif isinstance(existing, str) and isinstance(value, str):
+                if key in {"arguments", "content"}:
+                    target[key] = existing + value
+                elif value and value != existing:
+                    target[key] = value
+            else:
+                target[key] = value
 
     # Aspect ratio to size mapping for Poe Videos API
     _ASPECT_RATIO_SIZES: dict[str, str] = {
@@ -132,7 +274,11 @@ class PoeProvider(ComfyUIProvider):
             f"Poe generate_video (chat): model={model}, has_image={image_path is not None}"
         )
 
-        response = await self.client.post(
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
+        response = await client.post(
             f"{self.base_url}/chat/completions",
             json={
                 "model": model,
@@ -193,8 +339,12 @@ class PoeProvider(ComfyUIProvider):
             f"seconds={create_body['seconds']}, has_image={'input_image' in create_body}"
         )
 
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
         # Step 1: Create video
-        create_response = await self.client.post(
+        create_response = await client.post(
             f"{self.base_url}/videos",
             json=create_body,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -219,7 +369,7 @@ class PoeProvider(ComfyUIProvider):
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-            poll_response = await self.client.get(
+            poll_response = await client.get(
                 f"{self.base_url}/videos/{video_id}",
                 headers={"Authorization": f"Bearer {self.api_key}"},
             )
@@ -240,7 +390,7 @@ class PoeProvider(ComfyUIProvider):
             raise RuntimeError(f"Poe video generation timed out after {timeout}s (status={status})")
 
         # Step 3: Download video content
-        download_response = await self.client.get(
+        download_response = await client.get(
             f"{self.base_url}/videos/{video_id}/content",
             headers={"Authorization": f"Bearer {self.api_key}"},
         )
@@ -305,7 +455,11 @@ class PoeProvider(ComfyUIProvider):
         logger = logging.getLogger(__name__)
         logger.info(f"Poe generate_image request: model={model}, has_image={image_path is not None}")
 
-        response = await self.client.post(
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
+        response = await client.post(
             f"{self.base_url}/chat/completions",
             json=request_body,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -316,7 +470,7 @@ class PoeProvider(ComfyUIProvider):
             raise RuntimeError(f"Poe API error: {error_msg}")
 
         result = response.json()
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        content = str(result.get("choices", [{}])[0].get("message", {}).get("content", ""))
 
         return result.get("id", ""), self._parse_media_content(content)
 
@@ -467,11 +621,26 @@ class PoeProvider(ComfyUIProvider):
 
     def get_text_models(self) -> list[dict]:
         text_only = [
-            m
+            {
+                **m,
+                "supports_tools": self._model_supports_tools(m.get("id", "")),
+            }
             for m in self._available_models
-            if m.get("architecture", {}).get("output_modalities") == ["text"]
+            if self._is_text_model(m)
         ]
         return text_only
+
+    @classmethod
+    def _is_text_model(cls, model: dict[str, Any]) -> bool:
+        output_modalities = model.get("architecture", {}).get("output_modalities")
+        if output_modalities == ["text"]:
+            return True
+        model_id = str(model.get("id", "")).lower()
+        return any(model_id.startswith(prefix) for prefix in cls._POE_TEXT_MODELS)
+
+    @classmethod
+    def _model_supports_tools(cls, model_id: str) -> bool:
+        return model_id.lower() in cls._TOOL_CAPABLE_TEXT_MODELS
 
 
 async def create_poe_provider(provider_id: UUID, config: dict) -> PoeProvider:

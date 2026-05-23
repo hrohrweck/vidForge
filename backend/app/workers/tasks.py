@@ -590,7 +590,12 @@ async def _merge_videos(job_id: str, segment_paths: list[str]) -> dict:
 # ======================================================================
 
 
-@celery_app.task(bind=True, time_limit=TASK_TIME_LIMIT)
+@celery_app.task(
+    bind=True,
+    time_limit=TASK_TIME_LIMIT,
+    max_retries=3,
+    default_retry_delay=30,
+)
 def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
     """Run a pipeline stage via the plugin dispatcher."""
     from app.workers.dispatcher import dispatch_stage

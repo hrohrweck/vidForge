@@ -91,6 +91,8 @@ AVAILABLE_TEXT_MODELS: list[dict[str, Any]] = [
         "license": "Apache 2.0",
         "provider": "local",
         "ollama_model": "qwen3.6:35b",
+        "supports_tools": True,
+        "supports_vision": False,
         "default": True,
     },
     {
@@ -103,6 +105,8 @@ AVAILABLE_TEXT_MODELS: list[dict[str, Any]] = [
         "license": "Llama 3.3",
         "provider": "local",
         "ollama_model": "llama3.3:70b",
+        "supports_tools": True,
+        "supports_vision": False,
         "default": False,
     },
     {
@@ -115,6 +119,8 @@ AVAILABLE_TEXT_MODELS: list[dict[str, Any]] = [
         "license": "Apache 2.0",
         "provider": "local",
         "ollama_model": "qwen3.6:14b",
+        "supports_tools": False,
+        "supports_vision": False,
         "default": False,
     },
     {
@@ -127,6 +133,8 @@ AVAILABLE_TEXT_MODELS: list[dict[str, Any]] = [
         "license": "Apache 2.0",
         "provider": "local",
         "ollama_model": "huihui_ai/qwen3.6-abliterated:35b-Claude-4.7",
+        "supports_tools": False,
+        "supports_vision": False,
         "default": False,
     },
 ]

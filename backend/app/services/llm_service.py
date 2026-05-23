@@ -1,15 +1,29 @@
 import asyncio
-from typing import Any
+import json
+import logging
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any, Literal
 
 import httpx
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 class LLMError(Exception):
     pass
+
+
+@dataclass
+class LLMChunk:
+    type: Literal["text", "tool_call", "usage", "done"]
+    content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
 
 
 class LLMClient:
@@ -20,6 +34,111 @@ class LLMClient:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        """Stream Ollama chat responses as typed chunks.
+
+        Ollama's native ``/api/chat`` endpoint returns newline-delimited JSON when
+        ``stream`` is true. Text is yielded immediately; tool-call fragments are
+        accumulated and emitted once as a complete tool-call chunk before usage
+        and done chunks.
+        """
+
+        payload: dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "stream": True,
+        }
+        if tools is not None:
+            payload["tools"] = tools
+
+        tool_calls: list[dict[str, Any]] = []
+        try:
+            async with self.client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise LLMError(f"Invalid streamed LLM response: {line}") from exc
+
+                    if data.get("error"):
+                        raise LLMError(str(data["error"]))
+
+                    message = data.get("message") or {}
+                    content = message.get("content")
+                    if content:
+                        yield LLMChunk(type="text", content=content)
+
+                    incoming_tool_calls = message.get("tool_calls")
+                    if incoming_tool_calls:
+                        self._merge_tool_call_deltas(tool_calls, incoming_tool_calls)
+
+                    if data.get("done"):
+                        if tool_calls:
+                            yield LLMChunk(type="tool_call", tool_calls=tool_calls)
+
+                        tokens_in = data.get("prompt_eval_count")
+                        tokens_out = data.get("eval_count")
+                        if tokens_in is not None or tokens_out is not None:
+                            yield LLMChunk(
+                                type="usage",
+                                tokens_in=tokens_in,
+                                tokens_out=tokens_out,
+                            )
+
+                        yield LLMChunk(type="done")
+                        return
+        except LLMError:
+            raise
+        except Exception as exc:
+            raise LLMError(f"LLM stream failed: {type(exc).__name__}: {exc}") from exc
+
+        raise LLMError("LLM stream ended without a done chunk")
+
+    @staticmethod
+    def _merge_tool_call_deltas(
+        accumulated: list[dict[str, Any]],
+        incoming: list[dict[str, Any]],
+    ) -> None:
+        for position, tool_call in enumerate(incoming):
+            index = tool_call.get("index", position) if isinstance(tool_call, dict) else position
+            if not isinstance(index, int):
+                index = position
+
+            while len(accumulated) <= index:
+                accumulated.append({})
+
+            LLMClient._merge_tool_call_delta(accumulated[index], tool_call)
+
+    @staticmethod
+    def _merge_tool_call_delta(target: dict[str, Any], delta: dict[str, Any]) -> None:
+        for key, value in delta.items():
+            if key == "index" or value is None:
+                continue
+
+            existing = target.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                LLMClient._merge_tool_call_delta(existing, value)
+            elif isinstance(existing, str) and isinstance(value, str):
+                if key in {"arguments", "content"}:
+                    target[key] = existing + value
+                elif value and value != existing:
+                    target[key] = value
+            else:
+                target[key] = value
 
     async def generate(
         self,
@@ -62,14 +181,25 @@ class LLMClient:
                     raise LLMError(f"Empty response from LLM (model: {self.model})")
 
                 return content
-            except httpx.HTTPError as e:
+            except Exception as e:
                 last_error = e
+                wait = 2 ** attempt
+                logger.warning(
+                    "LLM request attempt %d/%d failed (wait=%ds): %s: %s",
+                    attempt + 1,
+                    retries,
+                    wait,
+                    type(e).__name__,
+                    e,
+                )
                 if attempt < retries - 1:
-                    wait = 2 ** attempt
                     await asyncio.sleep(wait)
                 continue
 
-        raise LLMError(f"LLM request failed after {retries} attempts: {last_error}")
+        error_type = type(last_error).__name__ if last_error else "Unknown"
+        error_msg = str(last_error) if last_error else "no error details"
+        full_error = f"{error_type}: {error_msg}"
+        raise LLMError(f"LLM request failed after {retries} attempts: {full_error}")
 
     async def generate_with_context(
         self,

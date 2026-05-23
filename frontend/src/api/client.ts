@@ -764,3 +764,268 @@ export interface ModelPreferences {
   video_provider: string
   text_provider: string
 }
+
+// Chat API types and namespace
+
+export interface MessagePart {
+  type: 'text' | 'image' | 'audio' | 'script'
+  content: string | Record<string, unknown>
+}
+
+export interface ToolCall {
+  id: string
+  name: string
+  arguments: Record<string, string>
+}
+
+export interface ToolResult {
+  tool_call_id: string
+  output?: string | null
+  error?: string | null
+}
+
+export interface Conversation {
+  id: string
+  user_id: string
+  title: string | null
+  created_at: string
+  updated_at: string
+  last_message_at: string | null
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  parts: MessagePart[] | null
+  tool_calls: ToolCall[] | null
+  tool_call_id: string | null
+  created_at: string
+}
+
+export type ChatStreamEventType =
+  | 'message_start'
+  | 'message_end'
+  | 'message_delta'
+  | 'tool_call_start'
+  | 'tool_call_end'
+  | 'tool_result'
+  | 'error'
+
+export interface ChatStreamEvent {
+  event: ChatStreamEventType
+  data: Record<string, unknown>
+}
+
+export interface ChatStreamMessageStart {
+  event: 'message_start'
+  message_id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+}
+
+export interface ChatStreamMessageDelta {
+  event: 'message_delta'
+  content: string
+}
+
+export interface ChatStreamToolCallStart {
+  event: 'tool_call_start'
+  tool_call_id: string
+  name: string
+  arguments?: Record<string, string>
+}
+
+export interface ChatStreamToolResult {
+  event: 'tool_result'
+  tool_call_id: string
+  output?: string
+  error?: string
+}
+
+export interface ChatStreamError {
+  event: 'error'
+  error: string
+}
+
+export const chatApi = {
+  listConversations: async () => {
+    const response = await api.get<Conversation[]>('/chat/conversations')
+    return response.data
+  },
+
+  getConversation: async (id: string) => {
+    const response = await api.get<Conversation>(`/chat/conversations/${id}`)
+    return response.data
+  },
+
+  createConversation: async (title?: string, model_id?: string) => {
+    const response = await api.post<Conversation>('/chat/conversations', { title, model_id })
+    return response.data
+  },
+
+  renameConversation: async (id: string, title: string) => {
+    const response = await api.patch<Conversation>(`/chat/conversations/${id}`, { title })
+    return response.data
+  },
+
+  deleteConversation: async (id: string) => {
+    await api.delete(`/chat/conversations/${id}`)
+  },
+
+  listMessages: async (conversationId: string) => {
+    const response = await api.get<Message[]>(`/chat/conversations/${conversationId}/messages`)
+    return response.data
+  },
+
+  uploadAttachment: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await api.post<{
+      attachment_id: string
+      kind: string
+      mime_type: string
+      size: number
+      url: string
+    }>('/chat/uploads', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return response.data
+  },
+
+  streamMessage: async function* (
+    conversationId: string,
+    content: string,
+    attachments?: string[],
+    signal?: AbortSignal
+  ): AsyncGenerator<ChatStreamEvent, void, unknown> {
+    const token = useAuthStore.getState().token
+    const response = await fetch(`/api/chat/conversations/${conversationId}/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content, attachments }),
+      signal,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Stream request failed' }))
+      throw new Error(error.detail || `HTTP ${response.status}`)
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is null')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim()
+            if (data && data !== '[DONE]') {
+              try {
+                const parsed = JSON.parse(data) as ChatStreamEvent
+                yield parsed
+              } catch {
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  },
+
+  getTokenUsage: async () => {
+    const response = await api.get<{ items: Array<{
+      model_id: string
+      prompt_tokens: number
+      completion_tokens: number
+      total_tokens: number
+      estimated_cost: number | null
+      message_count: number
+    }> }>('/chat/token-usage')
+    return response.data
+  },
+}
+
+// MCP Admin API types and namespace
+
+export interface MCPServer {
+  id: string
+  name: string
+  description: string | null
+  command: string
+  args: string[] | null
+  env_keys: string[] | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface MCPServerWithCredentials extends MCPServer {
+  env: Record<string, string> | null
+}
+
+export interface MCPServerCreate {
+  name: string
+  description?: string
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+}
+
+export interface MCPServerUpdate {
+  name?: string
+  description?: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  is_active?: boolean
+}
+
+export interface MCPTool {
+  name: string
+  description?: string
+  input_schema?: Record<string, unknown>
+}
+
+export const mcpAdminApi = {
+  listServers: async () => {
+    const response = await api.get<MCPServer[]>('/mcp/servers')
+    return response.data
+  },
+
+  createServer: async (data: MCPServerCreate) => {
+    const response = await api.post<MCPServer>('/mcp/servers', data)
+    return response.data
+  },
+
+  updateServer: async (id: string, data: MCPServerUpdate) => {
+    const response = await api.patch<MCPServer>(`/mcp/servers/${id}`, data)
+    return response.data
+  },
+
+  deleteServer: async (id: string) => {
+    await api.delete(`/mcp/servers/${id}`)
+  },
+
+  listServerTools: async (id: string) => {
+    const response = await api.get<MCPTool[]>(`/mcp/servers/${id}/tools`)
+    return response.data
+  },
+}

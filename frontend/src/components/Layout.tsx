@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   User as UserIcon,
+  MessageSquare,
 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import { ThemeToggle } from './ThemeToggle'
@@ -52,6 +53,7 @@ const getNavEntries = (isSuperuser: boolean): NavEntry[] => [
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
   { to: '/media', label: 'Media Library', icon: Image },
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/settings', label: 'Settings', icon: Settings },
   ...(isSuperuser
     ? [

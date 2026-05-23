@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { jobsApi, templatesApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
+import TokenUsageHistogram from '../components/dashboard/TokenUsageHistogram'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -84,6 +85,8 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      <TokenUsageHistogram />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>

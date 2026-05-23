@@ -67,6 +67,7 @@ class WorkerContext:
             pool_size=5,
             max_overflow=10,
             pool_pre_ping=True,
+            pool_recycle=1800,
         )
         self._session_factory = async_sessionmaker(
             self._engine,
@@ -125,13 +126,21 @@ class WorkerContext:
     # ------------------------------------------------------------------
 
     def run(self, coro):
-        """Submit *coro* on the shared loop and block until it returns.
-
-        This is the bridge between synchronous Celery task functions and
-        the shared async event loop.  Thread-safe: any Celery worker
-        thread may call this.
-        """
-        assert self._loop is not None, "WorkerContext not started"
+        if self._loop is None or not self._loop.is_running():
+            logger.error(
+                "[WorkerContext] Event loop is not running (loop=%s). "
+                "Attempting to restart context...",
+                self._loop,
+            )
+            try:
+                self.stop()
+            except Exception:
+                pass
+            self.start()
+            if self._loop is None or not self._loop.is_running():
+                raise RuntimeError(
+                    "WorkerContext event loop is not running and could not be restarted"
+                )
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return fut.result()
 

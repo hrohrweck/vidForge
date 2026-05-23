@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -80,6 +81,84 @@ class Group(Base):
     )
 
 
+class Conversation(Base):
+    __tablename__ = "conversation"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="conversations")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan"
+    )
+    token_usages: Mapped[list["ChatTokenUsage"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+
+class Message(Base):
+    __tablename__ = "message"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    conversation_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("conversation.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    tool_call_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class MCPServer(Base):
+    __tablename__ = "mcp_server"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    auth_type: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    encrypted_credentials: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class ChatTokenUsage(Base):
+    __tablename__ = "chat_token_usage"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("conversation.id", ondelete="CASCADE"), nullable=True
+    )
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="chat_token_usages")
+    conversation: Mapped["Conversation | None"] = relationship(back_populates="token_usages")
+
+
 engine = create_async_engine(
     get_settings().database_url,
     echo=get_settings().debug,
@@ -135,6 +214,12 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     projects: Mapped[list["Project"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    chat_token_usages: Mapped[list["ChatTokenUsage"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 

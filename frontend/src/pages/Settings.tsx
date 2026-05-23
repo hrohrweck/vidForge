@@ -63,7 +63,7 @@ export default function Settings() {
   })
 
   const updateSettingsMutation = useMutation({
-    mutationFn: async (settings: typeof storageSettings) => {
+    mutationFn: async (settings: typeof storageSettings & { preferences?: { auto_create_jobs: boolean } }) => {
       const response = await fetch('/api/users/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -84,8 +84,13 @@ export default function Settings() {
     },
   })
 
+  const [autoCreateJobs, setAutoCreateJobs] = useState(false)
+
   const handleSaveSettings = () => {
-    updateSettingsMutation.mutate(storageSettings)
+    updateSettingsMutation.mutate({
+      ...storageSettings,
+      preferences: { auto_create_jobs: autoCreateJobs },
+    })
   }
 
   const formatFileSize = (bytes: number) => {
@@ -164,6 +169,22 @@ export default function Settings() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="auto_create_jobs"
+                  checked={autoCreateJobs}
+                  onChange={(e) => setAutoCreateJobs(e.target.checked)}
+                  className="h-4 w-4 rounded border-input"
+                />
+                <div>
+                  <Label htmlFor="auto_create_jobs">Auto-create jobs without confirmation</Label>
+                  <p className="text-xs text-muted-foreground">
+                    When enabled, jobs are created immediately without asking for confirmation
+                  </p>
+                </div>
               </div>
             </div>
           </div>
