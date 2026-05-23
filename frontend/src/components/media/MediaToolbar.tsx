@@ -102,8 +102,7 @@ export function MediaToolbar({
 
   const handleTypeFilterChange = (fileType: FileType | 'all') => {
     if (fileType === 'all') {
-      const { file_type, ...rest } = query
-      onQueryChange(rest as AssetListQuery)
+      onQueryChange({ ...query, file_type: undefined })
     } else {
       onQueryChange({ ...query, file_type: fileType })
     }
