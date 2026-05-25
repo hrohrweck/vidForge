@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from typing import Any, Awaitable, Callable
@@ -8,11 +9,15 @@ from uuid import UUID
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 from app.services.llm_service import LLMChunk, LLMError
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 
 
 class PoeProvider(ComfyUIProvider):
+    _models_without_tools: set[str] = set()  # Cache of models that don't support tool calling
+
     _TOOL_CAPABLE_TEXT_MODELS = {
         "claude-opus-4.7",
         "claude-sonnet-4.6",
@@ -83,13 +88,18 @@ class PoeProvider(ComfyUIProvider):
         if not client:
             raise RuntimeError("Provider not initialized")
 
+        # Skip tools if we know this model doesn't support them
+        effective_tools = tools
+        if effective_tools and model in self._models_without_tools:
+            effective_tools = None
+
         payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "stream": True,
         }
-        if tools:
-            payload["tools"] = tools
+        if effective_tools:
+            payload["tools"] = effective_tools
 
         tool_calls: list[dict[str, Any]] = []
         usage: dict[str, Any] | None = None
@@ -103,53 +113,93 @@ class PoeProvider(ComfyUIProvider):
             ) as response:
                 if response.status_code != 200:
                     body = await response.aread()
+                    body_text = body.decode("utf-8", errors="replace")
+                    # Auto-detect models that don't support tool calling
+                    if (
+                        effective_tools
+                        and "does not support tool calling" in body_text
+                    ):
+                        self._models_without_tools.add(model)
+                        # Retry without tools
+                        logger.warning(
+                            "Model %s does not support tools, retrying without",
+                            model,
+                        )
+                        payload.pop("tools", None)
+                        # Re-send the request without tools
+                        async with client.stream(
+                            "POST",
+                            f"{self.base_url}/chat/completions",
+                            json=payload,
+                            headers={"Authorization": f"Bearer {self.api_key}"},
+                        ) as retry_response:
+                            if retry_response.status_code != 200:
+                                retry_body = await retry_response.aread()
+                                raise LLMError(
+                                    f"Poe API error ({retry_response.status_code}): "
+                                    f"{retry_body.decode('utf-8', errors='replace')[:500]}"
+                                )
+                            async for event in self._stream_events(retry_response):
+                                yield event
+                            return
                     raise LLMError(
                         f"Poe API error ({response.status_code}): "
-                        f"{body.decode('utf-8', errors='replace')[:500]}"
+                        f"{body_text[:500]}"
                     )
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-
-                    data = self._parse_stream_line(line)
-                    if data is None:
-                        if tool_calls:
-                            yield LLMChunk(type="tool_call", tool_calls=tool_calls)
-                        if usage:
-                            yield LLMChunk(
-                                type="usage",
-                                tokens_in=usage.get("prompt_tokens"),
-                                tokens_out=usage.get("completion_tokens"),
-                            )
-                        yield LLMChunk(type="done")
-                        return
-
-                    if error := data.get("error"):
-                        if isinstance(error, dict):
-                            raise LLMError(str(error.get("message") or error))
-                        raise LLMError(str(error))
-
-                    if data.get("usage"):
-                        usage = data["usage"]
-
-                    choices = data.get("choices") or []
-                    if not choices:
-                        continue
-
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if content:
-                        yield LLMChunk(type="text", content=content)
-
-                    incoming_tool_calls = delta.get("tool_calls")
-                    if incoming_tool_calls:
-                        self._merge_tool_call_deltas(tool_calls, incoming_tool_calls)
+                async for event in self._stream_events(response):
+                    yield event
         except LLMError:
             raise
         except Exception as exc:
             raise LLMError(f"Poe stream failed: {type(exc).__name__}: {exc}") from exc
 
         raise LLMError("Poe stream ended without a done chunk")
+
+    async def _stream_events(
+        self,
+        response: httpx.Response,
+    ) -> AsyncIterator[LLMChunk]:
+        """Yield LLMChunks from an open SSE response stream."""
+        tool_calls: list[dict[str, Any]] = []
+        usage: dict[str, Any] | None = None
+
+        async for line in response.aiter_lines():
+            if not line:
+                continue
+
+            data = self._parse_stream_line(line)
+            if data is None:
+                if tool_calls:
+                    yield LLMChunk(type="tool_call", tool_calls=tool_calls)
+                if usage:
+                    yield LLMChunk(
+                        type="usage",
+                        tokens_in=usage.get("prompt_tokens"),
+                        tokens_out=usage.get("completion_tokens"),
+                    )
+                yield LLMChunk(type="done")
+                return
+
+            if error := data.get("error"):
+                if isinstance(error, dict):
+                    raise LLMError(str(error.get("message") or error))
+                raise LLMError(str(error))
+
+            if data.get("usage"):
+                usage = data["usage"]
+
+            choices = data.get("choices") or []
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta") or {}
+            content = delta.get("content")
+            if content:
+                yield LLMChunk(type="text", content=content)
+
+            incoming_tool_calls = delta.get("tool_calls")
+            if incoming_tool_calls:
+                self._merge_tool_call_deltas(tool_calls, incoming_tool_calls)
 
     @staticmethod
     def _parse_stream_line(line: str) -> dict[str, Any] | None:
