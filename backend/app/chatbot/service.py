@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot.mcp_client import MCPClientManager
 from app.chatbot.streaming import SSEEventType
 from app.chatbot.tools import ToolContext, ToolRegistry, create_builtin_registry, dispatch
-from app.database import ChatTokenUsage, Conversation, MCPServer, Message
+from app.database import ChatTokenUsage, Conversation, MCPServer, Message, Provider
 from app.services.llm_service import LLMClient
 from app.services.model_config import get_model_config
 
@@ -281,6 +281,33 @@ class ChatOrchestrator:
         self.context_limit = context_limit or self.default_context_limit
         self.conversations = ConversationService(db)
 
+    async def _resolve_llm(self, model_id: str) -> ChatLLM:
+        """Return the appropriate LLM client for the given model_id.
+
+        For Poe models (prefixed with ``poe:``), loads the Poe provider
+        from the database. Otherwise returns the default LLMClient.
+        """
+        if model_id.startswith("poe:"):
+            try:
+                from app.services.providers import PoeProvider
+
+                result = await self.db.execute(
+                    select(Provider).where(
+                        Provider.provider_type == "poe",
+                        Provider.is_active == True,  # noqa: E712
+                    )
+                )
+                for provider in result.scalars().all():
+                    try:
+                        instance = PoeProvider(provider.id, provider.config)
+                        await instance.initialize(provider.config)
+                        return instance
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        return LLMClient()
+
     async def run_turn(
         self,
         conversation_id: UUID,
@@ -308,6 +335,11 @@ class ChatOrchestrator:
         tokens_in = 0
         tokens_out = 0
 
+        # Resolve the LLM client for the selected model (Ollama vs Poe)
+        llm = await self._resolve_llm(model_id)
+        # Poe models are prefixed with "poe:" — strip it for the API call
+        actual_model = model_id.removeprefix("poe:") if model_id.startswith("poe:") else model_id
+
         for iteration in range(1, self.max_iterations + 1):
             if time.monotonic() - started_at >= self.max_wall_seconds:
                 yield self._error_event("wall_clock_limit_exceeded")
@@ -319,7 +351,7 @@ class ChatOrchestrator:
             loop_tokens_in = 0
             loop_tokens_out = 0
 
-            async for chunk in self.llm.chat_stream(history, model=model_id, tools=tools):
+            async for chunk in llm.chat_stream(history, model=actual_model, tools=tools):
                 if chunk.type == "text" and chunk.content:
                     text_parts.append(chunk.content)
                     yield (SSEEventType.TOKEN.value, {"content": chunk.content})
@@ -566,7 +598,9 @@ class ChatOrchestrator:
             if conversation.title not in (None, "", "New Conversation", "New Chat"):
                 return  # Already has a custom title
 
-            title = await self.llm.generate(
+            # Title generation uses the default local LLM regardless of chat provider
+            llm = LLMClient()
+            title = await llm.generate(
                 prompt=(
                     "Create a very short title (max 6 words) for a conversation "
                     "that starts with this message. Reply with ONLY the title, "
