@@ -26,13 +26,13 @@ function TypingIndicator() {
 /**
  * Parse a model response into { thinking, answer } parts.
  *
- * Supports these formats:
- *   - DeepSeek: <think>...</think>
- *   - Qwen thinking: 【thinking】...【/thinking】
- *   - Raw <｜end▁of▁thinking｜> text before final answer
+ * Supported formats:
+ *   - DeepSeek / Ollama: <think>...</think>
+ *   - Qwen: 【thinking】...【/thinking】
+ *   - GLM / Poe inline: "Thinking...\n[analysis]\nGenerate Response...\n[answer]"
  */
 function parseThinking(content: string): { thinking: string; answer: string } {
-  // Try <think>...</think> (DeepSeek format)
+  // <think>...</think> (DeepSeek / Ollama format)
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
   if (thinkMatch) {
     const before = content.slice(0, thinkMatch.index)
@@ -43,7 +43,7 @@ function parseThinking(content: string): { thinking: string; answer: string } {
     }
   }
 
-  // Try 【thinking】...【/thinking】 (Qwen format)
+  // 【thinking】...【/thinking】 (Qwen format)
   const qwMatch = content.match(/【thinking】([\s\S]*?)【\/thinking】/)
   if (qwMatch) {
     const before = content.slice(0, qwMatch.index)
@@ -54,19 +54,46 @@ function parseThinking(content: string): { thinking: string; answer: string } {
     }
   }
 
+  // Inline thinking (GLM / Poe / OpenAI reasoning models)
+  // Look for generation markers that separate thinking from the final answer
+  const separators = [
+    /Generate Response\.?\s*\(Proceed to output\)/i,
+    /^Generate Final Response\.?$/im,
+    /^Generate Response\.?$/im,
+    /^(?:Final|Actual) Answer:?\s*$/im,
+    /^──+\s*Answer\s*──+$/im,
+  ]
+  for (const sep of separators) {
+    const m = content.match(sep)
+    if (m && m.index! > 20 && m.index! + m[0].length < content.length * 0.9) {
+      const thinking = content.slice(0, m.index).trim()
+      const answer = content.slice(m.index! + m[0].length).trim()
+      if (answer.length > 0) {
+        return { thinking, answer }
+      }
+    }
+  }
+
   return { thinking: '', answer: content }
 }
 
 function AssistantMessage({ content, streaming }: { content: string; streaming?: boolean }) {
   const { thinking, answer } = parseThinking(content)
-  const [showThinking, setShowThinking] = useState(!streaming) // auto-open during streaming
+  const [showThinking, setShowThinking] = useState(true) // open while streaming
 
-  // Auto-expand during streaming, collapse when done
+  // Collapse thinking when streaming ends (unless it's a tagged format)
+  const prevStreaming = useRef(streaming)
   useEffect(() => {
-    if (streaming) {
-      setShowThinking(true)
+    if (prevStreaming.current && !streaming) {
+      // Streaming just finished — collapse if this is inline (not tagged) thinking
+      const hasExplicitTags = content.includes('<think>') || content.includes('</think>') ||
+        content.includes('【thinking】')
+      if (!hasExplicitTags && thinking.length > 0) {
+        setShowThinking(false)
+      }
     }
-  }, [streaming])
+    prevStreaming.current = streaming
+  }, [streaming, content, thinking])
 
   const hasThinking = thinking.length > 0
 
@@ -87,7 +114,7 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
             <span>Thinking {streaming ? '(in progress...)' : ''}</span>
           </button>
           {showThinking && (
-            <div className="px-3 py-2 text-xs text-muted-foreground/70 italic border-t border-border/30">
+            <div className="px-3 py-2 text-xs text-muted-foreground/70 italic border-t border-border/30 max-h-60 overflow-y-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {thinking}
               </ReactMarkdown>
@@ -104,7 +131,6 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
           </ReactMarkdown>
         </div>
       ) : !hasThinking ? (
-        // No thinking section found — render full content as-is
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {content}
         </ReactMarkdown>
@@ -159,10 +185,8 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
         )
       })}
 
-      {/* Standalone typing indicator when no assistant message exists yet */}
       {showTypingIndicator && <TypingIndicator />}
 
-      {/* Auto-scroll to bottom */}
       <ScrollAnchor streaming={streaming ?? false} />
     </div>
   )
