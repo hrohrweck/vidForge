@@ -195,6 +195,17 @@ class PoeProvider(ComfyUIProvider):
             delta = choices[0].get("delta") or {}
             content = delta.get("content")
             reasoning = delta.get("reasoning_content")
+
+            # DEBUG: log the delta keys to see what Poe returns
+            delta_keys = [k for k, v in delta.items() if v]
+            if delta_keys:
+                logger.info(
+                    "[Poe delta] keys=%s content_len=%d reasoning=%s",
+                    delta_keys,
+                    len(content or ""),
+                    bool(reasoning),
+                )
+
             if reasoning:
                 # Wrap reasoning in <think> tags so the frontend can parse it
                 yield LLMChunk(type="text", content=f"<think>{reasoning}</think>")
