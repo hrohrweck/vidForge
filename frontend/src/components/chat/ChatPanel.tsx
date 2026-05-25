@@ -142,7 +142,7 @@ export function ChatPanel() {
           const delta = (eventData.content as string) ?? ''
           assistantMsg.content += delta
         } else if (event.event === 'error') {
-          setStreamError((eventData.error as string) ?? 'Stream error')
+          setStreamError((eventData.reason as string) ?? (eventData.error as string) ?? 'Stream error')
         }
       }
     } catch (err) {

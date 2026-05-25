@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -8,6 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -337,6 +340,9 @@ async def create_message_stream(
                 yield encode_sse_event(event_type, event_data)
         except asyncio.CancelledError:
             return
+        except Exception as exc:
+            logger.exception("Chat stream error")
+            yield encode_sse_event("error", {"reason": f"{type(exc).__name__}: {exc}"})
 
     return StreamingResponse(
         event_generator(),

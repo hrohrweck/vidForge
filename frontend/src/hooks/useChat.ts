@@ -131,7 +131,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
               break
             }
             case 'error': {
-              const errorMsg = (eventData.error as string) ?? 'Unknown streaming error'
+              const errorMsg = (eventData.reason as string) ?? (eventData.error as string) ?? 'Unknown streaming error'
               setError(errorMsg)
               setStreamError(errorMsg)
               break

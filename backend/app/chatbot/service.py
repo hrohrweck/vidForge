@@ -260,7 +260,7 @@ class ChatOrchestrator:
     """Drive one chatbot turn through LLM streaming and serial tool execution."""
 
     max_iterations = 8
-    max_wall_seconds = 60.0
+    max_wall_seconds = 120.0
     default_context_limit = 8192
 
     def __init__(
