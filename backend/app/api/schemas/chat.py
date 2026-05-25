@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class MessagePart(BaseModel):
@@ -99,6 +99,14 @@ class MessageOut(BaseModel):
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
     created_at: datetime
+
+    @field_validator("tool_calls", mode="before")
+    @classmethod
+    def normalize_tool_calls(cls, v: object) -> object:
+        """Normalize tool_calls from stored dict format to a list."""
+        if isinstance(v, dict):
+            return v.get("tool_calls", v)
+        return v
 
 
 class ChatStreamEvent(BaseModel):
