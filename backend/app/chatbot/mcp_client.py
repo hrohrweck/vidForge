@@ -23,11 +23,20 @@ TOOL_CALL_TIMEOUT_SECONDS = 30.0
 class MCPServerLike(Protocol):
     """Subset of the MCPServer model needed by the client manager."""
 
-    slug: str
-    url: str
-    auth_type: str
-    encrypted_credentials: bytes | None
-    enabled: bool
+    @property
+    def slug(self) -> str: ...
+
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def auth_type(self) -> str: ...
+
+    @property
+    def encrypted_credentials(self) -> bytes | None: ...
+
+    @property
+    def enabled(self) -> bool: ...
 
 @dataclass
 class ToolDefinition:

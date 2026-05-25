@@ -9,14 +9,14 @@ interface ChatMessageListProps {
 export function ChatMessageList({ messages }: ChatMessageListProps) {
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         No messages yet. Start the conversation!
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto space-y-4 p-4">
+    <div className="h-full overflow-y-auto space-y-4 p-4">
       {messages.map((msg) => {
         const isUser = msg.role === 'user'
         return (

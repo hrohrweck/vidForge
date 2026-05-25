@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     admin,
-    admin_mcp,
     audio,
     auth,
     chat,
@@ -23,6 +22,7 @@ from app.api import (
     uploads,
     users,
 )
+from app.api.admin_mcp import router as admin_mcp_router
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
 from app.database import User, async_session, create_tables, seed_builtin_data, seed_rbac_data
@@ -106,7 +106,7 @@ app.include_router(styles.router, prefix="/api/styles", tags=["styles"])
 app.include_router(storage.router, prefix="/api/storage", tags=["storage"])
 app.include_router(uploads.router, prefix="/api/uploads", tags=["uploads"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(admin_mcp.router, prefix="/api/admin", tags=["admin"])
+app.include_router(admin_mcp_router, prefix="/api/admin", tags=["admin"])
 app.include_router(providers.router, prefix="/api/providers", tags=["providers"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(scenes.router, prefix="/api/jobs", tags=["scenes"])

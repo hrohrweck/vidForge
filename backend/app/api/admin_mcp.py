@@ -162,7 +162,7 @@ async def test_mcp_server(
 
     manager = MCPClientManager(session_ttl_seconds=10, tool_cache_ttl_seconds=0)
     try:
-        ok = await manager.health_check(server)
+        ok = await manager.health_check(server)  # type: ignore[arg-type]
         if not ok:
             return {"ok": False, "tools_count": 0, "error": "MCP server health check failed"}
 

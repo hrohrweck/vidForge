@@ -171,7 +171,8 @@ class PluginBase(ABC):
                     label, attempt + 1, max_retries + 1, exc, delay,
                 )
                 await asyncio.sleep(delay)
-        raise last_exc  # should not reach here
+        assert last_exc is not None
+        raise last_exc
 
     # ------------------------------------------------------------------
     # Stage: generate images
@@ -214,14 +215,6 @@ class PluginBase(ABC):
                     "[image-s%s] generate_images failed: %s",
                     scene.scene_number, exc, exc_info=True,
                 )
-                await db.rollback()
-                from sqlalchemy import select as sa_select
-
-                from app.database import VideoScene as VScene
-                result = await db.execute(
-                    sa_select(VScene).where(VScene.id == scene.id)
-                )
-                scene = result.scalar_one()
                 scene.status = "failed"
                 scene.error_message = str(exc)[:500]
             await db.commit()
@@ -296,14 +289,6 @@ class PluginBase(ABC):
                     "[video-s%s] generate_videos failed: %s",
                     scene.scene_number, exc, exc_info=True,
                 )
-                await db.rollback()
-                from sqlalchemy import select as sa_select
-
-                from app.database import VideoScene as VScene
-                result = await db.execute(
-                    sa_select(VScene).where(VScene.id == scene.id)
-                )
-                scene = result.scalar_one()
                 scene.status = "failed"
                 scene.error_message = str(exc)[:500]
             await db.commit()
@@ -412,8 +397,8 @@ class PluginBase(ABC):
         image_prompt = scene.image_prompt or original_prompt
 
         try:
-            from app.services.llm_service import LLMService
-            llm = LLMService()
+            from app.services.llm_service import LLMClient
+            llm = LLMClient()
 
             system = (
                 "You are a video director. A scene is being split into "

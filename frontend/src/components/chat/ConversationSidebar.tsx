@@ -51,9 +51,12 @@ export function ConversationSidebar() {
   }
 
   return (
-    <div className="flex flex-col h-full border-r bg-muted/30">
+    <div className="flex h-full flex-col rounded-[10px] border bg-card overflow-hidden">
       <div className="border-b p-3">
-        <button onClick={handleNewChat} className="flex w-full items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90">
+        <button
+          onClick={handleNewChat}
+          className="flex w-full items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+        >
           <Plus className="h-4 w-4" />
           New Chat
         </button>
