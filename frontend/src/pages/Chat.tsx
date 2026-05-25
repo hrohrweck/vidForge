@@ -160,7 +160,6 @@ export default function Chat() {
         const eventData = event.data as Record<string, unknown>
         if (event.event === 'token') {
           const delta = (eventData.content as string) ?? ''
-          assistantMsg.content += delta
           updateStreamingMessage(selectedConversationId, delta)
         } else if (event.event === 'error') {
           setStreamError((eventData.error as string) ?? 'Stream error')
