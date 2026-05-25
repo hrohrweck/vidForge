@@ -605,31 +605,10 @@ class ChatOrchestrator:
             conversation = await self.conversations.get(user_id, conversation_id)
             if conversation.title not in (None, "", "New Conversation", "New Chat"):
                 return  # Already has a custom title
-            # Title generation uses the default local LLM regardless of chat provider
-            llm = LLMClient()
-            raw = await llm.generate(
-                system=(
-                    "You are a title generator. Reply with ONLY the title. "
-                    "Do NOT include any thinking, reasoning, analysis, or explanation. "
-                    "Just the title text, nothing else."
-                ),
-                prompt=(
-                    "Create a concise title (max 6 words) for this conversation:\n\n"
-                    f"{first_message[:300]}"
-                ),
-                max_tokens=30,
-                temperature=0.3,
-                retries=1,
-            )
-            # Aggressively strip any thinking/prefixes from the response
-            title = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
-            title = re.sub(r'【thinking】.*?【/thinking】', '', title, flags=re.DOTALL)
-            for pattern in [
-                r'(?is)^.*?thinking process.*?\n\n',
-                r'(?is)^thinking\.\.\.?\s*\n',
-                r'(?is)^here is.*?thinking.*?\n\n',
-            ]:
-                title = re.sub(pattern, '', title)
+            # Use the first user message directly as the title.
+            # Thinking models (Qwen 3.6) burn all tokens on reasoning, so
+            # we skip the LLM call and just truncate the user's message.
+            title = first_message.strip()[:60]
             title = title.strip().strip('"').strip("'")
             # If still looks like garbage, take the last non-empty line
             if len(title) > 60 or title.lower().startswith(('thinking', 'here', 'i ', 'the user')):
