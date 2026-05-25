@@ -52,6 +52,7 @@ export default function Chat() {
   const updateStreamingMessage = useChatStore((s) => s.updateStreamingMessage)
   const selectConversation = useChatStore((s) => s.selectConversation)
   const selectedModelId = useChatStore((s) => s.selectedModelId)
+  const refreshConversations = useChatStore((s) => s.refreshConversations)
 
   const [input, setInput] = useState('')
   const [isUploading, setIsUploading] = useState(false)
@@ -167,6 +168,7 @@ export default function Chat() {
       }
     } finally {
       setStreaming(false)
+      refreshConversations()
     }
   }, [input, pendingAttachments, selectedConversationId, appendMessage, clearAttachments, setStreaming, setStreamError])
 

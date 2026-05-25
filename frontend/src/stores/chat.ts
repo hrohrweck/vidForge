@@ -46,6 +46,8 @@ interface ChatState {
   addAttachment: (att: Attachment) => void
   removeAttachment: (id: string) => void
   clearAttachments: () => void
+  convRefreshKey: number
+  refreshConversations: () => void
 }
 
 export const useChatStore = create<ChatState>()(
@@ -108,6 +110,9 @@ export const useChatStore = create<ChatState>()(
         })),
 
       clearAttachments: () => set({ pendingAttachments: [] }),
+
+      convRefreshKey: 0,
+      refreshConversations: () => set((state) => ({ convRefreshKey: state.convRefreshKey + 1 })),
     }),
     {
       name: 'chat-storage',

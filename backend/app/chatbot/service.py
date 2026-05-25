@@ -406,6 +406,10 @@ class ChatOrchestrator:
                 tokens_out=loop_tokens_out,
             )
             await self._record_usage(user_id, model_id, conversation_id, tokens_in, tokens_out)
+
+            # Auto-generate a title for new conversations
+            await self._auto_title(user_id, conversation_id, user_message)
+
             yield self._usage_event(tokens_in, tokens_out)
             yield self._done_event()
             return
@@ -553,3 +557,28 @@ class ChatOrchestrator:
 
     def _done_event(self) -> StreamEvent:
         return (SSEEventType.DONE.value, {})
+
+    async def _auto_title(self, user_id: UUID, conversation_id: UUID, first_message: str) -> None:
+        """Generate a short title from the first user message if the conversation
+        still has the default title."""
+        try:
+            conversation = await self.conversations.get(user_id, conversation_id)
+            if conversation.title not in (None, "", "New Conversation", "New Chat"):
+                return  # Already has a custom title
+
+            title = await self.llm.generate(
+                prompt=(
+                    "Create a very short title (max 6 words) for a conversation "
+                    "that starts with this message. Reply with ONLY the title, "
+                    "no quotes, no punctuation, no explanation.\n\n"
+                    f"Message: {first_message[:500]}"
+                ),
+                max_tokens=20,
+                temperature=0.3,
+                retries=1,
+            )
+            title = title.strip().strip('"').strip("'")
+            if title:
+                await self.conversations.rename(user_id, conversation_id, title[:60])
+        except Exception:
+            pass  # Title generation is best-effort

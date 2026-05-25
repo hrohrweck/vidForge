@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { MessageSquare, Plus, Trash2 } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { chatApi } from '../../api/client'
@@ -8,10 +8,11 @@ import type { Conversation } from '../../stores/chat'
 export function ConversationSidebar() {
   const selectedConversationId = useChatStore((s) => s.selectedConversationId)
   const selectConversation = useChatStore((s) => s.selectConversation)
+  const convRefreshKey = useChatStore((s) => s.convRefreshKey)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [deleting, setDeleting] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchConversations = useCallback(() => {
     chatApi.listConversations().then((data) => {
       setConversations(
         data.map((api: ApiConversation) => ({
@@ -23,6 +24,10 @@ export function ConversationSidebar() {
       )
     }).catch((err) => console.error('Failed to load conversations:', err))
   }, [])
+
+  useEffect(() => {
+    fetchConversations()
+  }, [fetchConversations, convRefreshKey])
 
   const handleNewChat = async () => {
     try {
