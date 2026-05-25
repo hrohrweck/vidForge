@@ -1,5 +1,16 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { Paperclip, FileText, Image, Music, X, MessageSquare } from 'lucide-react'
+
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Fallback for insecure contexts (HTTP)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
 import { useChatStore } from '../stores/chat'
 import type { Message, Attachment } from '../stores/chat'
 import { chatApi } from '../api/client'
@@ -117,7 +128,7 @@ export default function Chat() {
     if (!selectedConversationId) return
 
     const userMsg: Message = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
@@ -132,7 +143,7 @@ export default function Chat() {
 
     try {
       const assistantMsg: Message = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'assistant',
         content: '',
         createdAt: new Date().toISOString(),
