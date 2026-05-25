@@ -132,6 +132,46 @@ else
     echo "[VidForge] LTX 2.3 download skipped (set VIDFORGE_DOWNLOAD_LTX=true to enable)"
 fi
 
+# ============================================
+# LTXVideo Gemma Text Encoder
+# ============================================
+GEMMA_DIR="$TEXT_ENCODERS_DIR/gemma-3-12b-it"
+mkdir -p "$GEMMA_DIR"
+
+# Only download Gemma if LTX is enabled
+if [ "${VIDFORGE_DOWNLOAD_LTX:-false}" = "true" ]; then
+    GEMMA_BASE_URL="https://huggingface.co/lightricks/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main"
+    
+    # Small config/tokenizer files
+    for f in .gitattributes README.md added_tokens.json chat_template.json config.json \
+             generation_config.json preprocessor_config.json processor_config.json \
+             special_tokens_map.json tokenizer.json tokenizer.model \
+             tokenizer_config.json model.safetensors.index.json; do
+        download_file "$GEMMA_BASE_URL/$f" "$GEMMA_DIR/$f" "gemma/$f"
+    done
+    
+    # Model shards (large files ~5GB each)
+    download_file "$GEMMA_BASE_URL/model-00001-of-00005.safetensors" \
+        "$GEMMA_DIR/model-00001-of-00005.safetensors" "gemma/shard-1"
+    download_file "$GEMMA_BASE_URL/model-00002-of-00005.safetensors" \
+        "$GEMMA_DIR/model-00002-of-00005.safetensors" "gemma/shard-2"
+    download_file "$GEMMA_BASE_URL/model-00003-of-00005.safetensors" \
+        "$GEMMA_DIR/model-00003-of-00005.safetensors" "gemma/shard-3"
+    download_file "$GEMMA_BASE_URL/model-00004-of-00005.safetensors" \
+        "$GEMMA_DIR/model-00004-of-00005.safetensors" "gemma/shard-4"
+    download_file "$GEMMA_BASE_URL/model-00005-of-00005.safetensors" \
+        "$GEMMA_DIR/model-00005-of-00005.safetensors" "gemma/shard-5"
+fi
+
+# ============================================
+# UMT5 text encoder symlink (needed by LTXVideo)
+# ============================================
+if [ -f "$CLIP_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors" ] && [ ! -f "$TEXT_ENCODERS_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors" ]; then
+    ln -s "$CLIP_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors" \
+        "$TEXT_ENCODERS_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    echo "[VidForge] Created umt5 symlink in text_encoders/"
+fi
+
 echo "[VidForge] ==========================================="
 echo "[VidForge] Model setup complete!"
 echo "[VidForge] Starting ComfyUI..."
