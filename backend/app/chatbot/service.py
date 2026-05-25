@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
@@ -612,6 +613,9 @@ class ChatOrchestrator:
                 retries=1,
             )
             title = title.strip().strip('"').strip("'")
+            # Strip any thinking/reasoning blocks from the LLM response
+            title = re.sub(r'<think>.*?</think>', '', title, flags=re.DOTALL).strip()
+            title = re.sub(r'【thinking】.*?【/thinking】', '', title, flags=re.DOTALL).strip()
             if title:
                 await self.conversations.rename(user_id, conversation_id, title[:60])
         except Exception:
