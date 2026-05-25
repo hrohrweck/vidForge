@@ -775,7 +775,7 @@ export interface MessagePart {
 export interface ToolCall {
   id: string
   name: string
-  arguments: Record<string, string>
+  arguments: Record<string, unknown>
 }
 
 export interface ToolResult {
@@ -821,7 +821,7 @@ export interface ChatStreamToolCallStart {
   event: 'tool_call_start'
   tool_call_id: string
   name: string
-  arguments?: Record<string, string>
+  arguments?: Record<string, unknown>
 }
 
 export interface ChatStreamToolResult {

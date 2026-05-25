@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -45,7 +45,7 @@ class ToolCall(BaseModel):
 
     id: str
     name: str
-    arguments: dict[str, str]
+    arguments: dict[str, Any]
 
     @model_validator(mode="before")
     @classmethod
