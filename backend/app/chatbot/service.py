@@ -339,7 +339,7 @@ class ChatOrchestrator:
                     conversation_id,
                     "assistant",
                     assistant_text,
-                    tool_calls={"tool_calls": tool_calls},
+                    tool_calls={"tool_calls": [self._normalize_tool_call(tc) for tc in tool_calls]},
                     tokens_in=loop_tokens_in,
                     tokens_out=loop_tokens_out,
                 )
@@ -347,7 +347,7 @@ class ChatOrchestrator:
                     {
                         "role": "assistant",
                         "content": assistant_text,
-                        "tool_calls": tool_calls,
+                        "tool_calls": [self._normalize_tool_call(tc) for tc in tool_calls],
                     }
                 )
 

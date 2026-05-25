@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class MessagePart(BaseModel):
@@ -46,6 +46,28 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_tool_call(cls, data: object) -> object:
+        """Normalize from Ollama format (function.name) to flat format."""
+        if not isinstance(data, dict):
+            return data
+        function = data.get("function")
+        if isinstance(function, dict):
+            if "name" not in data and function.get("name"):
+                data["name"] = function["name"]
+            if "arguments" not in data and function.get("arguments"):
+                raw_args = function["arguments"]
+                if isinstance(raw_args, str):
+                    try:
+                        import json
+                        data["arguments"] = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        data["arguments"] = {"raw": raw_args}
+                else:
+                    data["arguments"] = raw_args
+        return data
 
 
 class ToolResult(BaseModel):
