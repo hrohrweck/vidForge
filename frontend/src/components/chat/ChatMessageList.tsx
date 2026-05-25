@@ -55,7 +55,33 @@ function parseThinking(content: string): { thinking: string; answer: string } {
   }
 
   // Inline thinking (GLM / Poe / OpenAI reasoning models)
-  // Look for generation markers using plain string search (more reliable than regex)
+  // GLM often starts with "Thinking..." followed by blockquote (> ) reasoning
+  // and then the plain-text answer. Split where the blockquotes end.
+  if (content.startsWith('Thinking')) {
+    const lines = content.split('\n')
+    let splitIdx = 0
+    let inReasoning = false
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (line.startsWith('>') || line.trim() === '') {
+        inReasoning = true
+        splitIdx = i + 1
+      } else if (inReasoning && line.trim().length > 0) {
+        // First non-empty, non-blockquote line after reasoning = answer start
+        splitIdx = i
+        break
+      }
+    }
+    if (splitIdx > 0 && splitIdx < lines.length) {
+      const thinking = lines.slice(0, splitIdx).join('\n').trim()
+      const answer = lines.slice(splitIdx).join('\n').trim()
+      if (thinking.length > 10 && answer.length > 0) {
+        return { thinking, answer }
+      }
+    }
+  }
+
+  // Look for generation markers using plain string search
   const inlineMarkers = [
     "Generate Response. (Proceed to output).",
     "Generate Response. (Proceed to output)",

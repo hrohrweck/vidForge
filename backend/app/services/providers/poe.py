@@ -153,7 +153,9 @@ class PoeProvider(ComfyUIProvider):
         except Exception as exc:
             raise LLMError(f"Poe stream failed: {type(exc).__name__}: {exc}") from exc
 
-        raise LLMError("Poe stream ended without a done chunk")
+        # Some Poe models stream content without a final [DONE] marker.
+        # Treat end-of-stream as an implicit done.
+        yield LLMChunk(type="done")
 
     async def _stream_events(
         self,
