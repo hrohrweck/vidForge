@@ -23,10 +23,12 @@ function TypingIndicator() {
 }
 
 export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
-  const showTypingIndicator =
-    streaming && (messages.length === 0 || (messages[messages.length - 1].role !== 'assistant'))
+  const visibleMessages = messages.filter((msg) => msg.role !== 'tool' && msg.role !== 'system')
 
-  if (messages.length === 0 && !streaming) {
+  const showTypingIndicator =
+    streaming && (visibleMessages.length === 0 || (visibleMessages[visibleMessages.length - 1]?.role !== 'assistant'))
+
+  if (visibleMessages.length === 0 && !streaming) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         No messages yet. Start the conversation!
@@ -36,7 +38,7 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
 
   return (
     <div className="h-full overflow-y-auto space-y-4 p-4">
-      {messages.map((msg) => {
+      {visibleMessages.map((msg) => {
         const isUser = msg.role === 'user'
         const isEmptyAssistant = !isUser && streaming && msg.content === ''
         return (
