@@ -47,6 +47,8 @@ export default function Chat() {
   const setStreaming = useChatStore((s) => s.setStreaming)
   const setStreamError = useChatStore((s) => s.setStreamError)
   const streaming = useChatStore((s) => s.streaming)
+  const streamError = useChatStore((s) => s.streamError)
+  const updateStreamingMessage = useChatStore((s) => s.updateStreamingMessage)
   const selectConversation = useChatStore((s) => s.selectConversation)
 
   const [input, setInput] = useState('')
@@ -148,6 +150,7 @@ export default function Chat() {
         if (event.event === 'token') {
           const delta = (eventData.content as string) ?? ''
           assistantMsg.content += delta
+          updateStreamingMessage(selectedConversationId, delta)
         } else if (event.event === 'error') {
           setStreamError((eventData.error as string) ?? 'Stream error')
         }
@@ -186,11 +189,16 @@ export default function Chat() {
 
             {/* Chat messages — fills remaining space */}
             <div className="flex-1 rounded-[10px] border bg-card overflow-hidden min-h-0">
-              <ChatMessageList messages={messages} />
+              <ChatMessageList messages={messages} streaming={streaming} />
             </div>
 
             {/* Input area — 50px height */}
             <div className="shrink-0">
+              {streamError && (
+                <div className="mb-[6px] rounded-[8px] bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {streamError}
+                </div>
+              )}
               {pendingAttachments.length > 0 && (
                 <div className="mb-[6px] flex flex-wrap gap-1">
                   {pendingAttachments.map((att) => (
@@ -208,7 +216,7 @@ export default function Chat() {
               >
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
+                  disabled={isUploading || streaming}
                   className="flex shrink-0 items-center justify-center rounded-md border p-1.5 hover:bg-muted disabled:opacity-50"
                   aria-label="Attach file"
                   title="Attach file"
@@ -226,19 +234,28 @@ export default function Chat() {
                 <input
                   ref={inputRef}
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  placeholder="Type a message..."
+                  placeholder={streaming ? 'Waiting for response...' : 'Type a message...'}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onKeyDown}
                   disabled={streaming}
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={isUploading || streaming || (!input.trim() && pendingAttachments.length === 0)}
-                  className="shrink-0 rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-                >
-                  Send
-                </button>
+                {streaming ? (
+                  <div className="flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-4 py-1.5 text-sm text-muted-foreground">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:200ms]" />
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:400ms]" />
+                    <span className="ml-1">Processing</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={isUploading || (!input.trim() && pendingAttachments.length === 0)}
+                    className="shrink-0 rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                )}
               </div>
             </div>
           </div>
