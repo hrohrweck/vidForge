@@ -169,7 +169,7 @@ export default function Chat() {
   }, [handleSend])
 
   return (
-    <div className="-m-6 flex" style={{ height: 'calc(100vh - 3.5rem)' }}>
+    <div className="flex h-full w-full">
       <div className="flex h-full w-full gap-[10px] p-[10px]">
         {/* Left sidebar — conversation history */}
         <div className="h-full w-72 shrink-0">
