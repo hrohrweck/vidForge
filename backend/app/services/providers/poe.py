@@ -19,6 +19,7 @@ class PoeProvider(ComfyUIProvider):
         "gemini-3.1-pro",
         "gpt-5.4",
         "o3-mini",
+        "glm-5.1-t",
     }
 
     _POE_TEXT_MODELS = (
@@ -29,6 +30,7 @@ class PoeProvider(ComfyUIProvider):
         "o3",
         "o4",
         "qwen",
+        "glm",
     )
 
     def __init__(self, provider_id: UUID, config: dict):
@@ -85,9 +87,8 @@ class PoeProvider(ComfyUIProvider):
             "model": model,
             "messages": messages,
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
-        if tools is not None:
+        if tools:
             payload["tools"] = tools
 
         tool_calls: list[dict[str, Any]] = []
@@ -100,7 +101,12 @@ class PoeProvider(ComfyUIProvider):
                 json=payload,
                 headers={"Authorization": f"Bearer {self.api_key}"},
             ) as response:
-                response.raise_for_status()
+                if response.status_code != 200:
+                    body = await response.aread()
+                    raise LLMError(
+                        f"Poe API error ({response.status_code}): "
+                        f"{body.decode('utf-8', errors='replace')[:500]}"
+                    )
                 async for line in response.aiter_lines():
                     if not line:
                         continue
