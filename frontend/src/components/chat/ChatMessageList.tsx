@@ -55,19 +55,21 @@ function parseThinking(content: string): { thinking: string; answer: string } {
   }
 
   // Inline thinking (GLM / Poe / OpenAI reasoning models)
-  // Look for generation markers that separate thinking from the final answer
-  const separators = [
-    /Generate Response\.?\s*\(Proceed to output\)/i,
-    /^Generate Final Response\.?$/im,
-    /^Generate Response\.?$/im,
-    /^(?:Final|Actual) Answer:?\s*$/im,
-    /^──+\s*Answer\s*──+$/im,
+  // Look for generation markers using plain string search (more reliable than regex)
+  const inlineMarkers = [
+    "Generate Response. (Proceed to output).",
+    "Generate Response. (Proceed to output)",
+    "Generate Response (Proceed to output)",
+    "Generate Final Response.",
+    "Generate Response.",
+    "\nFinal Answer",
+    "\nActual Answer",
   ]
-  for (const sep of separators) {
-    const m = content.match(sep)
-    if (m && m.index! > 20 && m.index! + m[0].length < content.length * 0.9) {
-      const thinking = content.slice(0, m.index).trim()
-      const answer = content.slice(m.index! + m[0].length).trim()
+  for (const marker of inlineMarkers) {
+    const idx = content.indexOf(marker)
+    if (idx > 20 && idx + marker.length < content.length * 0.95) {
+      const thinking = content.slice(0, idx).trim()
+      const answer = content.slice(idx + marker.length).trim()
       if (answer.length > 0) {
         return { thinking, answer }
       }
