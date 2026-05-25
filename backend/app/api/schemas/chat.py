@@ -45,7 +45,7 @@ class ToolCall(BaseModel):
 
     id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: dict[str, Any] = {}
 
     @model_validator(mode="before")
     @classmethod
