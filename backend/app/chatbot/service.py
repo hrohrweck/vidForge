@@ -605,25 +605,39 @@ class ChatOrchestrator:
             conversation = await self.conversations.get(user_id, conversation_id)
             if conversation.title not in (None, "", "New Conversation", "New Chat"):
                 return  # Already has a custom title
-
             # Title generation uses the default local LLM regardless of chat provider
             llm = LLMClient()
-            title = await llm.generate(
-                prompt=(
-                    "Create a very short title (max 6 words) for a conversation "
-                    "that starts with this message. Reply with ONLY the title, "
-                    "no quotes, no punctuation, no explanation.\n\n"
-                    f"Message: {first_message[:500]}"
+            raw = await llm.generate(
+                system=(
+                    "You are a title generator. Reply with ONLY the title. "
+                    "Do NOT include any thinking, reasoning, analysis, or explanation. "
+                    "Just the title text, nothing else."
                 ),
-                max_tokens=20,
+                prompt=(
+                    "Create a concise title (max 6 words) for this conversation:\n\n"
+                    f"{first_message[:300]}"
+                ),
+                max_tokens=30,
                 temperature=0.3,
                 retries=1,
             )
+            # Aggressively strip any thinking/prefixes from the response
+            title = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+            title = re.sub(r'【thinking】.*?【/thinking】', '', title, flags=re.DOTALL)
+            for pattern in [
+                r'(?is)^.*?thinking process.*?\n\n',
+                r'(?is)^thinking\.\.\.?\s*\n',
+                r'(?is)^here is.*?thinking.*?\n\n',
+            ]:
+                title = re.sub(pattern, '', title)
             title = title.strip().strip('"').strip("'")
-            # Strip any thinking/reasoning blocks from the LLM response
-            title = re.sub(r'<think>.*?</think>', '', title, flags=re.DOTALL).strip()
-            title = re.sub(r'【thinking】.*?【/thinking】', '', title, flags=re.DOTALL).strip()
+            # If still looks like garbage, take the last non-empty line
+            if len(title) > 60 or title.lower().startswith(('thinking', 'here', 'i ', 'the user')):
+                lines = [l.strip() for l in title.split('\n') if l.strip()]
+                title = lines[-1] if lines else title
+            title = title[:60]
             if title:
-                await self.conversations.rename(user_id, conversation_id, title[:60])
+                await self.conversations.rename(user_id, conversation_id, title)
         except Exception:
+            pass  # Title generation is best-effort
             pass  # Title generation is best-effort
