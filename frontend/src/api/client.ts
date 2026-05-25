@@ -884,7 +884,8 @@ export const chatApi = {
   streamMessage: async function* (
     conversationId: string,
     content: string,
-    attachments?: string[],
+    modelId: string,
+    attachments?: Array<{ kind: string; url: string; name?: string }>,
     signal?: AbortSignal
   ): AsyncGenerator<ChatStreamEvent, void, unknown> {
     const token = useAuthStore.getState().token
@@ -894,7 +895,11 @@ export const chatApi = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content, attachments }),
+      body: JSON.stringify({
+        content,
+        model_id: modelId,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      }),
       signal,
     })
 

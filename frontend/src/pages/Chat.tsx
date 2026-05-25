@@ -1,16 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react'
 import { Paperclip, FileText, Image, Music, X, MessageSquare } from 'lucide-react'
-
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  // Fallback for insecure contexts (HTTP)
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
+import { generateId } from '../lib/utils'
 import { useChatStore } from '../stores/chat'
 import type { Message, Attachment } from '../stores/chat'
 import { chatApi } from '../api/client'
@@ -61,6 +51,7 @@ export default function Chat() {
   const streamError = useChatStore((s) => s.streamError)
   const updateStreamingMessage = useChatStore((s) => s.updateStreamingMessage)
   const selectConversation = useChatStore((s) => s.selectConversation)
+  const selectedModelId = useChatStore((s) => s.selectedModelId)
 
   const [input, setInput] = useState('')
   const [isUploading, setIsUploading] = useState(false)
@@ -136,7 +127,11 @@ export default function Chat() {
     appendMessage(selectedConversationId, userMsg)
     setInput('')
 
-    const attachmentIds = pendingAttachments.map((a) => a.id)
+    const attachmentData = pendingAttachments.map((a) => ({
+      kind: a.kind,
+      url: a.url,
+      name: a.name,
+    }))
     clearAttachments()
     setStreaming(true)
     setStreamError(null)
@@ -153,7 +148,8 @@ export default function Chat() {
       const stream = chatApi.streamMessage(
         selectedConversationId,
         text,
-        attachmentIds.length > 0 ? attachmentIds : undefined
+        selectedModelId,
+        attachmentData.length > 0 ? attachmentData : undefined
       )
 
       for await (const event of stream) {

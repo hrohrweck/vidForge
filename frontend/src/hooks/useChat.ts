@@ -2,11 +2,12 @@ import { useCallback, useRef, useState } from 'react'
 import { useChatStore, type Message } from '../stores/chat'
 import { chatApi } from '../api/client'
 import api from '../api/client'
+import { generateId } from '../lib/utils'
 
 export interface UseChatReturn {
   messages: Message[]
   streamingMessage: string
-  sendMessage: (content: string, attachments?: string[]) => Promise<void>
+  sendMessage: (content: string, attachments?: Array<{ kind: string; url: string; name?: string }>) => Promise<void>
   confirmJobDraft: (draftId: string) => Promise<void>
   cancelDraft: () => void
   isStreaming: boolean
@@ -48,7 +49,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
         }
       }
       appendMessage(conversationId, {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'assistant',
         content: finalContent,
         createdAt: new Date().toISOString(),
@@ -58,7 +59,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
   )
 
   const sendMessage = useCallback(
-    async (content: string, attachments?: string[]) => {
+    async (content: string, attachments?: Array<{ kind: string; url: string; name?: string }>) => {
       if (!conversationId) return
 
       cleanup()
@@ -73,18 +74,20 @@ export function useChat(conversationId: string | null): UseChatReturn {
       abortControllerRef.current = controller
 
       appendMessage(conversationId, {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'assistant',
         content: '',
         createdAt: new Date().toISOString(),
       })
 
+      const modelId = useChatStore.getState().selectedModelId
       let accumulatedDelta = ''
 
       try {
         const events = chatApi.streamMessage(
           conversationId,
           content,
+          modelId,
           attachments,
           controller.signal
         )
@@ -101,7 +104,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
             }
             case 'tool_call_start': {
               const toolMsg = {
-                id: crypto.randomUUID(),
+                id: generateId(),
                 role: 'tool' as const,
                 content: JSON.stringify({
                   tool_call_id: eventData.tool_call_id,
@@ -115,7 +118,7 @@ export function useChat(conversationId: string | null): UseChatReturn {
             }
             case 'tool_call_result': {
               const toolMsg = {
-                id: crypto.randomUUID(),
+                id: generateId(),
                 role: 'tool' as const,
                 content: JSON.stringify({
                   tool_call_id: eventData.tool_call_id,

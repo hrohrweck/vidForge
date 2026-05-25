@@ -84,7 +84,7 @@ class MessageCreate(BaseModel):
 class ChatStreamMessageCreate(BaseModel):
     content: str
     model_id: str
-    attachments: dict | None = None
+    attachments: list[dict] | None = None
     confirm_draft_id: str | None = None
 
 

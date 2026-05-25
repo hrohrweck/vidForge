@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Paperclip, X, FileText, Image, Music } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
+import { generateId } from '../../lib/utils'
 import type { Message, Attachment } from '../../stores/chat'
 import { chatApi } from '../../api/client'
 import { MessageBubble } from './MessageBubble'
@@ -37,6 +38,7 @@ export function ChatPanel() {
   const appendMessage = useChatStore((s) => s.appendMessage)
   const setStreaming = useChatStore((s) => s.setStreaming)
   const setStreamError = useChatStore((s) => s.setStreamError)
+  const selectedModelId = useChatStore((s) => s.selectedModelId)
 
   const [input, setInput] = useState('')
   const [isUploading, setIsUploading] = useState(false)
@@ -101,7 +103,7 @@ export function ChatPanel() {
     if (!selectedConversationId) return
 
     const userMsg: Message = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
@@ -109,14 +111,18 @@ export function ChatPanel() {
     appendMessage(selectedConversationId, userMsg)
     setInput('')
 
-    const attachmentIds = pendingAttachments.map((a) => a.id)
+    const attachmentData = pendingAttachments.map((a) => ({
+      kind: a.kind,
+      url: a.url,
+      name: a.name,
+    }))
     clearAttachments()
     setStreaming(true)
     setStreamError(null)
 
     try {
       const assistantMsg: Message = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: 'assistant',
         content: '',
         createdAt: new Date().toISOString(),
@@ -126,7 +132,8 @@ export function ChatPanel() {
       const stream = chatApi.streamMessage(
         selectedConversationId,
         text,
-        attachmentIds.length > 0 ? attachmentIds : undefined
+        selectedModelId,
+        attachmentData.length > 0 ? attachmentData : undefined
       )
 
       for await (const event of stream) {
