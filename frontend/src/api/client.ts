@@ -838,8 +838,8 @@ export interface ChatStreamError {
 
 export const chatApi = {
   listConversations: async () => {
-    const response = await api.get<Conversation[]>('/chat/conversations')
-    return response.data
+    const response = await api.get<{ items: Conversation[] }>('/chat/conversations')
+    return response.data.items
   },
 
   getConversation: async (id: string) => {
@@ -862,8 +862,8 @@ export const chatApi = {
   },
 
   listMessages: async (conversationId: string) => {
-    const response = await api.get<Message[]>(`/chat/conversations/${conversationId}/messages`)
-    return response.data
+    const response = await api.get<{ items: Message[] }>(`/chat/conversations/${conversationId}/messages`)
+    return response.data.items
   },
 
   uploadAttachment: async (file: File) => {
