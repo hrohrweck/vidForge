@@ -180,6 +180,13 @@ class LLMClient:
                 if not content:
                     raise LLMError(f"Empty response from LLM (model: {self.model})")
 
+                # Strip thinking/reasoning blocks so callers get clean output
+                import re
+                clean = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+                clean = re.sub(r'【thinking】.*?【/thinking】', '', clean, flags=re.DOTALL).strip()
+                if clean:
+                    content = clean
+
                 return content
             except Exception as e:
                 last_error = e

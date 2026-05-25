@@ -194,6 +194,10 @@ class PoeProvider(ComfyUIProvider):
 
             delta = choices[0].get("delta") or {}
             content = delta.get("content")
+            reasoning = delta.get("reasoning_content")
+            if reasoning:
+                # Wrap reasoning in <think> tags so the frontend can parse it
+                yield LLMChunk(type="text", content=f"<think>{reasoning}</think>")
             if content:
                 yield LLMChunk(type="text", content=content)
 
