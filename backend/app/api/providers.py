@@ -201,7 +201,12 @@ async def update_provider(
     if data.name is not None:
         provider.name = data.name
     if data.config is not None:
-        provider.config = data.config
+        # Merge with existing config so sensitive fields (api_key) aren't
+        # wiped when the client sends a partial config
+        merged = {**provider.config, **data.config}
+        # Remove empty strings that indicate "keep existing"
+        merged = {k: v for k, v in merged.items() if v != ""}
+        provider.config = merged
     if data.daily_budget_limit is not None:
         provider.daily_budget_limit = Decimal(str(data.daily_budget_limit))
     if data.priority is not None:
