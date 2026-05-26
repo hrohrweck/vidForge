@@ -35,6 +35,10 @@ class RunPodProviderConfig(ProviderConfigBase):
     max_workers: int = 3
 
 
+class AtlasCloudProviderConfig(ProviderConfigBase):
+    api_key: str | None = None
+
+
 class PoeProviderConfig(ProviderConfigBase):
     api_key: str
     max_concurrent_jobs: int = 1
@@ -44,7 +48,7 @@ class PoeProviderConfig(ProviderConfigBase):
 
 class ProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod|poe)$")
+    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod|poe|atlascloud)$")
     config: dict[str, Any]
     daily_budget_limit: float | None = None
     priority: int = 0
@@ -151,6 +155,8 @@ async def create_provider(
         ComfyUIDirectProviderConfig(**config)
     elif data.provider_type == "runpod":
         RunPodProviderConfig(**config)
+    elif data.provider_type == "atlascloud":
+        AtlasCloudProviderConfig(**config)
     elif data.provider_type == "poe":
         PoeProviderConfig(**config)
 
