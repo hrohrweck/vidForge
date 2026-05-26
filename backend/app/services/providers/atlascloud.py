@@ -271,13 +271,22 @@ class AtlasCloudProvider(ComfyUIProvider):
             if poll.status_code != 200:
                 try:
                     err_body = poll.json()
-                    err_msg = err_body.get("message") or err_body.get("msg", "")
-                    # Check nested data for error too
+                    err_msg = (
+                        err_body.get("message")
+                        or err_body.get("msg", "")
+                    )
+                    # Check nested data for more detail
                     err_data = err_body.get("data", {})
                     if isinstance(err_data, dict):
                         err_msg = err_data.get("message", "") or err_msg
+                    # Also check the raw body for embedded errors
+                    raw = str(err_body)
+                    if "api node returned 400" in raw.lower():
+                        err_msg = "Model not available or unsupported parameters"
                     if err_msg:
                         raise LLMError(f"AtlasCloud error: {err_msg}")
+                    # If no message found, include raw body for debugging
+                    raise LLMError(f"AtlasCloud returned {poll.status_code}: {raw[:200]}")
                 except LLMError:
                     raise
                 except Exception:

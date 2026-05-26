@@ -105,9 +105,20 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
                 scenes = await _load_scenes(db, job)
                 context = await plugin.generate_images(db, job, scenes, context)
-                job.stage = "images_ready"
-                await db.commit()
-                return {"status": "completed", "job_id": job_id, "stage": "images_ready"}
+
+                # Reload scenes to check final status
+                scenes = await _load_scenes(db, job)
+                any_ready = any(s.status == "image_ready" for s in scenes)
+                if any_ready:
+                    job.stage = "images_ready"
+                    await db.commit()
+                    return {"status": "completed", "job_id": job_id, "stage": "images_ready"}
+                else:
+                    job.status = "failed"
+                    job.stage = "generating_images"
+                    job.error_message = "All image scenes failed to generate"
+                    await db.commit()
+                    return {"status": "failed", "job_id": job_id, "stage": "generating_images"}
 
             elif stage == "generating_videos":
                 job.stage = "generating_videos"
@@ -115,9 +126,20 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
                 scenes = await _load_scenes(db, job)
                 context = await plugin.generate_videos(db, job, scenes, context)
-                job.stage = "videos_ready"
-                await db.commit()
-                return {"status": "completed", "job_id": job_id, "stage": "videos_ready"}
+
+                # Reload scenes to check final status
+                scenes = await _load_scenes(db, job)
+                any_ready = any(s.status == "video_ready" for s in scenes)
+                if any_ready:
+                    job.stage = "videos_ready"
+                    await db.commit()
+                    return {"status": "completed", "job_id": job_id, "stage": "videos_ready"}
+                else:
+                    job.status = "failed"
+                    job.stage = "generating_videos"
+                    job.error_message = "All video scenes failed to generate"
+                    await db.commit()
+                    return {"status": "failed", "job_id": job_id, "stage": "generating_videos"}
 
             elif stage == "rendering":
                 job.stage = "rendering"
