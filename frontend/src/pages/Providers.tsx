@@ -17,7 +17,7 @@ import {
 interface ProviderFormState {
   id: string | null
   name: string
-  providerType: 'comfyui_direct' | 'runpod' | 'poe'
+  providerType: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud'
   comfyuiUrl: string
   maxConcurrentJobs: string
   endpointId: string
@@ -331,6 +331,24 @@ export default function Providers() {
       return poePayload
     }
 
+    if (formState.providerType === 'atlascloud') {
+      const payload: ProviderCreateRequest | ProviderUpdateRequest = {
+        ...payloadBase,
+        provider_type: 'atlascloud',
+        config: {
+          max_concurrent_jobs:
+            Number.parseInt(formState.maxConcurrentJobs, 10) > 0
+              ? Number.parseInt(formState.maxConcurrentJobs, 10)
+              : 1,
+        },
+      }
+
+      if (formState.apiKey.trim()) {
+        payload.config = { ...payload.config, api_key: formState.apiKey.trim() }
+      }
+      return payload
+    }
+
     return null
   }
 
@@ -575,16 +593,35 @@ export default function Providers() {
                   onChange={(e) =>
                     setFormState((prev) => ({
                       ...prev,
-                      providerType: e.target.value as 'comfyui_direct' | 'runpod' | 'poe',
-                      apiKey: e.target.value === 'poe' ? '' : prev.apiKey,
+                      providerType: e.target.value as 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud',
+                      apiKey: (e.target.value === 'poe' || e.target.value === 'atlascloud') ? '' : prev.apiKey,
                     }))
                   }
                 >
                   <option value="comfyui_direct">ComfyUI Direct</option>
                   <option value="runpod">RunPod</option>
                   <option value="poe">Poe</option>
+                  <option value="atlascloud">AtlasCloud</option>
                 </select>
               </div>
+
+              {formState.providerType === 'atlascloud' ? (
+                <div className="space-y-2">
+                  <label htmlFor="atlas-api-key" className="text-sm font-medium">
+                    AtlasCloud API Key {formState.id ? '(leave blank to keep current)' : ''}
+                  </label>
+                  <input
+                    id="atlas-api-key"
+                    type="password"
+                    className="w-full border rounded-md px-3 py-2"
+                    value={formState.apiKey}
+                    placeholder={formState.id ? '••••••••' : ''}
+                    onChange={(e) =>
+                      setFormState((prev) => ({ ...prev, apiKey: e.target.value }))
+                    }
+                  />
+                </div>
+              ) : null}
 
               {formState.providerType === 'comfyui_direct' ? (
                 <>

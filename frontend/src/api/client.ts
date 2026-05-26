@@ -96,7 +96,7 @@ export interface UserUpdateRequest {
 export interface Provider {
   id: string
   name: string
-  provider_type: 'comfyui_direct' | 'runpod' | 'poe'
+  provider_type: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud'
   config: Record<string, unknown>
   is_active: boolean
   daily_budget_limit: number | null
@@ -107,7 +107,7 @@ export interface Provider {
 
 export interface ProviderCreateRequest {
   name: string
-  provider_type: 'comfyui_direct' | 'runpod' | 'poe'
+  provider_type: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud'
   config: Record<string, unknown>
   daily_budget_limit?: number | null
   priority?: number
@@ -124,7 +124,7 @@ export interface ProviderUpdateRequest {
 export interface ProviderStatus {
   id: string
   name: string
-  type: 'comfyui_direct' | 'runpod' | 'poe'
+  type: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud'
   is_available: boolean
   estimated_wait_seconds: number
   message: string

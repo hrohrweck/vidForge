@@ -17,6 +17,7 @@ from app.services.model_resolver import (
     resolve_model_variant,
 )
 from app.services.providers import (
+    AtlasCloudProvider,
     ComfyUIDirectProvider,
     PoeProvider,
     RunPodProvider,
@@ -44,8 +45,13 @@ VIDEO_WORKFLOW_MAP: dict[str, str] = {
 async def get_provider_instance(
     db: AsyncSession,
     provider: Provider,
-) -> PoeProvider | ComfyUIDirectProvider | RunPodProvider:
-    if provider.provider_type == "poe":
+) -> PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider:
+    if provider.provider_type == "atlascloud":
+        from app.services.providers import AtlasCloudProvider
+        instance = AtlasCloudProvider(provider.id, provider.config)
+        await instance.initialize(provider.config)
+        return instance
+    elif provider.provider_type == "poe":
         from app.services.providers import PoeProvider
         instance = PoeProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
@@ -68,7 +74,7 @@ async def get_provider_for_job(
     db: AsyncSession,
     job: Job,
     modality: str,
-) -> tuple[Provider | None, PoeProvider | ComfyUIDirectProvider | RunPodProvider | None]:
+) -> tuple[Provider | None, PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider | None]:
     provider_id = job.image_provider_id if modality == "image" else job.video_provider_id
 
     if provider_id:
