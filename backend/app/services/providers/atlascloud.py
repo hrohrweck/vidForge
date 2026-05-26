@@ -269,6 +269,19 @@ class AtlasCloudProvider(ComfyUIProvider):
                 headers={"Authorization": f"Bearer {self.api_key}"},
             )
             if poll.status_code != 200:
+                try:
+                    err_body = poll.json()
+                    err_msg = err_body.get("message") or err_body.get("msg", "")
+                    # Check nested data for error too
+                    err_data = err_body.get("data", {})
+                    if isinstance(err_data, dict):
+                        err_msg = err_data.get("message", "") or err_msg
+                    if err_msg:
+                        raise LLMError(f"AtlasCloud error: {err_msg}")
+                except LLMError:
+                    raise
+                except Exception:
+                    pass
                 continue
 
             result = poll.json()
@@ -342,6 +355,19 @@ class AtlasCloudProvider(ComfyUIProvider):
                 headers={"Authorization": f"Bearer {self.api_key}"},
             )
             if poll.status_code != 200:
+                try:
+                    err_body = poll.json()
+                    err_msg = err_body.get("message") or err_body.get("msg", "")
+                    # Check nested data for error too
+                    err_data = err_body.get("data", {})
+                    if isinstance(err_data, dict):
+                        err_msg = err_data.get("message", "") or err_msg
+                    if err_msg:
+                        raise LLMError(f"AtlasCloud error: {err_msg}")
+                except LLMError:
+                    raise
+                except Exception:
+                    pass
                 continue
 
             result = poll.json()
