@@ -164,6 +164,15 @@ if [ "${VIDFORGE_DOWNLOAD_LTX:-false}" = "true" ]; then
 fi
 
 # ============================================
+# Fix case-sensitive assertion in LTXVideo text embeddings
+# ============================================
+LTX_CONNECTOR="/workspace/ComfyUI/custom_nodes/ComfyUI-LTXVideo/text_embeddings_connectors.py"
+if [ -f "$LTX_CONNECTOR" ]; then
+    sed -i 's/assert actual == expected_val/assert str(actual).lower() == str(expected_val).lower()/' "$LTX_CONNECTOR"
+    echo "[VidForge] Patched LTXVideo text_embeddings_connectors.py (case-insensitive assertion)"
+fi
+
+# ============================================
 # UMT5 text encoder symlink (needed by LTXVideo)
 # ============================================
 if [ -f "$CLIP_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors" ] && [ ! -f "$TEXT_ENCODERS_DIR/umt5_xxl_fp8_e4m3fn_scaled.safetensors" ]; then
