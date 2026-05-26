@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2 } from 'lucide-react'
-import api, { jobsApi, templatesApi, providersApi, type CreateJobRequest, type Template, type Provider } from '../api/client'
+import api, { jobsApi, templatesApi, modelsApi, type CreateJobRequest, type Template } from '../api/client'
 import { projectsApi } from '../api/projects'
 import type { Project } from '../api/types/project'
 import { Button } from '../components/ui/button'
@@ -24,6 +24,13 @@ interface TemplateInput {
   max?: number
 }
 
+interface ModelOption {
+  id: string
+  name: string
+  provider: string
+  description?: string
+}
+
 export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -31,20 +38,24 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>({})
-  const [providerPreference, setProviderPreference] = useState<string>('auto')
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [isCreatingProject, setIsCreatingProject] = useState(false)
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [newProjectDescription, setNewProjectDescription] = useState('')
+
+  // Per-job model selections
+  const [selectedTextModel, setSelectedTextModel] = useState('')
+  const [selectedImageModel, setSelectedImageModel] = useState('')
+  const [selectedVideoModel, setSelectedVideoModel] = useState('')
 
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
     queryFn: () => templatesApi.list(),
   })
 
-  const { data: providers } = useQuery({
-    queryKey: ['providers'],
-    queryFn: () => providersApi.list(),
+  const { data: availableModels } = useQuery({
+    queryKey: ['availableModels'],
+    queryFn: () => modelsApi.getAvailableModels(),
   })
 
   const { data: projects } = useQuery({
@@ -52,7 +63,18 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     queryFn: () => projectsApi.list(),
   })
 
-  const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
+  // Set defaults from global preferences
+  useEffect(() => {
+    if (availableModels) {
+      const findDefault = (models: ModelOption[], provider: string) => {
+        const match = models.find((m) => m.provider === provider || m.id.includes(provider))
+        return match?.id || ''
+      }
+      setSelectedTextModel(findDefault(availableModels.text_models || [], 'local'))
+      setSelectedImageModel(findDefault(availableModels.image_models || [], 'local'))
+      setSelectedVideoModel(findDefault(availableModels.video_models || [], 'local'))
+    }
+  }, [availableModels])
 
   const selectedTemplate = templates?.data?.find(
     (t: Template) => t.id === selectedTemplateId
@@ -125,8 +147,13 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
       title: title.trim(),
       template_id: selectedTemplateId || undefined,
       project_id: selectedProjectId || undefined,
-      input_data: { ...inputValues, ...uploadedFiles },
-      provider_preference: providerPreference,
+      input_data: {
+        ...inputValues,
+        ...uploadedFiles,
+        text_model: selectedTextModel,
+        image_model: selectedImageModel,
+        video_model: selectedVideoModel,
+      },
     })
   }
 
@@ -227,6 +254,30 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     }
   }
 
+  const renderModelSelect = (
+    label: string,
+    models: ModelOption[] | undefined,
+    selected: string,
+    onChange: (id: string) => void,
+  ) => (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <select
+        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        value={selected}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!models?.length}
+      >
+        {!models?.length && <option value="">Loading...</option>}
+        {models?.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-background rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border">
@@ -238,7 +289,6 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Video Title — mandatory */}
           <div className="space-y-2">
             <Label>Video Title <span className="text-destructive">*</span></Label>
             <Input
@@ -265,11 +315,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                     </option>
                   ))}
                 </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsCreatingProject(true)}
-                >
+                <Button type="button" variant="outline" onClick={() => setIsCreatingProject(true)}>
                   + New
                 </Button>
               </div>
@@ -296,15 +342,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                   >
                     {createProjectMutation.isPending ? 'Creating...' : 'Create Project'}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setIsCreatingProject(false)
-                      setNewProjectTitle('')
-                      setNewProjectDescription('')
-                    }}
-                  >
+                  <Button type="button" variant="ghost" onClick={() => { setIsCreatingProject(false); setNewProjectTitle(''); setNewProjectDescription('') }}>
                     Cancel
                   </Button>
                 </div>
@@ -332,30 +370,34 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                 </option>
               ))}
             </select>
-          {selectedTemplate?.description && (
-            <p className="text-sm text-muted-foreground">
-              {selectedTemplate.description}
-            </p>
-          )}
+            {selectedTemplate?.description && (
+              <p className="text-sm text-muted-foreground">{selectedTemplate.description}</p>
+            )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="providerPreference">Provider Preference</Label>
-            <select
-              id="providerPreference"
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={providerPreference}
-              onChange={(e) => {
-                setProviderPreference(e.target.value)
-              }}
-            >
-              <option value="auto">Auto</option>
-              {activeProviders.map((provider: Provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name} ({provider.provider_type})
-                </option>
-              ))}
-            </select>
+          {/* AI Model Selection */}
+          <div className="space-y-4 border rounded-lg p-4 bg-muted/30">
+            <h3 className="text-sm font-semibold text-muted-foreground">AI Models</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {renderModelSelect(
+                'Text Model',
+                availableModels?.text_models,
+                selectedTextModel,
+                setSelectedTextModel,
+              )}
+              {renderModelSelect(
+                'Image Model',
+                availableModels?.image_models,
+                selectedImageModel,
+                setSelectedImageModel,
+              )}
+              {renderModelSelect(
+                'Video Model',
+                availableModels?.video_models,
+                selectedVideoModel,
+                setSelectedVideoModel,
+              )}
+            </div>
           </div>
 
           {templateInputs.length > 0 && (
