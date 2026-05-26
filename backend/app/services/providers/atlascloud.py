@@ -252,36 +252,42 @@ class AtlasCloudProvider(ComfyUIProvider):
             )
 
         data = resp.json()
-        prediction_id = data.get("predictionId")
+        # AtlasCloud wraps in {code, data: {id, urls: {get}}}
+        inner = data.get("data", data)
+        prediction_id = inner.get("id") or data.get("predictionId")
+        poll_url = (inner.get("urls", {}).get("get") or
+                    f"{ATLAS_API_BASE}/model/getResult")
         if not prediction_id:
-            raise LLMError(f"No predictionId in response: {data}")
+            raise LLMError(f"No prediction ID in response: {data}")
 
         # Poll for result
         for _ in range(120):  # 4 minutes max
             await asyncio.sleep(2)
             poll = await client.get(
-                f"{ATLAS_API_BASE}/model/getResult",
-                params={"predictionId": prediction_id},
+                poll_url if "http" in (poll_url or "") else f"{ATLAS_API_BASE}/model/getResult",
+                params={"predictionId": prediction_id} if "http" not in (poll_url or "") else None,
                 headers={"Authorization": f"Bearer {self.api_key}"},
             )
             if poll.status_code != 200:
                 continue
 
             result = poll.json()
-            status = result.get("status", "")
+            inner_result = result.get("data", result)
+            status = inner_result.get("status", "") or result.get("status", "")
             if status == "completed":
-                image_url = (
-                    result.get("data", {}).get("url")
-                    or result.get("output", "")
-                    or result.get("image_url", "")
-                )
+                outputs = inner_result.get("outputs") or inner_result.get("output")
+                image_url = (inner_result.get("url")
+                             or (outputs.get("image") if isinstance(outputs, dict) else None)
+                             or (outputs[0] if isinstance(outputs, list) and outputs else None)
+                             or result.get("image_url", "")
+                             or result.get("output", ""))
                 if image_url:
                     img_resp = await client.get(image_url)
                     img_resp.raise_for_status()
                     return model, img_resp.content
                 raise LLMError(f"No image URL in completed result: {result}")
             if status == "failed":
-                err = result.get("error", "Unknown error")
+                err = inner_result.get("error", "") or result.get("error", "Unknown error")
                 raise LLMError(f"Image generation failed: {err}")
 
         raise LLMError("Image generation timed out")
@@ -320,35 +326,43 @@ class AtlasCloudProvider(ComfyUIProvider):
             )
 
         data = resp.json()
-        prediction_id = data.get("predictionId")
+        # AtlasCloud wraps in {code, data: {id, urls: {get}}}}
+        inner = data.get("data", data)
+        prediction_id = inner.get("id") or data.get("predictionId")
+        poll_url = (inner.get("urls", {}).get("get") or
+                    f"{ATLAS_API_BASE}/model/getResult")
         if not prediction_id:
-            raise LLMError(f"No predictionId in response: {data}")
+            raise LLMError(f"No prediction ID in response: {data}")
 
         for _ in range(300):  # 10 minutes max
             await asyncio.sleep(2)
             poll = await client.get(
-                f"{ATLAS_API_BASE}/model/getResult",
-                params={"predictionId": prediction_id},
+                poll_url if "http" in (poll_url or "") else f"{ATLAS_API_BASE}/model/getResult",
+                params={"predictionId": prediction_id} if "http" not in (poll_url or "") else None,
                 headers={"Authorization": f"Bearer {self.api_key}"},
             )
             if poll.status_code != 200:
                 continue
 
             result = poll.json()
-            status = result.get("status", "")
+            inner_result = result.get("data", result)
+            status = inner_result.get("status", "") or result.get("status", "")
             if status == "completed":
-                video_url = (
-                    result.get("data", {}).get("url")
-                    or result.get("output", "")
-                    or result.get("video_url", "")
-                )
+                outputs = inner_result.get("outputs") or inner_result.get("output")
+                video_url = (inner_result.get("url") or
+                             (outputs.get("video") if isinstance(outputs, dict) else None) or
+                             (outputs[0] if isinstance(outputs, list) and outputs else None))
+                if not video_url:
+                    video_url = result.get("video_url", "") or result.get("output", "")
+                    if isinstance(video_url, dict):
+                        video_url = video_url.get("video") or video_url.get("url", "")
                 if video_url:
                     vid_resp = await client.get(video_url)
                     vid_resp.raise_for_status()
                     return model, vid_resp.content
                 raise LLMError(f"No video URL in completed result: {result}")
             if status == "failed":
-                err = result.get("error", "Unknown error")
+                err = inner_result.get("error", "") or result.get("error", "Unknown error")
                 raise LLMError(f"Video generation failed: {err}")
 
         raise LLMError("Video generation timed out")
