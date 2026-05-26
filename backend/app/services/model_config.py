@@ -208,6 +208,32 @@ def _load_poe_models() -> tuple[
                     videos.append(entry)
                 elif modality == "text":
                     texts.append(entry)
+
+            # AtlasCloud models
+            ac_rows = conn.execute(
+                text(
+                    "SELECT model_id, name, modality FROM atlascloud_models "
+                    "WHERE is_active = true"
+                )
+            ).fetchall()
+            for model_id, name, modality in ac_rows:
+                entry = {
+                    "id": f"atlascloud:{model_id}",
+                    "name": f"{name} (AtlasCloud)",
+                    "description": f"AtlasCloud model: {model_id}",
+                    "size_gb": 0,
+                    "speed": "cloud",
+                    "quality": "good",
+                    "license": "Proprietary",
+                    "provider": "atlascloud",
+                    "default": False,
+                }
+                if modality == "image":
+                    images.append(entry)
+                elif modality == "video":
+                    videos.append(entry)
+                elif modality == "text":
+                    texts.append(entry)
     finally:
         engine.dispose()
 

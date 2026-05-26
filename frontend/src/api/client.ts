@@ -389,6 +389,23 @@ export const providersApi = {
   deletePoeModel: async (providerId: string, modelId: string) => {
     await api.delete(`/providers/${providerId}/poe-models/${modelId}`)
   },
+
+  // AtlasCloud Models
+  listAtlasCloudModels: async (providerId: string) => {
+    const response = await api.get<PoeModel[]>(`/providers/${providerId}/atlascloud-models`)
+    return response.data
+  },
+  createAtlasCloudModel: async (providerId: string, data: PoeModelCreate) => {
+    const response = await api.post<PoeModel>(`/providers/${providerId}/atlascloud-models`, data)
+    return response.data
+  },
+  updateAtlasCloudModel: async (providerId: string, modelId: string, data: PoeModelUpdate) => {
+    const response = await api.patch<PoeModel>(`/providers/${providerId}/atlascloud-models/${modelId}`, data)
+    return response.data
+  },
+  deleteAtlasCloudModel: async (providerId: string, modelId: string) => {
+    await api.delete(`/providers/${providerId}/atlascloud-models/${modelId}`)
+  },
 }
 
 export const modelsApi = {

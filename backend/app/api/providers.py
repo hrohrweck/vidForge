@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, require_admin
-from app.database import PoeModel, Provider, User, get_db
+from app.database import AtlasCloudModel, PoeModel, Provider, User, get_db
 from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
 from app.services.worker_registry import WorkerRegistry
@@ -452,5 +452,124 @@ async def delete_poe_model(
         raise HTTPException(status_code=404, detail="Model not found")
 
     await db.delete(poe_model)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+# ── AtlasCloud Models ────────────────────────────────────────────
+
+class AtlasCloudModelCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    model_id: str = Field(..., min_length=1, max_length=255)
+    modality: str = Field(..., pattern="^(video|image|text)$")
+
+
+class AtlasCloudModelUpdate(BaseModel):
+    name: str | None = None
+    model_id: str | None = None
+    modality: str | None = Field(None, pattern="^(video|image|text)$")
+    is_active: bool | None = None
+
+
+class AtlasCloudModelResponse(BaseModel):
+    id: UUID
+    provider_id: UUID
+    name: str
+    model_id: str
+    modality: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.get("/{provider_id}/atlascloud-models", response_model=list[AtlasCloudModelResponse])
+async def list_atlascloud_models(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(AtlasCloudModel).where(AtlasCloudModel.provider_id == provider_id)
+    )
+    return result.scalars().all()
+
+
+@router.post("/{provider_id}/atlascloud-models", response_model=AtlasCloudModelResponse)
+async def create_atlascloud_model(
+    provider_id: UUID,
+    data: AtlasCloudModelCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    if provider.provider_type != "atlascloud":
+        raise HTTPException(
+            status_code=400, detail="AtlasCloud models only available for AtlasCloud providers"
+        )
+
+    model = AtlasCloudModel(
+        provider_id=provider_id,
+        name=data.name,
+        model_id=data.model_id,
+        modality=data.modality,
+    )
+    db.add(model)
+    await db.commit()
+    await db.refresh(model)
+    return model
+
+
+@router.patch("/{provider_id}/atlascloud-models/{model_id}", response_model=AtlasCloudModelResponse)
+async def update_atlascloud_model(
+    provider_id: UUID,
+    model_id: UUID,
+    data: AtlasCloudModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(
+        select(AtlasCloudModel).where(
+            AtlasCloudModel.id == model_id, AtlasCloudModel.provider_id == provider_id
+        )
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if data.name is not None:
+        model.name = data.name
+    if data.model_id is not None:
+        model.model_id = data.model_id
+    if data.modality is not None:
+        model.modality = data.modality
+    if data.is_active is not None:
+        model.is_active = data.is_active
+
+    await db.commit()
+    await db.refresh(model)
+    return model
+
+
+@router.delete("/{provider_id}/atlascloud-models/{model_id}")
+async def delete_atlascloud_model(
+    provider_id: UUID,
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    result = await db.execute(
+        select(AtlasCloudModel).where(
+            AtlasCloudModel.id == model_id, AtlasCloudModel.provider_id == provider_id
+        )
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    await db.delete(model)
     await db.commit()
     return {"status": "deleted"}

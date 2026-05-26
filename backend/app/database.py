@@ -384,6 +384,25 @@ class Provider(Base):
     poe_models: Mapped[list["PoeModel"]] = relationship(
         back_populates="provider", cascade="all, delete-orphan"
     )
+    atlascloud_models: Mapped[list["AtlasCloudModel"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan"
+    )
+
+
+class AtlasCloudModel(Base):
+    __tablename__ = "atlascloud_models"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    modality: Mapped[str] = mapped_column(String(20), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    provider: Mapped["Provider"] = relationship(back_populates="atlascloud_models")
 
 
 class PoeModel(Base):
