@@ -294,6 +294,7 @@ class AtlasCloudProvider(ComfyUIProvider):
         model: str = "kling-v2.0",
         duration: int | None = None,
         aspect_ratio: str = "16:9",
+        image_path: str | None = None,
         reference_image_url: str | None = None,
     ) -> tuple[str, bytes] | None:
         """Submit a video generation job and poll until completion."""
@@ -301,9 +302,10 @@ class AtlasCloudProvider(ComfyUIProvider):
         if not client:
             raise RuntimeError("Provider not initialized")
 
+        ref_url = image_path or reference_image_url
         payload: dict[str, Any] = {"model": model, "prompt": prompt}
-        if reference_image_url:
-            payload["image_url"] = reference_image_url
+        if ref_url:
+            payload["image_url"] = ref_url
 
         resp = await client.post(
             f"{ATLAS_API_BASE}/model/generateVideo",

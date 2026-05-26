@@ -257,13 +257,17 @@ async def _resolve_image_provider(
     user_prefs = await get_user_model_preferences(db, job.user_id)
     selected_model = model_preference or user_prefs.get("image_model", "flux1-schnell")
 
-    # Poe model → use the Poe provider directly
+    # Cloud models → use the appropriate cloud provider
+    if selected_model.startswith("atlascloud:"):
+        cloud_id = selected_model.removeprefix("atlascloud:")
+        provider, instance = await _get_atlascloud_provider(db)
+        if provider and instance:
+            return cloud_id, provider.id, "atlascloud", instance
     if selected_model.startswith("poe:"):
         poe_model_id = selected_model.removeprefix("poe:")
         provider, instance = await _get_poe_provider(db)
         if provider and instance:
             return poe_model_id, provider.id, "poe", instance
-        # Poe provider not available — fall through to local
 
     # Local / ComfyUI model
     provider, instance = await get_comfyui_direct_provider(db, provider_id)
@@ -281,13 +285,17 @@ async def _resolve_video_provider(
     selected_model = model_preference or user_prefs.get("video_model", "wan2.2")
     selected_model = get_family_from_legacy_id(selected_model)
 
-    # Poe model → use the Poe provider directly
+    # Cloud models → use the appropriate cloud provider
+    if selected_model.startswith("atlascloud:"):
+        cloud_id = selected_model.removeprefix("atlascloud:")
+        provider, instance = await _get_atlascloud_provider(db)
+        if provider and instance:
+            return cloud_id, provider.id, "atlascloud", instance
     if selected_model.startswith("poe:"):
         poe_model_id = selected_model.removeprefix("poe:")
         provider, instance = await _get_poe_provider(db)
         if provider and instance:
             return poe_model_id, provider.id, "poe", instance
-        # Poe provider not available — fall through to local
 
     # Local / ComfyUI model
     provider, instance = await get_comfyui_direct_provider(db, provider_id)
@@ -300,6 +308,28 @@ async def _get_poe_provider(
     """Find the first active Poe provider in the DB."""
     result = await db.execute(
         select(Provider).where(Provider.provider_type == "poe", Provider.is_active == True)  # noqa: E712
+    )
+    providers = result.scalars().all()
+    for provider in providers:
+        try:
+            instance = await get_provider_instance(db, provider)
+            return provider, instance
+        except Exception:
+            continue
+    return None, None
+
+
+
+
+
+async def _get_atlascloud_provider(
+    db: AsyncSession,
+) -> tuple[Provider | None, AtlasCloudProvider | None]:
+    """Find the first active AtlasCloud provider in the DB."""
+    result = await db.execute(
+        select(Provider).where(
+            Provider.provider_type == "atlascloud", Provider.is_active == True  # noqa: E712
+        )
     )
     providers = result.scalars().all()
     for provider in providers:
@@ -328,9 +358,9 @@ async def generate_image(
         db, job, provider_id, model_preference,
     )
 
-    if ptype == "poe":
-        # Poe provider — direct API call
-        _poe_id, image_data = await instance.generate_image(
+    if ptype in ("poe", "atlascloud"):
+        # Cloud provider — direct API call
+        _cloud_id, image_data = await instance.generate_image(
             prompt=prompt,
             model=selected_model,
             aspect_ratio=aspect_ratio,
@@ -391,9 +421,9 @@ async def generate_video(
         db, job, provider_id, model_preference,
     )
 
-    if ptype == "poe":
-        # Poe provider — direct API call
-        _poe_id, video_data = await instance.generate_video(
+    if ptype in ("poe", "atlascloud"):
+        # Cloud provider — direct API call
+        _cloud_id, video_data = await instance.generate_video(
             prompt=prompt,
             model=selected_model,
             duration=duration,
