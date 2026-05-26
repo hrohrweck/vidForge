@@ -606,21 +606,26 @@ export default function Providers() {
               </div>
 
               {formState.providerType === 'atlascloud' ? (
-                <div className="space-y-2">
-                  <label htmlFor="atlas-api-key" className="text-sm font-medium">
-                    AtlasCloud API Key {formState.id ? '(leave blank to keep current)' : ''}
-                  </label>
-                  <input
-                    id="atlas-api-key"
-                    type="password"
-                    className="w-full border rounded-md px-3 py-2"
-                    value={formState.apiKey}
-                    placeholder={formState.id ? '••••••••' : ''}
-                    onChange={(e) =>
-                      setFormState((prev) => ({ ...prev, apiKey: e.target.value }))
-                    }
-                  />
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <label htmlFor="atlas-api-key" className="text-sm font-medium">
+                      AtlasCloud API Key {formState.id ? '(leave blank to keep current)' : ''}
+                    </label>
+                    <input
+                      id="atlas-api-key"
+                      type="password"
+                      className="w-full border rounded-md px-3 py-2"
+                      value={formState.apiKey}
+                      placeholder={formState.id ? '••••••••' : ''}
+                      onChange={(e) =>
+                        setFormState((prev) => ({ ...prev, apiKey: e.target.value }))
+                      }
+                    />
+                  </div>
+                  {formState.id && (
+                    <AtlasCloudModelsSection providerId={formState.id} />
+                  )}
+                </>
               ) : null}
 
               {formState.providerType === 'comfyui_direct' ? (
@@ -813,10 +818,7 @@ export default function Providers() {
                   </div>
                   
                   {formState.id && (
-                    <>
-                      <PoeModelsSection providerId={formState.id} />
-                      <AtlasCloudModelsSection providerId={formState.id} />
-                    </>
+                    <PoeModelsSection providerId={formState.id} />
                   )}
                 </>
               ) : null}
