@@ -295,6 +295,25 @@ class ChatOrchestrator:
         For Poe models (prefixed with ``poe:``), loads the Poe provider
         from the database. Otherwise returns the default LLMClient.
         """
+        if model_id.startswith("atlascloud:"):
+            try:
+                from app.services.providers import AtlasCloudProvider
+
+                result = await self.db.execute(
+                    select(Provider).where(
+                        Provider.provider_type == "atlascloud",
+                        Provider.is_active == True,  # noqa: E712
+                    )
+                )
+                for provider in result.scalars().all():
+                    try:
+                        instance = AtlasCloudProvider(provider.id, provider.config)
+                        await instance.initialize(provider.config)
+                        return instance
+                    except Exception:
+                        continue
+            except Exception:
+                pass
         if model_id.startswith("poe:"):
             try:
                 from app.services.providers import PoeProvider
@@ -345,8 +364,12 @@ class ChatOrchestrator:
 
         # Resolve the LLM client for the selected model (Ollama vs Poe)
         llm = await self._resolve_llm(model_id)
-        # Poe models are prefixed with "poe:" — strip it for the API call
-        actual_model = model_id.removeprefix("poe:") if model_id.startswith("poe:") else model_id
+        # Cloud models are prefixed with "atlascloud:" or "poe:" — strip for the API call
+        actual_model = model_id
+        for prefix in ("atlascloud:", "poe:"):
+            if model_id.startswith(prefix):
+                actual_model = model_id.removeprefix(prefix)
+                break
 
         for iteration in range(1, self.max_iterations + 1):
             if time.monotonic() - started_at >= self.max_wall_seconds:
