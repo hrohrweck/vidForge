@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { jobsApi, templatesApi, providersApi, Template, type Provider } from '../api/client'
+import { jobsApi, templatesApi, modelsApi, Template } from '../api/client'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
@@ -16,7 +16,9 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
   const [jobInputs, setJobInputs] = useState<string>('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [autoStart, setAutoStart] = useState(true)
-  const [providerPreference, setProviderPreference] = useState<string>('auto')
+  const [selectedTextModel, setSelectedTextModel] = useState('')
+  const [selectedImageModel, setSelectedImageModel] = useState('')
+  const [selectedVideoModel, setSelectedVideoModel] = useState('')
 
   const queryClient = useQueryClient()
 
@@ -28,19 +30,32 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
     },
   })
 
-  const { data: providers } = useQuery({
-    queryKey: ['providers'],
-    queryFn: () => providersApi.list(),
+  const { data: availableModels } = useQuery({
+    queryKey: ['availableModels'],
+    queryFn: () => modelsApi.getAvailableModels(),
   })
 
-  const activeProviders = providers?.filter((p: Provider) => p.is_active) || []
+  // Set defaults from global preferences
+  useEffect(() => {
+    if (availableModels) {
+      const findDefault = (models: Array<{id: string; provider: string; name: string}>, provider: string) => {
+        const match = models.find((m) => m.provider === provider || m.id.includes(provider))
+        return match?.id || ''
+      }
+      setSelectedTextModel(findDefault(availableModels.text_models || [], 'local'))
+      setSelectedImageModel(findDefault(availableModels.image_models || [], 'local'))
+      setSelectedVideoModel(findDefault(availableModels.video_models || [], 'local'))
+    }
+  }, [availableModels])
 
   const createBatchMutation = useMutation({
     mutationFn: async (data: {
       template_id: string
       jobs: Record<string, unknown>[]
       auto_start: boolean
-      provider_preference: string
+      text_model: string
+      image_model: string
+      video_model: string
     }) => {
       return jobsApi.createBatch(data)
     },
@@ -57,7 +72,6 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
         selectedTemplate,
         csvFile,
         autoStart,
-        providerPreference
       )
     },
     onSuccess: () => {
@@ -80,7 +94,9 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
           template_id: selectedTemplate,
           jobs,
           auto_start: autoStart,
-          provider_preference: providerPreference,
+          text_model: selectedTextModel,
+          image_model: selectedImageModel,
+          video_model: selectedVideoModel,
         })
       } catch {
         alert('Invalid JSON format')
@@ -137,23 +153,35 @@ export function BatchJobModal({ isOpen, onClose }: BatchJobModalProps) {
             </select>
           </div>
 
+            <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">AI Models</h3>
             <div>
-            <Label htmlFor="batch-provider">Provider Preference</Label>
-            <select
-              id="batch-provider"
-              className="w-full mt-1 border rounded px-3 py-2"
-              value={providerPreference}
-              onChange={(e) => {
-                setProviderPreference(e.target.value)
-              }}
-            >
-              <option value="auto">Auto</option>
-              {activeProviders.map((provider: Provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name} ({provider.provider_type})
-                </option>
-              ))}
-            </select>
+              <Label>Text Model</Label>
+              <select className="w-full mt-1 border rounded px-3 py-2" value={selectedTextModel} onChange={(e) => setSelectedTextModel(e.target.value)}>
+                {!availableModels?.text_models?.length && <option value="">Loading...</option>}
+                {availableModels?.text_models?.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Image Model</Label>
+              <select className="w-full mt-1 border rounded px-3 py-2" value={selectedImageModel} onChange={(e) => setSelectedImageModel(e.target.value)}>
+                {!availableModels?.image_models?.length && <option value="">Loading...</option>}
+                {availableModels?.image_models?.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Video Model</Label>
+              <select className="w-full mt-1 border rounded px-3 py-2" value={selectedVideoModel} onChange={(e) => setSelectedVideoModel(e.target.value)}>
+                {!availableModels?.video_models?.length && <option value="">Loading...</option>}
+                {availableModels?.video_models?.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {mode === 'manual' && (
