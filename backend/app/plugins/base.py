@@ -248,6 +248,7 @@ class PluginBase(ABC):
 
         input_data = job.input_data or {}
         aspect_ratio = input_data.get("aspect_ratio", "16:9")
+        video_model = input_data.get("video_model")
 
         for scene in scenes:
             if scene.generated_video_path:
@@ -266,6 +267,7 @@ class PluginBase(ABC):
                         scene_number=scene.scene_number,
                         reference_image_path=scene.reference_image_path,
                         provider_id=job.video_provider_id,
+                        model_preference=video_model,
                         duration=duration, aspect_ratio=aspect_ratio,
                         label=f"video-s{scene.scene_number}",
                     )
