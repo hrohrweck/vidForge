@@ -332,7 +332,8 @@ class AtlasCloudProvider(ComfyUIProvider):
 
         ref_url = image_path or reference_image_url
         payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
-        if ref_url:
+        # Only include image_url if it looks like an actual URL (not a local path)
+        if ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
             payload["image_url"] = ref_url
 
         resp = await client.post(
