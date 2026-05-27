@@ -197,9 +197,9 @@ export function MediaLibrary() {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex h-screen bg-background">
+      <div className="flex h-full gap-[10px] p-[10px]">
         {/* Left Sidebar - Folder Rail */}
-        <div className="w-64 border-r border-border flex flex-col">
+        <div className="w-56 shrink-0 rounded-[10px] border bg-card overflow-hidden flex flex-col h-full">
           <FolderRail
             folders={folderTree}
             selectedId={selectedFolderId}
@@ -212,7 +212,7 @@ export function MediaLibrary() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden gap-[10px]">
           {/* Toolbar */}
           <MediaToolbar
             query={query}
@@ -234,7 +234,7 @@ export function MediaLibrary() {
           )}
 
           {/* Canvas */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto min-h-0">
             <MediaCanvas
               assets={allAssets}
               view={view}
@@ -252,11 +252,13 @@ export function MediaLibrary() {
 
         {/* Right Sidebar - Detail Panel */}
         {isDetailPanelOpen && selectedAssetForDetails && (
-          <MediaDetailPanel
-            asset={selectedAssetForDetails}
-            isOpen={isDetailPanelOpen}
-            onClose={() => setIsDetailPanelOpen(false)}
-          />
+          <div className="w-80 shrink-0 rounded-[10px] border bg-card overflow-hidden h-full">
+            <MediaDetailPanel
+              asset={selectedAssetForDetails}
+              isOpen={isDetailPanelOpen}
+              onClose={() => setIsDetailPanelOpen(false)}
+            />
+          </div>
         )}
       </div>
 

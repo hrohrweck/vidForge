@@ -74,6 +74,7 @@ export default function Layout() {
   const { user, logout } = useAuthStore()
   const location = useLocation()
   const isChatPage = location.pathname === '/chat'
+  const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/')
   const navEntries = getNavEntries(user?.is_superuser || false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
@@ -214,7 +215,7 @@ export default function Layout() {
         </aside>
 
         <main className="flex-1 overflow-y-auto bg-background/50">
-          <div className={isChatPage ? 'h-full w-full p-0' : 'container mx-auto p-6 max-w-6xl'}>
+          <div className={isFullPage ? 'h-full w-full p-0' : 'container mx-auto p-6 max-w-6xl'}>
             <Outlet />
           </div>
         </main>
