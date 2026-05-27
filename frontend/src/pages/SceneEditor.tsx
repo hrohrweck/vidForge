@@ -55,6 +55,7 @@ function formatTime(seconds: number) {
 export default function SceneEditor() {
   const { jobId } = useParams<{ jobId: string }>()
   const queryClient = useQueryClient()
+  const hasPendingSceneOp = useRef(false)
 
   const [editingScene, setEditingScene] = useState<VideoScene | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
@@ -175,7 +176,6 @@ export default function SceneEditor() {
   // ── Full regeneration (re-plan + images + videos) ─────────────────
 
   const [isRegenerating, setIsRegenerating] = useState(false)
-  const hasPendingSceneOp = useRef(false)
 
   const regenerateAllMutation = useMutation({
     mutationFn: () => scenesApi.regenerateAll(jobId!),
