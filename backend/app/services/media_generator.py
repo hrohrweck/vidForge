@@ -260,6 +260,9 @@ async def _resolve_image_provider(
     # Cloud models → use the appropriate cloud provider
     if selected_model.startswith("atlascloud:"):
         cloud_id = selected_model.removeprefix("atlascloud:")
+        # Model IDs like atlascloud/xxx get double-prefixed by discovery
+        if cloud_id.startswith("atlascloud/"):
+            cloud_id = cloud_id[11:]
         provider, instance = await _get_atlascloud_provider(db)
         if provider and instance:
             return cloud_id, provider.id, "atlascloud", instance
@@ -288,6 +291,9 @@ async def _resolve_video_provider(
     # Cloud models → use the appropriate cloud provider
     if selected_model.startswith("atlascloud:"):
         cloud_id = selected_model.removeprefix("atlascloud:")
+        # Model IDs like atlascloud/xxx get double-prefixed by discovery
+        if cloud_id.startswith("atlascloud/"):
+            cloud_id = cloud_id[11:]
         provider, instance = await _get_atlascloud_provider(db)
         if provider and instance:
             return cloud_id, provider.id, "atlascloud", instance
