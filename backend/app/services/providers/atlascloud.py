@@ -348,7 +348,7 @@ class AtlasCloudProvider(ComfyUIProvider):
                     )
                     if upload_resp.status_code == 200:
                         upload_data = upload_resp.json()
-                        uploaded_url = upload_data.get("data", {}).get("url") or upload_data.get("url")
+                        uploaded_url = upload_data.get("data", {}).get("download_url") or upload_data.get("data", {}).get("url") or upload_data.get("url")
                         if uploaded_url:
                             payload["image_url"] = uploaded_url
             except Exception as e:
