@@ -192,26 +192,37 @@ export default function JobDetail() {
           </div>
           <div className="flex gap-4">
             {job.preview_path && (
-              <a
-                href={`/api/uploads/download/${job.preview_path}`}
-                download
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const url = jobsApi.downloadUrl(job.id)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = ''
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
               >
-                <Button variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Preview
-                </Button>
-              </a>
+                <Download className="h-4 w-4 mr-2" />
+                Download Preview
+              </Button>
             )}
             {job.output_path && (
-              <a
-                href={`/api/uploads/download/${job.output_path}`}
-                download
+              <Button
+                onClick={() => {
+                  const url = jobsApi.downloadUrl(job.id)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = ''
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
               >
-                <Button>
                   <Download className="h-4 w-4 mr-2" />
                   Download Video
                 </Button>
-              </a>
             )}
           </div>
         </div>
