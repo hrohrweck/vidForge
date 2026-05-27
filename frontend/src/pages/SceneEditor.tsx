@@ -198,7 +198,7 @@ export default function SceneEditor() {
     !!job?.stage && ['planned', 'images_ready'].includes(job.stage)
 
   const canGenerateVideos = () =>
-    !!job?.stage && ['images_ready', 'videos_ready'].includes(job.stage)
+    true  // Always allow per-scene video generation when image exists
 
   const allVideosGenerated = () =>
     !!scenes?.length && scenes.every(s => s.generated_video_path)
@@ -420,7 +420,8 @@ export default function SceneEditor() {
                                 <Image className="h-4 w-4" />
                               </Button>
                             )}
-                            {scene.reference_image_path && canGenerateVideos() && !isOperationInProgress && (
+                            {scene.reference_image_path && canGenerateVideos() && (
+                              // Video button always available when image exists
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -466,7 +467,7 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Image Ready
                               </span>
-                            ) : scene.status === 'generating_image' || scene.status === 'generating' ? (
+                            ) : generateImageMutation.isPending && generateImageMutation.variables === scene.id ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
                                 <Clock className="h-3 w-3" /> Generating Image…
                               </span>
@@ -479,7 +480,7 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Video Ready
                               </span>
-                            ) : scene.status === 'generating_video' || scene.status === 'generating' ? (
+                            ) : generateVideoMutation.isPending && generateVideoMutation.variables === scene.id ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
                                 <Clock className="h-3 w-3" /> Generating Video…
                               </span>
