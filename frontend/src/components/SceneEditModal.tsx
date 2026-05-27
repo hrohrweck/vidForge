@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { X, Upload, Save, RefreshCw } from 'lucide-react'
+import { X, Upload, Save, RefreshCw, Image } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
+import { AssetPickerModal } from './media/AssetPickerModal'
 import type { VideoScene } from '../api/client'
+import type { MediaAsset } from '../api/types/media'
 
 interface SceneEditModalProps {
   scene: VideoScene
@@ -21,6 +23,7 @@ export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEd
   const [startTime, setStartTime] = useState(scene.start_time)
   const [endTime, setEndTime] = useState(scene.end_time)
   const [referenceImage, setReferenceImage] = useState<File | null>(null)
+  const [showAssetPicker, setShowAssetPicker] = useState(false)
 
   const handleSave = () => {
     onSave({
@@ -162,6 +165,13 @@ export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEd
 
           <div className="space-y-2">
             <Label>Reference Image (Optional)</Label>
+            <div className="flex gap-2 items-center">
+              <Button variant="outline" size="sm" type="button" onClick={() => setShowAssetPicker(true)}>
+                <Image className="h-4 w-4 mr-2" />
+                From Media Library
+              </Button>
+              <span className="text-xs text-muted-foreground">or upload:</span>
+            </div>
             <div className="flex gap-2">
               <Input
                 type="file"
@@ -221,6 +231,15 @@ export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEd
           )}
         </div>
       </div>
+
+      <AssetPickerModal
+        isOpen={showAssetPicker}
+        onClose={() => setShowAssetPicker(false)}
+        onSelect={(asset: MediaAsset) => {
+          onSave({ reference_image_path: asset.file_path })
+          setShowAssetPicker(false)
+        }}
+      />
     </div>
   )
 }
