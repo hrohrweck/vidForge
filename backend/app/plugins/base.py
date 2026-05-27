@@ -622,14 +622,16 @@ class PluginBase(ABC):
             from app.services.media_generator import generate_video
             duration = max(2, int(scene_duration))
             prompt = scene.visual_description or scene.lyrics_segment or ""
+            input_data = job.input_data or {}
             video_path, _mid, _pid, actual_duration = await self._retry(
                 generate_video,
                 db=db, job=job, prompt=prompt,
                 scene_number=scene.scene_number,
                 reference_image_path=scene.reference_image_path,
                 provider_id=job.video_provider_id,
+                model_preference=input_data.get("video_model"),
                 duration=duration,
-                aspect_ratio=(job.input_data or {}).get("aspect_ratio", "16:9"),
+                aspect_ratio=input_data.get("aspect_ratio", "16:9"),
                 label=f"rerender-video-s{scene.scene_number}",
             )
             scene.generated_video_path = video_path
