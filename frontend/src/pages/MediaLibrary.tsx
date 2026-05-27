@@ -212,7 +212,7 @@ export function MediaLibrary() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden gap-[10px]">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden gap-[10px] relative">
           {/* Toolbar */}
           <MediaToolbar
             query={query}
@@ -223,18 +223,15 @@ export function MediaLibrary() {
             breadcrumbs={[{ id: null, name: 'All Assets' }, ...(selectedFolderId ? [{ id: selectedFolderId, name: 'Current Folder' }] : [])]}
           />
 
-          {/* Bulk Actions Bar */}
-          {selection.count > 0 && (
+          {/* Canvas */}
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {/* Bulk Actions Bar - slides down centered at top */}
             <BulkActionsBar
               selection={selection}
               onMove={() => {}}
               onTag={() => {}}
               onDelete={handleBulkDelete}
             />
-          )}
-
-          {/* Canvas */}
-          <div className="flex-1 overflow-y-auto min-h-0">
             <MediaCanvas
               assets={allAssets}
               view={view}
