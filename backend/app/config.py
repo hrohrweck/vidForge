@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 1440
 
     comfyui_url: str = "http://localhost:8188"
     comfyui_workflows_path: str = "./app/comfyui/workflows"

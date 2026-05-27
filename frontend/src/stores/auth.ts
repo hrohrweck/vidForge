@@ -21,6 +21,7 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   setAuth: (token: string, user: User) => void
+  setToken: (token: string) => void
   logout: () => void
   hasPermission: (permission: string) => boolean
 }
@@ -37,6 +38,7 @@ export const useAuthStore = create<AuthState>()(
           user,
           isAuthenticated: true,
         }),
+      setToken: (token) => set({ token }),
       logout: () => {
         fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
         set({
