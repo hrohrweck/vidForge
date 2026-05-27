@@ -96,11 +96,13 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 # Plan scenes
                 result = await plugin.plan_scenes(db, job, context)
                 job.stage = "planned"
+                job.progress = 15
                 await db.commit()
                 return {"status": "completed", "job_id": job_id, "stage": "planned", **result}
 
             elif stage == "generating_images":
                 job.stage = "generating_images"
+                job.progress = 20
                 await db.commit()
 
                 scenes = await _load_scenes(db, job)
@@ -111,6 +113,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 any_ready = any(s.status == "image_ready" for s in scenes)
                 if any_ready:
                     job.stage = "images_ready"
+                    job.progress = 40
                     await db.commit()
                     return {"status": "completed", "job_id": job_id, "stage": "images_ready"}
                 else:
@@ -122,6 +125,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
             elif stage == "generating_videos":
                 job.stage = "generating_videos"
+                job.progress = 45
                 await db.commit()
 
                 scenes = await _load_scenes(db, job)
@@ -132,6 +136,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 any_ready = any(s.status == "video_ready" for s in scenes)
                 if any_ready:
                     job.stage = "videos_ready"
+                    job.progress = 80
                     await db.commit()
                     return {"status": "completed", "job_id": job_id, "stage": "videos_ready"}
                 else:

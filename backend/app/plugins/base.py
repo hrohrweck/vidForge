@@ -213,6 +213,10 @@ class PluginBase(ABC):
                 )
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
+                # Update progress: 20% → 40% spread across all scenes
+                total = len(scenes)
+                done = sum(1 for s in scenes if s.status == "image_ready")
+                job.progress = min(20 + int(20 * done / max(total, 1)), 40)
             except Exception as exc:
                 logger.error(
                     "[image-s%s] generate_images failed: %s",
