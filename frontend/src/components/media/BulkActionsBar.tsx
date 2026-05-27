@@ -26,7 +26,14 @@ export const BulkActionsBar = memo(function BulkActionsBar({
   }
 
   return (
-    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[70%] animate-in slide-in-from-top-2 duration-300">
+    <div
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-50"
+      style={{
+        width: '70%',
+        animation: 'slideDown 0.3s ease-out',
+      }}
+    >
+    <style>{`@keyframes slideDown { from { transform: translate(-50%, -100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }`}</style>
       <div className="rounded-xl bg-card border shadow-lg px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-foreground">
