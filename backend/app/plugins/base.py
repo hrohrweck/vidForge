@@ -213,6 +213,12 @@ class PluginBase(ABC):
                 )
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
+                # Auto-import to media library
+                await _import_scene_asset(
+                    db, job, scene.reference_image_path,
+                    f"scene-{scene.scene_number}-image",
+                    "image", scene.scene_number,
+                )
                 # Update progress: 20% → 40% spread across all scenes
                 total = len(scenes)
                 done = sum(1 for s in scenes if s.status == "image_ready")
@@ -659,3 +665,50 @@ class PluginBase(ABC):
     def get_export_options_schema(self) -> dict[str, Any]:
         """Return a JSON schema for template-specific export options."""
         return {}
+
+
+async def _import_scene_asset(
+    db, job, file_path, name, file_type, scene_number,
+) -> None:
+    """Import a generated scene asset into the media library."""
+    if not file_path:
+        return
+    try:
+        from pathlib import Path
+        from app.config import get_settings
+        from app.services.auto_import import (
+            _create_asset_from_file,
+            _get_or_create_folder,
+        )
+
+        settings = get_settings()
+        storage = Path(settings.storage_path).resolve()
+        full_path = storage / file_path
+        if not full_path.exists():
+            return
+
+        # Create/use a per-job folder under /Generated
+        gen_folder = await _get_or_create_folder(
+            user_id=job.user_id,
+            name="Generated",
+            parent_id=None,
+            db=db,
+        )
+        job_folder = await _get_or_create_folder(
+            user_id=job.user_id,
+            name=job.title or f"Job-{str(job.id)[:8]}",
+            parent_id=gen_folder.id,
+            db=db,
+        )
+
+        await _create_asset_from_file(
+            user_id=job.user_id,
+            folder_id=job_folder.id,
+            file_path=full_path,
+            name=name,
+            file_type=file_type,
+            source_job_id=job.id,
+            db=db,
+        )
+    except Exception:
+        pass  # Non-critical — don't fail the pipeline if import fails
