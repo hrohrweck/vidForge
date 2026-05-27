@@ -91,7 +91,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-40 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="h-14 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
