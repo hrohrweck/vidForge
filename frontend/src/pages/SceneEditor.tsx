@@ -6,7 +6,7 @@
  * the common scene grid, workflow progress bar, and export modal.
  */
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -101,6 +101,7 @@ export default function SceneEditor() {
     refetchInterval: () => {
       const j = queryClient.getQueryData<{ status?: string }>(['job', jobId])
       if (j?.status === 'processing') return 3000
+      if (hasPendingSceneOp.current) return 2000
       return false
     },
   })
@@ -174,6 +175,7 @@ export default function SceneEditor() {
   // ── Full regeneration (re-plan + images + videos) ─────────────────
 
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const hasPendingSceneOp = useRef(false)
 
   const regenerateAllMutation = useMutation({
     mutationFn: () => scenesApi.regenerateAll(jobId!),
@@ -467,7 +469,7 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Image Ready
                               </span>
-                            ) : generateImageMutation.isPending && generateImageMutation.variables === scene.id ? (
+                            ) : scene.status === 'generating_image' || scene.status === 'generating' ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
                                 <Clock className="h-3 w-3" /> Generating Image…
                               </span>
@@ -480,7 +482,7 @@ export default function SceneEditor() {
                               <span className="flex items-center gap-1 text-xs text-green-600">
                                 <CheckCircle className="h-3 w-3" /> Video Ready
                               </span>
-                            ) : generateVideoMutation.isPending && generateVideoMutation.variables === scene.id ? (
+                            ) : scene.status === 'generating_video' || scene.status === 'generating' ? (
                               <span className="flex items-center gap-1 text-xs text-yellow-600">
                                 <Clock className="h-3 w-3" /> Generating Video…
                               </span>

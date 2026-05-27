@@ -572,7 +572,7 @@ async def generate_scene_image(
     from app.workers.tasks import generate_scene_media
     generate_scene_media.delay(str(job_id), str(scene_id), "image")
 
-    scene.status = "generating"
+    scene.status = "generating_image"
     await db.commit()
 
     return {"status": "queued", "scene_id": str(scene_id), "media_type": "image"}
@@ -605,7 +605,7 @@ async def generate_scene_video(
     from app.workers.tasks import generate_scene_media
     generate_scene_media.delay(str(job_id), str(scene_id), "video")
 
-    scene.status = "generating"
+    scene.status = "generating_video"
     await db.commit()
 
     return {"status": "queued", "scene_id": str(scene_id), "media_type": "video"}
