@@ -14,7 +14,7 @@ import {
   CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2, XCircle,
 } from 'lucide-react'
 import {
-  jobsApi, scenesApi, templatesApi, type VideoScene, type SceneUpdate,
+  jobsApi, scenesApi, templatesApi, modelsApi, type VideoScene, type SceneUpdate,
 } from '../api/client'
 import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
@@ -359,6 +359,14 @@ export default function SceneEditor() {
                 </div>
               </div>
 
+              {/* Model Switcher */}
+              <ModelSwitcher
+                job={job}
+                onModelsChanged={() => {
+                  queryClient.invalidateQueries({ queryKey: ['job', job?.id] })
+                  refetchScenes()
+                }}
+              />
               {/* Scene list */}
               <div className="bg-card rounded-lg border p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -388,10 +396,10 @@ export default function SceneEditor() {
                               <span className="text-sm text-muted-foreground">
                                 {formatTime(scene.start_time)} - {formatTime(scene.end_time)}
                               </span>
-                              {scene.status === 'error' && (
-                                <span className="flex items-center gap-1 text-xs text-red-500">
+                              {(scene.status === 'failed' || scene.status === 'error') && scene.error_message && (
+                                <span className="flex items-center gap-1 text-xs text-red-500 cursor-help" title={scene.error_message}>
                                   <AlertCircle className="h-3 w-3" />
-                                  {scene.error_message || 'Error'}
+                                  {scene.error_message.substring(0, 80)}{scene.error_message.length > 80 ? '…' : ''}
                                 </span>
                               )}
                             </div>
@@ -715,4 +723,73 @@ export default function SceneEditor() {
       </div>
     )
   }
+}
+
+
+// ── Model Switcher ───────────────────────────────────────────────
+
+function ModelSwitcher({ job, onModelsChanged }: { job?: { id: string; input_data?: Record<string, unknown> | null } | null; onModelsChanged: () => void }) {
+  const [showModels, setShowModels] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const { data: availableModels } = useQuery({
+    queryKey: ['availableModels'],
+    queryFn: () => modelsApi.getAvailableModels(),
+  })
+
+  const currentVideo = (job?.input_data as Record<string,unknown> | null)?.video_model as string || ''
+  const currentImage = (job?.input_data as Record<string,unknown> | null)?.image_model as string || ''
+
+  const handleModelChange = async (key: string, value: string) => {
+    if (!job?.id) return
+    setSaving(true)
+    try {
+      const inputData = { ...(job.input_data || {}), [key]: value }
+      await jobsApi.patch(job.id, { input_data: inputData })
+      onModelsChanged()
+    } catch (e) {
+      console.error('Failed to update model:', e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const renderSelect = (label: string, models: any[] | undefined, selected: string, key: string) => (
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-medium w-16">{label}</span>
+      <select
+        className="flex-1 h-8 rounded border px-2 text-xs bg-background"
+        value={selected}
+        onChange={(e) => handleModelChange(key, e.target.value)}
+        disabled={saving}
+      >
+        {models?.map((m: any) => (
+          <option key={m.id} value={m.id}>{m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})</option>
+        )) || <option value="">Loading...</option>}
+      </select>
+    </div>
+  )
+
+  return (
+    <div className="bg-card rounded-lg border">
+      <button
+        onClick={() => setShowModels(!showModels)}
+        className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium hover:bg-muted/50 rounded-t-lg"
+      >
+        <span>Model Settings</span>
+        <span className="text-xs text-muted-foreground">
+          Video: {currentVideo?.split(':').pop()?.split('/')[0] || 'default'} | Image: {currentImage?.split(':').pop()?.split('/')[0] || 'default'}
+        </span>
+      </button>
+      {showModels && (
+        <div className="px-4 py-3 border-t space-y-2">
+          {renderSelect('Video', availableModels?.video_models, currentVideo, 'video_model')}
+          {renderSelect('Image', availableModels?.image_models, currentImage, 'image_model')}
+          <p className="text-xs text-muted-foreground pt-1">
+            {saving ? 'Saving...' : 'Changes apply to the next generation run for all scenes.'}
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }

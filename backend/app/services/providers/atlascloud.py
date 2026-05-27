@@ -336,6 +336,8 @@ class AtlasCloudProvider(ComfyUIProvider):
         if ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
             payload["image_url"] = ref_url
 
+        logger.warning(f"AtlasCloud video payload: {json.dumps(payload)[:500]}")
+
         resp = await client.post(
             f"{ATLAS_API_BASE}/model/generateVideo",
             json=payload,

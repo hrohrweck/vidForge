@@ -347,6 +347,10 @@ export const jobsApi = {
     const response = await api.post<Job>(`/jobs/${id}/retry`)
     return response.data
   },
+  patch: async (id: string, data: { input_data?: Record<string, unknown> }) => {
+    const response = await api.patch<Job>(`/jobs/${id}`, data)
+    return response.data
+  },
   delete: (id: string) => api.delete(`/jobs/${id}`),
 
   downloadUrl: (id: string) => {

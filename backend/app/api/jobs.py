@@ -189,6 +189,29 @@ async def get_job(
     return job
 
 
+class JobPatchRequest(BaseModel):
+    input_data: dict | None = None
+
+
+@router.patch("/{job_id}", response_model=JobResponse)
+async def patch_job(
+    job_id: UUID,
+    data: JobPatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Job:
+    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if data.input_data is not None:
+        job.input_data = {**(job.input_data or {}), **data.input_data}
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
 @router.delete("/{job_id}")
 async def delete_job(
     job_id: UUID,
