@@ -10,7 +10,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  RefreshCw, ChevronLeft, Image, Video, Download,
+  RefreshCw, ChevronLeft, Image, Video, Download, Pencil,
   CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2, XCircle,
 } from 'lucide-react'
 import {
@@ -420,13 +420,13 @@ export default function SceneEditor() {
                                 <Image className="h-4 w-4" />
                               </Button>
                             )}
-                            {scene.reference_image_path && !scene.generated_video_path && canGenerateVideos() && !isOperationInProgress && (
+                            {scene.reference_image_path && canGenerateVideos() && !isOperationInProgress && (
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => generateVideoMutation.mutate(scene.id)}
                                 disabled={generateVideoMutation.isPending}
-                                title="Generate video for this scene"
+                                title={scene.generated_video_path ? 'Regenerate video for this scene' : 'Generate video for this scene'}
                               >
                                 <Video className="h-4 w-4" />
                               </Button>
@@ -438,7 +438,7 @@ export default function SceneEditor() {
                                 onClick={() => setEditingScene(scene)}
                                 title="Edit scene"
                               >
-                                <RefreshCw className="h-4 w-4" />
+                                <Pencil className="h-4 w-4" />
                               </Button>
                             )}
                             {!isOperationInProgress && (
