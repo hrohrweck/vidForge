@@ -221,9 +221,10 @@ export default function SceneEditor() {
     if (pendingDownload && job?.status === 'completed' && job?.output_path) {
       setPendingDownload(false)
       const url = jobsApi.downloadUrl(job.id)
+      const filename = (job.title || 'video').replace(/[^a-zA-Z0-9._-]/g, '_') + '.mp4'
       const a = document.createElement('a')
       a.href = url
-      a.download = ''
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
