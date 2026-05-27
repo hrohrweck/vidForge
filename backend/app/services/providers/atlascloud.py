@@ -234,7 +234,7 @@ class AtlasCloudProvider(ComfyUIProvider):
         if not client:
             raise RuntimeError("Provider not initialized")
 
-        payload: dict[str, Any] = {"model": model, "prompt": prompt}
+        payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
 
@@ -331,7 +331,7 @@ class AtlasCloudProvider(ComfyUIProvider):
             raise RuntimeError("Provider not initialized")
 
         ref_url = image_path or reference_image_url
-        payload: dict[str, Any] = {"model": model, "prompt": prompt}
+        payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
         if ref_url:
             payload["image_url"] = ref_url
 
