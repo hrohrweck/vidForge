@@ -196,9 +196,10 @@ export default function JobDetail() {
                 variant="outline"
                 onClick={() => {
                   const url = jobsApi.downloadUrl(job.id)
+                  const fn = (job.title || 'video').replace(/[^a-zA-Z0-9._-]/g, '_') + '.mp4'
                   const a = document.createElement('a')
                   a.href = url
-                  a.download = ''
+                  a.download = fn
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)
@@ -212,9 +213,10 @@ export default function JobDetail() {
               <Button
                 onClick={() => {
                   const url = jobsApi.downloadUrl(job.id)
+                  const fn = (job.title || 'video').replace(/[^a-zA-Z0-9._-]/g, '_') + '.mp4'
                   const a = document.createElement('a')
                   a.href = url
-                  a.download = ''
+                  a.download = fn
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)

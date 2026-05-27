@@ -640,6 +640,7 @@ class PluginBase(ABC):
         scene.status = "video_ready"
         scene.error_message = None
         await db.commit()
+        await _import_scene_asset(db, job, scene.generated_video_path, f"scene-{scene.scene_number}-video", "video", scene.scene_number)
         return scene.generated_video_path
 
     # ------------------------------------------------------------------
