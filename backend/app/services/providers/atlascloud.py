@@ -332,11 +332,29 @@ class AtlasCloudProvider(ComfyUIProvider):
 
         ref_url = image_path or reference_image_url
         payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
-        # Only include image_url if it looks like an actual URL (not a local path)
-        if ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
-            payload["image_url"] = ref_url
 
-        logger.warning(f"AtlasCloud video payload: {json.dumps(payload)[:500]}")
+        # Upload local image to AtlasCloud first for I2V models
+        if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
+            try:
+                from pathlib import Path
+                from app.config import get_settings
+                settings = get_settings()
+                full_path = Path(settings.storage_path) / image_path
+                with open(str(full_path), "rb") as f:
+                    upload_resp = await client.post(
+                        f"{ATLAS_API_BASE}/model/uploadMedia",
+                        files={"file": (full_path.name, f, "image/png")},
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                    )
+                    if upload_resp.status_code == 200:
+                        upload_data = upload_resp.json()
+                        uploaded_url = upload_data.get("data", {}).get("url") or upload_data.get("url")
+                        if uploaded_url:
+                            payload["image_url"] = uploaded_url
+            except Exception as e:
+                logger.warning(f"Failed to upload image for I2V: {e}")
+        elif ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
+            payload["image_url"] = ref_url
 
         resp = await client.post(
             f"{ATLAS_API_BASE}/model/generateVideo",
