@@ -192,6 +192,8 @@ class PluginBase(ABC):
         """
         from app.services.media_generator import generate_image
 
+        input_data = job.input_data or {}
+        image_model = input_data.get("image_model")
         for scene in scenes:
             if scene.reference_image_path:
                 continue
@@ -205,6 +207,7 @@ class PluginBase(ABC):
                     job=job,
                     prompt=prompt,
                     scene_number=scene.scene_number,
+                    model_preference=image_model,
                     provider_id=job.image_provider_id,
                     label=f"image-s{scene.scene_number}",
                 )
@@ -318,6 +321,9 @@ class PluginBase(ABC):
         import math
         from pathlib import Path
 
+        input_data = job.input_data or {}
+        video_model = input_data.get("video_model")
+
         from app.config import get_settings
         from app.services.media_generator import (
             generate_video,
@@ -353,6 +359,7 @@ class PluginBase(ABC):
                 scene_number=scene.scene_number,
                 reference_image_path=current_seed_path,
                 provider_id=job.video_provider_id,
+                model_preference=video_model,
                 duration=clip_duration,
                 aspect_ratio=aspect_ratio,
                 label=f"video-s{scene.scene_number}.{i+1}/{num_clips}",
