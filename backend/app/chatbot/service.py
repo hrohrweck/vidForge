@@ -291,9 +291,40 @@ class ChatOrchestrator:
     async def _resolve_llm(self, model_id: str) -> ChatLLM:
         """Return the appropriate LLM client for the given model_id.
 
-        For Poe models (prefixed with ``poe:``), loads the Poe provider
-        from the database. Otherwise returns the default LLMClient.
+        Looks up the model in model_configs to determine the provider.
+        Falls back to prefix matching for backward compatibility,
+        then to the default LLMClient (Ollama).
         """
+        # First: look up model in model_configs to find provider
+        try:
+            from app.database import ModelConfig
+            from sqlalchemy.orm import selectinload
+
+            result = await self.db.execute(
+                select(ModelConfig)
+                .options(selectinload(ModelConfig.provider))
+                .where(
+                    ModelConfig.model_id == model_id,
+                    ModelConfig.is_active == True,  # noqa: E712
+                )
+            )
+            config = result.scalar_one_or_none()
+            if config and config.provider:
+                provider = config.provider
+                if provider.provider_type == "poe":
+                    from app.services.providers import PoeProvider
+                    instance = PoeProvider(provider.id, provider.config)
+                    await instance.initialize(provider.config)
+                    return instance
+                elif provider.provider_type == "atlascloud":
+                    from app.services.providers import AtlasCloudProvider
+                    instance = AtlasCloudProvider(provider.id, provider.config)
+                    await instance.initialize(provider.config)
+                    return instance
+        except Exception:
+            pass
+
+        # Fallback: prefix matching (backward compat)
         if model_id.startswith("atlascloud:"):
             try:
                 from app.services.providers import AtlasCloudProvider
