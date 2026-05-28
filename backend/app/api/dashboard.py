@@ -70,12 +70,15 @@ async def dashboard_cost(
     # Aggregate jobs.actual_cost by completed_at + template_id.
     # media_assets table does not exist in current schema, so we
     # use only jobs data.  Frontend handles missing sources gracefully.
+    # Compute end date inclusive (add 1 day for BETWEEN)
+    to_date_inclusive = to_date + timedelta(days=1)
+
     query = text(f"""
         SELECT {trunc} AS bucket,
                COALESCE(CAST(template_id AS text), 'job_generation') AS model_id,
                COALESCE(SUM(actual_cost), 0) AS cost
         FROM jobs
-        WHERE completed_at BETWEEN :from_date AND :to_date + INTERVAL '1 day'
+        WHERE completed_at BETWEEN :from_date AND :to_date_inclusive
           AND actual_cost IS NOT NULL
           AND user_id = :user_id
         GROUP BY bucket, template_id
@@ -84,7 +87,7 @@ async def dashboard_cost(
 
     result = await db.execute(query, {
         "from_date": from_date,
-        "to_date": to_date,
+        "to_date_inclusive": to_date_inclusive,
         "user_id": str(current_user.id),
     })
     rows = result.fetchall()
