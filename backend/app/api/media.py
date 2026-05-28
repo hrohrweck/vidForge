@@ -276,17 +276,25 @@ async def get_folder_tree(
     )
     folders = result.scalars().all()
 
-    # Build tree structure
-    folder_map = {str(f.id): folder_to_response(f) for f in folders}
+    # Build tree structure using FolderTreeResponse (has children field)
+    def folder_to_tree_node(folder: MediaFolder) -> FolderTreeResponse:
+        return FolderTreeResponse(
+            id=str(folder.id),
+            user_id=str(folder.user_id),
+            name=folder.name,
+            parent_id=str(folder.parent_id) if folder.parent_id else None,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+            children=[],
+        )
+    
+    folder_map = {str(f.id): folder_to_tree_node(f) for f in folders}
     root_folders = []
 
     for folder in folders:
         folder_data = folder_map[str(folder.id)]
         if folder.parent_id and str(folder.parent_id) in folder_map:
-            parent = folder_map[str(folder.parent_id)]
-            if not hasattr(parent, 'children'):
-                parent.children = []
-            parent.children.append(folder_data)
+            folder_map[str(folder.parent_id)].children.append(folder_data)
         else:
             root_folders.append(folder_data)
 
