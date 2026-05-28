@@ -6,6 +6,7 @@ interface TextModel {
   id: string
   name: string
   provider: string
+  provider_type?: string
   description?: string
 }
 
@@ -70,14 +71,17 @@ export function ModelPicker() {
     }
   }
 
-  // Group by provider
+  // Group by provider type
   const grouped = models.reduce<Record<string, TextModel[]>>((acc, m) => {
-    const group = m.provider === 'local' ? 'Local (Ollama)' : 'Cloud'
+    const group = m.provider_type === 'ollama' ? 'Ollama (Local)' :
+                  m.provider_type === 'poe' ? 'Poe' :
+                  m.provider_type === 'atlascloud' ? 'AtlasCloud' :
+                  m.provider || 'Other'
     if (!acc[group]) acc[group] = []
     acc[group].push(m)
     return acc
   }, {})
-  const groupOrder = ['Local (Ollama)', 'Cloud']
+  const groupOrder = ['Ollama (Local)', 'Poe', 'AtlasCloud', 'Other']
 
   const options: React.ReactNode[] = []
   for (const group of groupOrder) {
