@@ -74,7 +74,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
     if (!prompt.trim() || !selectedModel) return
     setSubmitting(true)
     try {
-      await api.post('/api/media/generate', {
+      await api.post('/media/generate', {
         model_id: selectedModel.id,
         prompt: prompt.trim(),
         aspect_ratio: aspectRatio,
