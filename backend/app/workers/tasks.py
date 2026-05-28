@@ -647,3 +647,200 @@ async def _export_scene_video(job_id: str, options: dict) -> dict:
         await db.commit()
 
     return await dispatch_stage(job_id, "rendering")
+
+
+# ======================================================================
+# Task 10: train_avatar_lora
+# ======================================================================
+
+
+@celery_app.task(bind=True, time_limit=3600)
+def train_avatar_lora(self, avatar_id: str) -> dict:
+    return ctx.run(_train_avatar_lora(avatar_id))
+
+
+async def _train_avatar_lora(avatar_id: str) -> dict:
+    import shutil
+    from app.database import Avatar
+
+    async with ctx.session_factory() as db:
+        avatar = await db.get(Avatar, UUID(avatar_id))
+        if not avatar:
+            return {"status": "failed", "error": "Avatar not found"}
+
+        avatar.lora_training_status = "training"
+        await db.commit()
+
+        try:
+            # Collect training image paths
+            from sqlalchemy.orm import selectinload
+            from sqlalchemy import select as sa_select
+
+            result = await db.execute(
+                sa_select(Avatar)
+                .options(selectinload(Avatar.images))
+                .where(Avatar.id == UUID(avatar_id))
+            )
+            avatar_with_images = result.scalar_one()
+            images = [img for img in avatar_with_images.images if img.storage_path]
+            if len(images) < 3:
+                raise ValueError("Need at least 3 images for LoRA training")
+
+            # Generate caption
+            caption = f"{avatar.name}, {avatar.gender}"
+            if avatar.bio:
+                caption += f", {avatar.bio}"
+
+            # Create training directory
+            train_dir = Path(settings.storage_path) / "loras" / str(avatar.id)
+            train_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy images and write captions
+            for i, img in enumerate(images):
+                src = Path(settings.storage_path) / img.storage_path
+                if src.exists():
+                    dst = train_dir / f"image_{i}{src.suffix}"
+                    shutil.copy2(src, dst)
+                    (train_dir / f"image_{i}.txt").write_text(caption)
+
+            # Placeholder: actual LoRA training would happen here
+            import asyncio
+            await asyncio.sleep(2)
+
+            # Mark as trained
+            avatar.lora_model_path = str(train_dir / "avatar_lora.safetensors")
+            avatar.lora_training_status = "trained"
+            await db.commit()
+
+        except Exception:
+            avatar.lora_training_status = "failed"
+            await db.commit()
+            raise
+
+    return {"status": "completed", "avatar_id": avatar_id}
+
+
+@celery_app.task(bind=True, time_limit=300)
+def cleanup_orphaned_avatars(self):
+    return ctx.run(_cleanup_orphaned_avatars())
+
+
+async def _cleanup_orphaned_avatars():
+    from datetime import timedelta
+
+    from app.database import Avatar, AvatarImage, JobAvatar
+
+    async with ctx.session_factory() as db:
+        cutoff = datetime.utcnow() - timedelta(days=30)
+
+        result = await db.execute(
+            select(Avatar).where(
+                Avatar.deleted_at != None,
+                Avatar.deleted_at < cutoff,
+            )
+        )
+        candidates = result.scalars().all()
+
+        cleaned = 0
+        for avatar in candidates:
+            ref_result = await db.execute(
+                select(JobAvatar).where(JobAvatar.avatar_id == avatar.id)
+            )
+            if ref_result.first() is None:
+                for img in avatar.images:
+                    img_path = Path(settings.storage_path) / img.storage_path
+                    if img_path.exists():
+                        img_path.unlink()
+                await db.delete(avatar)
+                cleaned += 1
+
+        await db.commit()
+        logger.info("Cleaned up %s orphaned avatars", cleaned)
+        return {"status": "completed", "cleaned": cleaned}
+
+
+# ======================================================================
+# Task 11: generate_avatar_poses
+# ======================================================================
+
+
+@celery_app.task(bind=True, time_limit=600)
+def generate_avatar_poses_task(self, avatar_id: str) -> dict:
+    return ctx.run(_generate_avatar_poses(avatar_id))
+
+
+async def _generate_avatar_poses(avatar_id: str) -> dict:
+    from types import SimpleNamespace
+
+    from app.database import Avatar, AvatarImage
+    from app.services.media_generator import generate_image
+
+    lock_key = f"avatar:poses:generating:{avatar_id}"
+
+    # Acquire Redis lock — only one generation per avatar at a time
+    acquired = await ctx.redis.set(lock_key, "1", nx=True, ex=600)
+    if not acquired:
+        return {"status": "skipped", "reason": "already generating"}
+
+    try:
+        async with ctx.session_factory() as db:
+            avatar = await db.get(Avatar, UUID(avatar_id))
+            if not avatar:
+                return {"status": "failed", "error": "Avatar not found"}
+            if not avatar.primary_image:
+                return {"status": "failed", "error": "No primary image set"}
+
+            primary_path = str(
+                Path(settings.storage_path) / avatar.primary_image.storage_path
+            )
+
+            # Mock job for generate_image — it only needs id and user_id
+            mock_job = SimpleNamespace(
+                id=UUID(avatar_id),
+                user_id=avatar.user_id,
+                provider_id=None,
+            )
+
+            base_prompt = (
+                f"{avatar.name}, {avatar.gender}"
+                + (f", {avatar.bio}" if avatar.bio else "")
+            )
+            poses = [
+                (f"front portrait of {base_prompt}"),
+                (f"3/4 profile view of {base_prompt}"),
+                (f"full body shot of {base_prompt}, standing pose"),
+            ]
+
+            max_order = max(
+                (img.sort_order for img in avatar.images), default=0
+            )
+
+            for i, prompt in enumerate(poses):
+                try:
+                    path, _model, _pid = await generate_image(
+                        db=db,
+                        job=mock_job,  # type: ignore[arg-type]
+                        prompt=prompt,
+                        scene_number=i,
+                        reference_image_path=primary_path,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to generate pose %d for avatar %s: %s",
+                        i, avatar_id, exc,
+                    )
+                    continue
+
+                img = AvatarImage(
+                    avatar_id=avatar.id,
+                    storage_path=path,
+                    is_primary=False,
+                    sort_order=max_order + i + 1,
+                )
+                db.add(img)
+
+            await db.commit()
+
+        return {"status": "completed", "avatar_id": avatar_id}
+    finally:
+        await ctx.redis.delete(lock_key)

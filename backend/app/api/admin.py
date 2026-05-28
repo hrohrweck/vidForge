@@ -634,3 +634,13 @@ async def list_permissions(
         }
         for p in permissions
     ]
+
+
+@router.post("/avatars/cleanup")
+async def trigger_avatar_cleanup(
+    admin: User = Depends(require_admin),
+) -> dict[str, str]:
+    from app.workers.tasks import cleanup_orphaned_avatars
+
+    cleanup_orphaned_avatars.delay()
+    return {"status": "cleanup_queued"}

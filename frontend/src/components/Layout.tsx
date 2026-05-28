@@ -53,6 +53,7 @@ const getNavEntries = (isSuperuser: boolean): NavEntry[] => [
   { to: '/jobs', label: 'Jobs', icon: Clapperboard },
   { to: '/templates', label: 'Templates', icon: FileVideo },
   { to: '/media', label: 'Media Library', icon: Image },
+  { to: '/avatars', label: 'Avatars', icon: UserIcon },
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/settings', label: 'Settings', icon: Settings },
   ...(isSuperuser
@@ -77,6 +78,9 @@ export default function Layout() {
   const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/')
   const navEntries = getNavEntries(user?.is_superuser || false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  const closeMobileMenu = () => setIsMobileMenuOpen(false)
 
   // Track which groups are expanded — keyed by group label
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
@@ -90,13 +94,13 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="sticky top-0 z-40 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
+      <header className="sticky top-0 z-50 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
         <div className="h-14 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="md:hidden"
             >
               <Menu className="h-5 w-5" />
@@ -139,14 +143,21 @@ export default function Layout() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 z-35 bg-black/50 transition-opacity md:hidden"
+            onClick={closeMobileMenu}
+          />
+        )}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-30 flex flex-col border-r border-sidebar-border bg-sidebar-bg transition-all duration-300 ease-in-out md:relative md:translate-x-0",
-            isSidebarOpen ? "w-64 translate-x-0" : "w-16 -translate-x-full md:translate-x-0"
+            "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar-bg transition-all duration-300 ease-in-out md:relative md:translate-x-0",
+            isMobileMenuOpen ? "w-64 translate-x-0" : "-translate-x-full md:translate-x-0",
+            isSidebarOpen ? "md:w-64" : "md:w-16"
           )}
         >
           <div className="flex items-center justify-end p-2 md:hidden">
-            <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(false)}>
+            <Button variant="ghost" size="icon" onClick={closeMobileMenu}>
               <ChevronLeft className="h-5 w-5" />
             </Button>
           </div>
@@ -162,6 +173,7 @@ export default function Layout() {
                     active={isGroupActive(entry)}
                     collapsed={!isSidebarOpen}
                     onToggle={() => toggleGroup(entry.label)}
+                    onNavClick={closeMobileMenu}
                   />
                 ) : (
                   /* ── Flat link ─────────────────────────────────── */
@@ -169,6 +181,7 @@ export default function Layout() {
                     <NavLink
                       to={entry.to}
                       end={entry.to === '/'}
+                      onClick={closeMobileMenu}
                       className={({ isActive }) =>
                         cn(
                           'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
@@ -232,9 +245,10 @@ interface NavGroupItemProps {
   active: boolean
   collapsed: boolean
   onToggle: () => void
+  onNavClick: () => void
 }
 
-function NavGroupItem({ group, expanded, active, collapsed, onToggle }: NavGroupItemProps) {
+function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick }: NavGroupItemProps) {
   return (
     <li>
       {/* Group header — clickable to expand/collapse */}
@@ -275,6 +289,7 @@ function NavGroupItem({ group, expanded, active, collapsed, onToggle }: NavGroup
               <NavLink
                 to={child.to}
                 end={child.to === '/admin'}
+                onClick={onNavClick}
                 className={({ isActive }) =>
                   cn(
                     'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',

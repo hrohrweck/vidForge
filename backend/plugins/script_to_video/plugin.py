@@ -98,16 +98,20 @@ class ScriptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
         from .planner import plan_scenes_from_script
+        from app.services.avatar_prompt_builder import build_avatar_context_string
 
         input_data = job.input_data or {}
         segments = context.get("segments", [])
         style = input_data.get("style", "realistic")
         duration = context.get("total_duration", 30)
 
+        avatars_context = build_avatar_context_string(context.get("avatars", []))
+
         scenes = await plan_scenes_from_script(
             segments=segments,
             duration=duration,
             style=style,
+            avatars_context=avatars_context or None,
         )
 
         await db.execute(sa_delete(VideoScene).where(VideoScene.job_id == job.id))

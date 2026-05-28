@@ -239,7 +239,13 @@ export interface CreateJobRequest {
   title?: string
   template_id?: string
   project_id?: string
-  input_data?: Record<string, unknown>
+  input_data?: Record<string, unknown> & {
+    avatars?: Array<{
+      avatarId: string
+      role?: string
+      consistencyStrategyOverride?: string
+    }>
+  }
   auto_start?: boolean
   provider_preference?: string
   model_preference?: string

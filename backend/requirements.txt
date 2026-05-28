@@ -41,6 +41,10 @@ cryptography>=42.0.0
 ffmpeg-python>=0.2.0
 openai-whisper>=20231117
 edge-tts>=6.1.0
+Pillow>=10.0.0
+insightface>=0.7.3
+opencv-python>=4.8.0
+onnxruntime>=1.15.0
 
 # Testing
 pytest>=7.4.0

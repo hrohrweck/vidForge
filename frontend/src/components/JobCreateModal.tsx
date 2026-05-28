@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, Upload, Loader2 } from 'lucide-react'
+import { X, Upload, Loader2, ChevronDown, ChevronRight, Plus, Search, User } from 'lucide-react'
 import api, { jobsApi, templatesApi, modelsApi, type CreateJobRequest, type Template } from '../api/client'
 import { projectsApi } from '../api/projects'
+import { avatarsApi, type Avatar, type ConsistencyStrategy, type JobAvatarAssignment } from '../api/avatars'
 import type { Project } from '../api/types/project'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
+import { Badge } from '../components/ui/badge'
 
 interface JobCreateModalProps {
   onClose: () => void
@@ -48,6 +50,10 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedImageModel, setSelectedImageModel] = useState('')
   const [selectedVideoModel, setSelectedVideoModel] = useState('')
 
+  const [selectedAvatars, setSelectedAvatars] = useState<JobAvatarAssignment[]>([])
+  const [avatarSectionOpen, setAvatarSectionOpen] = useState(false)
+  const [avatarSearchQuery, setAvatarSearchQuery] = useState('')
+
   const { data: templates, isLoading: templatesLoading } = useQuery({
     queryKey: ['templates'],
     queryFn: () => templatesApi.list(),
@@ -61,6 +67,11 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
+  })
+
+  const { data: avatarList } = useQuery({
+    queryKey: ['avatars'],
+    queryFn: () => avatarsApi.list(),
   })
 
   // Set defaults from global preferences
@@ -141,6 +152,35 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     setInputValues((prev) => ({ ...prev, [name]: result.path }))
   }
 
+  const filteredAvatars = (avatarList?.avatars || []).filter(
+    (a) =>
+      !selectedAvatars.some((sa) => sa.avatarId === a.id) &&
+      a.name.toLowerCase().includes(avatarSearchQuery.toLowerCase())
+  )
+
+  const addAvatar = (avatar: Avatar) => {
+    setSelectedAvatars((prev) => [...prev, { avatarId: avatar.id, role: '' }])
+    setAvatarSearchQuery('')
+  }
+
+  const removeAvatar = (avatarId: string) => {
+    setSelectedAvatars((prev) => prev.filter((a) => a.avatarId !== avatarId))
+  }
+
+  const updateAvatarRole = (avatarId: string, role: string) => {
+    setSelectedAvatars((prev) => prev.map((a) => (a.avatarId === avatarId ? { ...a, role } : a)))
+  }
+
+  const updateAvatarOverride = (avatarId: string, strategy: ConsistencyStrategy | '') => {
+    setSelectedAvatars((prev) =>
+      prev.map((a) =>
+        a.avatarId === avatarId
+          ? { ...a, consistencyStrategyOverride: strategy || undefined }
+          : a
+      )
+    )
+  }
+
   const handleSubmit = () => {
     if (!title.trim()) return
     createMutation.mutate({
@@ -153,6 +193,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         text_model: selectedTextModel,
         image_model: selectedImageModel,
         video_model: selectedVideoModel,
+        avatars: selectedAvatars,
       },
     })
   }
@@ -415,6 +456,162 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {(avatarList?.avatars?.length ?? 0) > 0 && (
+            <div className="space-y-3 border rounded-lg p-4 bg-muted/30">
+              <button
+                type="button"
+                className="flex items-center gap-2 w-full text-left"
+                onClick={() => setAvatarSectionOpen(!avatarSectionOpen)}
+              >
+                {avatarSectionOpen ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+                <h3 className="font-medium">Character Cast (Optional)</h3>
+                {selectedAvatars.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {selectedAvatars.length}
+                  </Badge>
+                )}
+              </button>
+
+              {!avatarSectionOpen && selectedAvatars.length > 0 && (
+                <p className="text-xs text-muted-foreground pl-6">
+                  {selectedAvatars
+                    .map((sa) => {
+                      const a = avatarList?.avatars.find((av) => av.id === sa.avatarId)
+                      return a?.name || 'Unknown'
+                    })
+                    .join(', ')}
+                </p>
+              )}
+
+              {avatarSectionOpen && (
+                <div className="space-y-3 pt-1">
+                  {selectedAvatars.map((sa) => {
+                    const avatar = avatarList?.avatars.find((a) => a.id === sa.avatarId)
+                    const thumbnail = avatar?.images?.find((img) => img.isPrimary)?.thumbnailUrl
+                    return (
+                      <div
+                        key={sa.avatarId}
+                        className="flex items-center gap-3 p-2 rounded-md border bg-background"
+                      >
+                        {thumbnail ? (
+                          <img
+                            src={thumbnail}
+                            alt={avatar?.name || ''}
+                            className="h-8 w-8 rounded-full object-cover flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        )}
+                        <span className="text-sm font-medium w-24 flex-shrink-0 truncate">
+                          {avatar?.name || 'Unknown'}
+                        </span>
+                        <Input
+                          className="h-8 text-xs flex-1 min-w-0"
+                          placeholder="Role (e.g. narrator, hero)"
+                          value={sa.role || ''}
+                          onChange={(e) => updateAvatarRole(sa.avatarId, e.target.value)}
+                        />
+                        <select
+                          className="h-8 rounded-md border border-input bg-background px-2 text-xs flex-shrink-0"
+                          value={sa.consistencyStrategyOverride || ''}
+                          onChange={(e) =>
+                            updateAvatarOverride(
+                              sa.avatarId,
+                              e.target.value as ConsistencyStrategy | ''
+                            )
+                          }
+                          title="Consistency override"
+                        >
+                          <option value="">Default strategy</option>
+                          <option value="ip_adapter">IP-Adapter</option>
+                          <option value="face_swap">Face Swap</option>
+                          <option value="lora">LoRA</option>
+                          <option value="prompt_only">Prompt Only</option>
+                        </select>
+                        <button
+                          type="button"
+                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-destructive flex-shrink-0"
+                          onClick={() => removeAvatar(sa.avatarId)}
+                          title="Remove avatar"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )
+                  })}
+
+                  <div className="relative">
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          className="h-9 pl-8 text-sm"
+                          placeholder="Search avatars..."
+                          value={avatarSearchQuery}
+                          onChange={(e) => setAvatarSearchQuery(e.target.value)}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 flex-shrink-0"
+                        disabled={filteredAvatars.length === 0}
+                        onClick={() => {
+                          if (filteredAvatars.length > 0) addAvatar(filteredAvatars[0])
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-1" />
+                        Add
+                      </Button>
+                    </div>
+                    {avatarSearchQuery && filteredAvatars.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md max-h-48 overflow-y-auto">
+                        {filteredAvatars.map((avatar) => {
+                          const thumbnail = avatar.images?.find((img) => img.isPrimary)?.thumbnailUrl
+                          return (
+                            <button
+                              key={avatar.id}
+                              type="button"
+                              className="flex items-center gap-3 w-full px-3 py-2 text-sm hover:bg-accent text-left"
+                              onClick={() => addAvatar(avatar)}
+                            >
+                              {thumbnail ? (
+                                <img
+                                  src={thumbnail}
+                                  alt={avatar.name}
+                                  className="h-6 w-6 rounded-full object-cover"
+                                />
+                              ) : (
+                                <User className="h-5 w-5 text-muted-foreground" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate">{avatar.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {avatar.gender}
+                                  {avatar.jobCount > 0 ? ` · ${avatar.jobCount} jobs` : ''}
+                                </div>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {avatarSearchQuery && filteredAvatars.length === 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">No matching avatars</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import json
+import logging
 import random
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from app.config import get_settings
 from app.database import Job, Provider, UserSettings
 from app.services.job_router import JobRouter
 from app.services.model_config import get_default_model_preferences
+from app.services.lora_registry import get_lora
 from app.services.model_registry import get_model
 from app.services.model_resolver import (
     get_family_from_legacy_id,
@@ -24,6 +26,7 @@ from app.services.providers import (
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 VIDEO_WORKFLOW_MAP: dict[str, str] = {
@@ -349,6 +352,10 @@ async def generate_image(
     provider_id: UUID | None = None,
     model_preference: str | None = None,
     aspect_ratio: str = "3:2",
+    reference_image_path: str | None = None,
+    reference_image_strength: float = 0.75,
+    lora_path: str | None = None,
+    lora_strength: float = 0.8,
 ) -> tuple[str, str, UUID | None]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -360,6 +367,14 @@ async def generate_image(
 
     if ptype in ("poe", "atlascloud"):
         # Cloud provider — direct API call
+        if lora_path:
+            logger.warning(
+                "LoRA not supported for cloud providers, falling back to prompt-only"
+            )
+        if reference_image_path:
+            logger.warning(
+                "IP-Adapter not supported for cloud providers, falling back to prompt-only"
+            )
         _cloud_id, image_data = await instance.generate_image(
             prompt=prompt,
             model=selected_model,
@@ -372,7 +387,23 @@ async def generate_image(
         return relative_path, f"poe_{selected_model}", resolved_pid
 
     # ComfyUI local provider
-    if selected_model == "flux1-schnell":
+    if lora_path:
+        workflow = _build_lora_image_workflow(
+            prompt=prompt,
+            lora_path=lora_path,
+            lora_strength=lora_strength,
+            aspect_ratio=aspect_ratio,
+            provider_config=instance.config,
+        )
+    elif reference_image_path:
+        workflow = _build_ip_adapter_image_workflow(
+            prompt=prompt,
+            reference_image_path=reference_image_path,
+            strength=reference_image_strength,
+            aspect_ratio=aspect_ratio,
+            provider_config=instance.config,
+        )
+    elif selected_model == "flux1-schnell":
         workflow = _build_flux_image_workflow(
             prompt=prompt,
             aspect_ratio=aspect_ratio,
@@ -939,6 +970,105 @@ def _video_generation_resolution(aspect_ratio: str) -> tuple[int, int]:
         "21:9": (848, 384),
     }
     return ratios.get(aspect_ratio, (848, 480))
+
+
+def _build_ip_adapter_image_workflow(
+    prompt: str,
+    reference_image_path: str,
+    strength: float,
+    aspect_ratio: str,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Load IP-Adapter workflow template and substitute runtime values.
+
+    Template variables like {prompt}, {seed}, {width} are replaced
+    with concrete values at call time.  String values are JSON-escaped
+    to keep the template body valid JSON after substitution.
+    """
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    checkpoint = str(
+        provider_config.get("ip_adapter_checkpoint")
+        or provider_config.get("checkpoint")
+        or "flux1-schnell.safetensors"
+    )
+    ip_adapter_model = str(
+        provider_config.get("ip_adapter_model")
+        or "ip-adapter-plus_sd15.safetensors"
+    )
+    clip_vision_model = str(
+        provider_config.get("clip_vision_model")
+        or "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    )
+    negative_prompt = str(
+        provider_config.get("image_negative_prompt")
+        or "blurry, low quality, distorted, deformed"
+    )
+
+    workflow_path = Path(__file__).parent.parent / "comfyui" / "ip_adapter_image.json"
+    json_str = workflow_path.read_text()
+
+    string_vars: dict[str, str] = {
+        "{prompt}": prompt,
+        "{negative_prompt}": negative_prompt,
+        "{reference_image_path}": reference_image_path,
+        "{checkpoint}": checkpoint,
+        "{ip_adapter_model}": ip_adapter_model,
+        "{clip_vision_model}": clip_vision_model,
+    }
+    for var, val in string_vars.items():
+        json_str = json_str.replace(var, json.dumps(val)[1:-1])
+
+    numeric_vars: dict[str, str] = {
+        "{ip_adapter_strength}": str(strength),
+        "{seed}": str(seed),
+        "{width}": str(width),
+        "{height}": str(height),
+    }
+    for var, val in numeric_vars.items():
+        json_str = json_str.replace(var, val)
+
+    return json.loads(json_str)
+
+
+def _build_lora_image_workflow(
+    prompt: str,
+    lora_path: str,
+    lora_strength: float,
+    aspect_ratio: str,
+    provider_config: dict[str, Any],
+) -> dict[str, Any]:
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    checkpoint = str(
+        provider_config.get("checkpoint")
+        or provider_config.get("lora_base_checkpoint")
+        or "flux1-schnell.safetensors"
+    )
+
+    workflow_path = Path(__file__).parent.parent / "comfyui" / "lora_image.json"
+    json_str = workflow_path.read_text()
+
+    string_vars: dict[str, str] = {
+        "{prompt}": prompt,
+        "{lora_path}": lora_path,
+        "{checkpoint}": checkpoint,
+    }
+    for var, val in string_vars.items():
+        json_str = json_str.replace(var, json.dumps(val)[1:-1])
+
+    numeric_vars: dict[str, str] = {
+        "{lora_strength}": str(lora_strength),
+        "{seed}": str(seed),
+        "{width}": str(width),
+        "{height}": str(height),
+    }
+    for var, val in numeric_vars.items():
+        json_str = json_str.replace(var, val)
+
+    return json.loads(json_str)
 
 
 def _build_flux_image_workflow(

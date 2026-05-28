@@ -12,6 +12,7 @@ import Providers from './pages/Providers'
 import Login from './pages/Login'
 import SceneEditor from './pages/SceneEditor'
 import Chat from './pages/Chat'
+import Avatars from './pages/Avatars'
 import { MediaLibrary } from './pages/MediaLibrary'
 import { AssetDetail } from './pages/AssetDetail'
 import MCPServersPage from './pages/MCPServersPage'
@@ -50,6 +51,7 @@ function App() {
             <Route path="admin/groups" element={<Groups />} />
             <Route path="media" element={<MediaLibrary />} />
             <Route path="media/asset/:id" element={<AssetDetail />} />
+            <Route path="avatars" element={<Avatars />} />
             <Route path="chat" element={<Chat />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

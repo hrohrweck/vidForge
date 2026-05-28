@@ -8,10 +8,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.config import get_settings
-from app.database import Job, Template, User, get_db
+from app.database import Avatar, Job, JobAvatar, Template, User, get_db
 from app.workers.tasks import process_scene_video_job, process_video_job
 
 router = APIRouter()
@@ -70,6 +71,13 @@ def _normalize_provider_preference(value: str) -> str:
     return "auto"
 
 
+class JobAvatarDetail(BaseModel):
+    avatar_id: UUID
+    avatar_name: str
+    role: str | None = None
+    consistency_strategy_override: str | None = None
+
+
 class JobResponse(BaseModel):
     id: UUID
     title: str
@@ -92,8 +100,22 @@ class JobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    avatars: list[JobAvatarDetail] | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _populate_job_avatars(job: Job) -> None:
+    if job.avatar_assignments:
+        job.avatars = [  # type: ignore[attr-defined]
+            JobAvatarDetail(
+                avatar_id=ja.avatar_id,
+                avatar_name=ja.avatar.name if ja.avatar else "Unknown",
+                role=ja.role,
+                consistency_strategy_override=ja.consistency_strategy_override,
+            )
+            for ja in job.avatar_assignments
+        ]
 
 
 @router.get("", response_model=list[JobResponse])
@@ -105,14 +127,22 @@ async def list_jobs(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[Job]:
-    query = select(Job).where(Job.user_id == current_user.id).order_by(Job.created_at.desc())
+    query = (
+        select(Job)
+        .options(selectinload(Job.avatar_assignments).selectinload(JobAvatar.avatar))
+        .where(Job.user_id == current_user.id)
+        .order_by(Job.created_at.desc())
+    )
     if status:
         query = query.where(Job.status == status)
     if project_id:
         query = query.where(Job.project_id == UUID(project_id))
     query = query.offset(offset).limit(limit)
     result = await db.execute(query)
-    return list(result.scalars().all())
+    jobs = list(result.scalars().all())
+    for job in jobs:
+        _populate_job_avatars(job)
+    return jobs
 
 
 @router.post("", response_model=JobResponse)
@@ -142,9 +172,74 @@ async def create_job(
             if workflow_type == "scene_based":
                 job.workflow_type = "scene_based"
 
+    # Flush the job early so job.id is populated for JobAvatar rows
     db.add(job)
+    await db.flush()
+
+    avatar_assignments: list[dict[str, Any]] = []
+    if isinstance(job.input_data, dict):
+        avatar_assignments = job.input_data.get("avatars", []) or []
+
+    avatar_errors: list[str] = []
+    avatar_rows: list[JobAvatar] = []
+    avatar_name_map: dict[UUID, str] = {}
+    seen_avatar_ids: set[UUID] = set()
+
+    for i, assignment in enumerate(avatar_assignments):
+        avatar_id_str = assignment.get("avatar_id")
+        try:
+            avatar_id = UUID(str(avatar_id_str))
+        except (ValueError, TypeError, AttributeError):
+            avatar_errors.append(f"avatars[{i}].avatar_id: invalid UUID '{avatar_id_str}'")
+            continue
+
+        if avatar_id in seen_avatar_ids:
+            continue
+        seen_avatar_ids.add(avatar_id)
+
+        av_result = await db.execute(
+            select(Avatar).where(
+                Avatar.id == avatar_id,
+                Avatar.user_id == current_user.id,
+                Avatar.deleted_at.is_(None),
+            )
+        )
+        avatar = av_result.scalar_one_or_none()
+        if not avatar:
+            avatar_errors.append(
+                f"avatars[{i}].avatar_id: avatar '{avatar_id_str}' not found or access denied"
+            )
+            continue
+
+        avatar_name_map[avatar_id] = avatar.name
+        avatar_rows.append(
+            JobAvatar(
+                job_id=job.id,
+                avatar_id=avatar_id,
+                role=assignment.get("role"),
+                consistency_strategy_override=assignment.get("consistency_strategy_override"),
+            )
+        )
+
+    if avatar_errors:
+        raise HTTPException(status_code=422, detail={"errors": avatar_errors})
+
+    for row in avatar_rows:
+        db.add(row)
     await db.commit()
     await db.refresh(job)
+
+    if avatar_rows:
+        avatars_response = [
+            JobAvatarDetail(
+                avatar_id=row.avatar_id,
+                avatar_name=avatar_name_map[row.avatar_id],
+                role=row.role,
+                consistency_strategy_override=row.consistency_strategy_override,
+            )
+            for row in avatar_rows
+        ]
+        job.avatars = avatars_response  # type: ignore[attr-defined]
 
     if job_data.auto_start:
         if job.workflow_type == "scene_based":
@@ -182,10 +277,15 @@ async def get_job(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
-    result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
+    result = await db.execute(
+        select(Job)
+        .options(selectinload(Job.avatar_assignments).selectinload(JobAvatar.avatar))
+        .where(Job.id == job_id, Job.user_id == current_user.id)
+    )
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _populate_job_avatars(job)
     return job
 
 

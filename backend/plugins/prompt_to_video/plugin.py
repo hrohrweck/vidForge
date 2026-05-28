@@ -85,16 +85,20 @@ class PromptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
         from .planner import plan_scenes_from_prompt
+        from app.services.avatar_prompt_builder import build_avatar_context_string
 
         input_data = job.input_data or {}
         prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
         style = input_data.get("style", "realistic")
         duration = input_data.get("duration", 10)
 
+        avatars_context = build_avatar_context_string(context.get("avatars", []))
+
         scenes = await plan_scenes_from_prompt(
             prompt=prompt,
             duration=duration,
             style=style,
+            avatars_context=avatars_context or None,
         )
 
         # Clear any existing scenes

@@ -20,7 +20,17 @@ Guidelines:
 - Match mood to lyrics emotion
 - Image prompts: 10-30 words
 - CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
-- First scene sets mood, last provides closure"""
+- First scene sets mood, last provides closure
+
+AVATAR CAST MEMBERS:
+If provided with a list of avatar cast members (name, gender, bio, role), you may include them in scenes where their presence enhances the narrative. NOT every scene needs avatars — use them naturally as the story demands.
+When a scene includes an avatar:
+- Include their FULL NAME in the visual_description
+- Describe their appearance and actions in the image_prompt
+- Use their bio and role to inform how they behave and interact
+- Place them naturally within the scene's environment
+Example image_prompt with avatar: "cinematic style: Alice (a red-haired detective in a trench coat) examining evidence on a dimly lit desk, dramatic lighting, photorealistic"
+Only use avatars that are provided — do NOT invent new characters."""
 
     def __init__(self):
         self.llm = LLMClient(model="huihui_ai/qwen3.6-abliterated:35b-Claude-4.7")

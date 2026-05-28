@@ -76,7 +76,129 @@ class PluginBase(ABC):
         Update ``job.input_data`` with enriched fields.
         Return an updated *context* dict that is forwarded to
         :meth:`plan_scenes`.
+
+        Also resolves avatar assignments from ``job.input_data["avatars"]``
+        into ``context["avatars"]`` as a list of resolved avatar dicts.
         """
+        context = await self._resolve_avatars(db, job, context)
+        return context
+
+    async def _resolve_avatars(
+        self,
+        db: AsyncSession,
+        job: Job,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve avatar assignments from job.input_data into the context dict.
+
+        Reads ``job.input_data["avatars"]`` (list of {avatar_id, role, ...}),
+        looks up full Avatar+AvatarImage data from the database, resolves
+        file-system paths for images, and populates ``context["avatars"]``.
+
+        Missing or soft-deleted avatars are logged as warnings and skipped.
+        Avatars with no valid primary image are skipped.
+        """
+        from pathlib import Path
+        from uuid import UUID
+
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from app.config import get_settings
+        from app.database import Avatar, AvatarImage
+
+        input_data = job.input_data or {}
+        avatar_assignments = input_data.get("avatars", [])
+
+        if not avatar_assignments:
+            return context
+
+        settings = get_settings()
+        storage_root = Path(settings.storage_path)
+        resolved: list[dict[str, Any]] = []
+
+        for assignment in avatar_assignments:
+            avatar_id = assignment.get("avatar_id")
+            if not avatar_id:
+                continue
+
+            # Normalise to UUID
+            if isinstance(avatar_id, str):
+                try:
+                    avatar_id = UUID(avatar_id)
+                except ValueError:
+                    logger.warning("Invalid avatar_id %r, skipping", avatar_id)
+                    continue
+
+            result = await db.execute(
+                select(Avatar)
+                .options(selectinload(Avatar.images))
+                .where(Avatar.id == avatar_id),
+            )
+            avatar = result.scalar_one_or_none()
+
+            if not avatar:
+                logger.warning("Avatar %s not found, skipping", avatar_id)
+                continue
+
+            if avatar.deleted_at:
+                logger.warning(
+                    "Avatar %s (%r) is soft-deleted, including with warning",
+                    avatar.id,
+                    avatar.name,
+                )
+
+            # --- Resolve primary image ---
+            primary = avatar.primary_image
+            if not primary:
+                # Fallback: first image marked primary, or first image
+                primary = next(
+                    (img for img in avatar.images if img.is_primary), None
+                )
+                if not primary and avatar.images:
+                    primary = avatar.images[0]
+
+            if not primary:
+                logger.error(
+                    "Avatar %s has no images, skipping", avatar.id
+                )
+                continue
+
+            primary_path = (
+                str(storage_root / primary.storage_path)
+                if primary.storage_path
+                else None
+            )
+
+            if primary_path and not Path(primary_path).exists():
+                logger.error(
+                    "Avatar %s primary image missing from disk: %s, skipping",
+                    avatar.id,
+                    primary_path,
+                )
+                continue
+
+            # Compose resolved avatar dict
+            resolved.append({
+                "id": str(avatar.id),
+                "name": avatar.name,
+                "gender": avatar.gender,
+                "bio": avatar.bio,
+                "role": assignment.get("role"),
+                "consistency_strategy": (
+                    assignment.get("consistency_strategy_override")
+                    or avatar.consistency_strategy
+                ),
+                "primary_image_path": primary_path,
+                "all_image_paths": [
+                    str(storage_root / img.storage_path)
+                    for img in avatar.images
+                    if img.storage_path
+                ],
+                "deleted": bool(avatar.deleted_at),
+            })
+
+        context["avatars"] = resolved
         return context
 
     # ------------------------------------------------------------------

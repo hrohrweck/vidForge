@@ -222,6 +222,9 @@ class User(Base):
     chat_token_usages: Mapped[list["ChatTokenUsage"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    avatars: Mapped[list["Avatar"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSettings(Base):
@@ -320,6 +323,9 @@ class Job(Base):
     worker: Mapped["Worker | None"] = relationship(back_populates="jobs")
     scenes: Mapped[list["VideoScene"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
+    )
+    avatar_assignments: Mapped[list["JobAvatar"]] = relationship(
+        back_populates="job", lazy="selectin"
     )
 
 
@@ -684,3 +690,88 @@ async def seed_rbac_data() -> None:
         except Exception as e:
             await db.rollback()
             print(f"Warning: Could not seed groups: {e}")
+
+
+class Avatar(Base):
+    __tablename__ = "avatars"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    gender: Mapped[str] = mapped_column(String(20), nullable=False)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consistency_strategy: Mapped[str] = mapped_column(String(20), default="ip_adapter")
+    primary_image_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("avatar_images.id", use_alter=True, name="fk_avatar_primary_image"),
+        nullable=True,
+    )
+    lora_model_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    lora_training_status: Mapped[str] = mapped_column(
+        String(20), server_default="not_trained", nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    user: Mapped["User"] = relationship(back_populates="avatars")
+    images: Mapped[list["AvatarImage"]] = relationship(
+        back_populates="avatar",
+        primaryjoin="AvatarImage.avatar_id == Avatar.id",
+        cascade="all, delete-orphan",
+    )
+    primary_image: Mapped["AvatarImage | None"] = relationship(
+        primaryjoin="Avatar.primary_image_id == AvatarImage.id",
+        post_update=True,
+    )
+    job_assignments: Mapped[list["JobAvatar"]] = relationship(back_populates="avatar")
+
+
+class AvatarImage(Base):
+    __tablename__ = "avatar_images"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    avatar_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("avatars.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    avatar: Mapped["Avatar"] = relationship(
+        back_populates="images", foreign_keys=[avatar_id]
+    )
+
+
+class JobAvatar(Base):
+    __tablename__ = "job_avatars"
+    __table_args__ = ()
+
+    job_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    avatar_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("avatars.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    consistency_strategy_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    job: Mapped["Job"] = relationship(back_populates="avatar_assignments")
+    avatar: Mapped["Avatar"] = relationship(back_populates="job_assignments")

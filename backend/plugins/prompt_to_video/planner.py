@@ -27,6 +27,17 @@ Guidelines:
 - CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - Ensure smooth narrative flow between scenes
 - Match mood to the content
+
+AVATAR CAST MEMBERS:
+If provided with a list of avatar cast members (name, gender, bio, role), you may include them in scenes where their presence enhances the narrative. NOT every scene needs avatars — use them naturally as the story demands.
+When a scene includes an avatar:
+- Include their FULL NAME in the visual_description
+- Describe their appearance and actions in the image_prompt
+- Use their bio and role to inform how they behave and interact
+- Place them naturally within the scene's environment
+Example image_prompt with avatar: "cinematic style: Alice (a red-haired detective in a trench coat) examining evidence on a dimly lit desk, dramatic lighting, photorealistic"
+Only use avatars that are provided — do NOT invent new characters.
+
 - Camera movements: static, pan_left, pan_right, zoom_in, zoom_out, tilt_up, orbit
 - Total duration should match the requested duration"""
 
@@ -35,6 +46,7 @@ async def plan_scenes_from_prompt(
     prompt: str,
     duration: float = 10,
     style: str = "realistic",
+    avatars_context: str | None = None,
 ) -> list[dict[str, Any]]:
     """Plan scenes from a single text prompt.
 
@@ -46,9 +58,11 @@ async def plan_scenes_from_prompt(
     try:
         user_prompt = (
             f"Create a scene plan for a {duration}-second video.\n"
-            f"Style: {style}\n\n"
-            f"Prompt: {prompt}"
+            f"Style: {style}\n"
         )
+        if avatars_context:
+            user_prompt += f"\n{avatars_context}\n\n"
+        user_prompt += f"Prompt: {prompt}"
         response = await llm.generate(
             prompt=user_prompt,
             system=SYSTEM_PROMPT,
