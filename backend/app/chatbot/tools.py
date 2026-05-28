@@ -2,19 +2,17 @@
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.models import get_available_models as _get_available_models
 from app.database import Job, Style, Template, UserSettings
 from app.models.media import MediaAsset
-from app.models.media import FileType
 from app.plugins.registry import get_all_plugins
 from app.services.llm_service import LLMClient
-from app.api.models import get_available_models as _get_available_models
 
 
 @dataclass
@@ -221,7 +219,7 @@ async def _handle_get_job_status(ctx: ToolContext, args: dict[str, Any]) -> dict
     try:
         job_uuid = UUID(job_id)
     except ValueError:
-        return {"error": "invalid_argument", "message": f"'job_id' must be a valid UUID"}
+        return {"error": "invalid_argument", "message": "'job_id' must be a valid UUID"}
 
     result = await db.execute(
         select(Job).where(Job.id == job_uuid, Job.user_id == UUID(ctx.user_id))

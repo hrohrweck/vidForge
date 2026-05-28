@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.config import get_settings
-from app.database import Avatar, AvatarImage, JobAvatar, User, get_db
+from app.database import Avatar, AvatarImage, User, get_db
 
 logger = logging.getLogger(__name__)
 

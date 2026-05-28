@@ -12,7 +12,6 @@ from app.config import get_settings
 from app.database import Job, ModelConfig, Provider, UserSettings
 from app.services.job_router import JobRouter
 from app.services.model_config_service import ModelConfigService
-from app.services.lora_registry import get_lora
 from app.services.model_resolver import (
     get_family_from_legacy_id,
     resolve_model_variant,

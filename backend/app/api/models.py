@@ -8,8 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.database import ModelConfig, User, UserSettings, get_db
-from app.services.model_config_service import ModelConfigService
-from app.services.model_resolver import get_all_families, get_family_variants, is_family_id
+from app.services.model_resolver import get_family_variants, is_family_id
 
 router = APIRouter(tags=["models"])
 

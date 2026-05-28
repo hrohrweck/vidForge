@@ -661,6 +661,7 @@ def train_avatar_lora(self, avatar_id: str) -> dict:
 
 async def _train_avatar_lora(avatar_id: str) -> dict:
     import shutil
+
     from app.database import Avatar
 
     async with ctx.session_factory() as db:
@@ -673,8 +674,8 @@ async def _train_avatar_lora(avatar_id: str) -> dict:
 
         try:
             # Collect training image paths
-            from sqlalchemy.orm import selectinload
             from sqlalchemy import select as sa_select
+            from sqlalchemy.orm import selectinload
 
             result = await db.execute(
                 sa_select(Avatar)
@@ -728,7 +729,7 @@ def cleanup_orphaned_avatars(self):
 async def _cleanup_orphaned_avatars():
     from datetime import timedelta
 
-    from app.database import Avatar, AvatarImage, JobAvatar
+    from app.database import Avatar, JobAvatar
 
     async with ctx.session_factory() as db:
         cutoff = datetime.utcnow() - timedelta(days=30)
@@ -866,7 +867,7 @@ def sync_provider_models(self, provider_type: str) -> dict:
 
 
 async def _sync_provider_models(provider_type: str) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.database import Provider
     from app.services.model_config_service import ModelConfigService
@@ -1135,6 +1136,7 @@ async def _generate_quick_media(
 ) -> dict:
     import uuid as _uuid
     from datetime import datetime as _datetime
+
     from app.database import ModelConfig, Provider
     from app.models.media import MediaAsset, SourceType
     from app.services.media_generator import generate_image, generate_video

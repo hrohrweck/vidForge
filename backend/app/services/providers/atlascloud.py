@@ -12,7 +12,7 @@ import httpx
 from app.database import ModelConfig
 from app.services.llm_service import LLMChunk, LLMError
 from app.services.model_config_service import ModelConfigService
-from app.services.providers.base import ComfyUIProvider, JobResult, ProviderInfo
+from app.services.providers.base import ComfyUIProvider, ProviderInfo
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +372,7 @@ class AtlasCloudProvider(ComfyUIProvider):
         if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
             try:
                 from pathlib import Path
+
                 from app.config import get_settings
                 settings = get_settings()
                 full_path = Path(settings.storage_path) / image_path

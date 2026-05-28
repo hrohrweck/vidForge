@@ -105,7 +105,7 @@ class PluginBase(ABC):
         from sqlalchemy.orm import selectinload
 
         from app.config import get_settings
-        from app.database import Avatar, AvatarImage
+        from app.database import Avatar
 
         input_data = job.input_data or {}
         avatar_assignments = input_data.get("avatars", [])
@@ -811,6 +811,7 @@ async def _import_scene_asset(
         return
     try:
         from pathlib import Path
+
         from app.config import get_settings
         from app.services.auto_import import (
             _create_asset_from_file,

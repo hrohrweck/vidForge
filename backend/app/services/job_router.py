@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Provider
 from app.services.budget_tracker import BudgetTracker
+from app.services.providers.atlascloud import AtlasCloudProvider
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
 from app.services.providers.comfyui_direct import ComfyUIDirectProvider
-from app.services.providers.atlascloud import AtlasCloudProvider
 from app.services.providers.poe import PoeProvider
 from app.services.providers.runpod import RunPodProvider
 from app.services.worker_registry import WorkerRegistry

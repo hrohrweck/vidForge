@@ -9,8 +9,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -287,7 +287,7 @@ async def get_folder_tree(
             updated_at=folder.updated_at,
             children=[],
         )
-    
+
     folder_map = {str(f.id): folder_to_tree_node(f) for f in folders}
     root_folders = []
 

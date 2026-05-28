@@ -123,7 +123,7 @@ describe('QuickCreateMedia', () => {
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
-        '/api/media/generate',
+        '/media/generate',
         expect.objectContaining({
           model_id: 'img-1',
           prompt: 'A beautiful landscape',

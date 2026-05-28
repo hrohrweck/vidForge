@@ -21,8 +21,8 @@ from app.database import (
     UserGroup,
     get_db,
 )
-from app.services.model_config_service import ModelConfigService
 from app.services.app_settings import get_setting, set_setting
+from app.services.model_config_service import ModelConfigService
 from app.services.permissions import get_user_permissions
 
 router = APIRouter()

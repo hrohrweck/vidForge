@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.database import ChatTokenUsage, get_db
+from app.database import get_db
 
 router = APIRouter()
 
