@@ -331,7 +331,10 @@ class AtlasCloudProvider(ComfyUIProvider):
             raise RuntimeError("Provider not initialized")
 
         ref_url = image_path or reference_image_url
-        payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
+        # Some models (Kling, WAN) expect prompt as array, others (Veo Lite) as string
+        prompt_val = [prompt] if any(m in model.lower() for m in ("kling", "wan", "spicy", "seedance", "vidu")) else prompt
+        is_veo_lite = "veo3.1-lite" in model.lower()
+        payload: dict[str, Any] = {"model": model, "prompt": prompt_val}
 
         # Upload local image to AtlasCloud first for I2V models
         if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
