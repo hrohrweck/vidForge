@@ -344,6 +344,7 @@ class PluginBase(ABC):
         settings = get_settings()
         storage = Path(settings.storage_path).resolve()
         output_dir = get_scene_output_dir(str(job.id), scene.scene_number)
+        output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         num_clips = math.ceil(scene_duration / max_clip_s)
@@ -386,6 +387,8 @@ class PluginBase(ABC):
                 current_seed_path = str(
                     seed_img.relative_to(storage)
                 )
+                # Ensure consistent path separators
+                current_seed_path = current_seed_path.replace("\\", "/")
 
         # Merge sub-clips with crossfade
         final_path = output_dir / "scene_video.mp4"
