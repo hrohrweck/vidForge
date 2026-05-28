@@ -907,7 +907,7 @@ async def _sync_provider_models(provider_type: str) -> dict:
                     }
                     update_data["is_deprecated"] = False
                     update_data["is_active"] = True
-                    update_data["last_synced_at"] = datetime.now(timezone.utc)
+                    update_data["last_synced_at"] = datetime.utcnow()
                     await service.update(
                         db, model_data["model_id"], provider.id, update_data
                     )
@@ -915,7 +915,7 @@ async def _sync_provider_models(provider_type: str) -> dict:
                     create_data = {
                         **model_data,
                         "provider_id": provider.id,
-                        "last_synced_at": datetime.now(timezone.utc),
+                        "last_synced_at": datetime.utcnow(),
                     }
                     await service.create(db, create_data)
                 total_synced += 1
