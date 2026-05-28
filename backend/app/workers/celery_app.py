@@ -52,6 +52,11 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=0),
         "args": ("comfyui_direct",),
     },
+    "sync-ollama-models": {
+        "task": "app.workers.tasks.sync_provider_models",
+        "schedule": crontab(hour=3, minute=30),
+        "args": ("ollama",),
+    },
 }
 
 
