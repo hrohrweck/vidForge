@@ -125,3 +125,40 @@ export async function getFirstTemplateId(
  */
 export const ADMIN_EMAIL = 'e2e-admin@vidforge.dev'
 export const ADMIN_PASSWORD = 'E2eAdmin123!'
+
+/* ------------------------------------------------------------------ */
+/*  Browser auth injection                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Inject auth state into the browser's localStorage so the app
+ * considers the user authenticated without going through the login form.
+ *
+ * @param page - Playwright Page
+ * @param token - JWT access token
+ * @param email - Optional: the user's email (for the Zustand user object)
+ */
+export async function injectAuth(
+  page: import('@playwright/test').Page,
+  token: string,
+  email?: string,
+): Promise<void> {
+  await page.goto('/')
+  await page.evaluate(
+    ({ token, email }) => {
+      const state = {
+        state: {
+          token,
+          user: email
+            ? { id: '', email, is_active: true, is_superuser: false, groups: [], permissions: [] }
+            : null,
+          isAuthenticated: true,
+        },
+        version: 0,
+      }
+      localStorage.setItem('auth-storage', JSON.stringify(state))
+    },
+    { token, email },
+  )
+  await page.reload()
+}

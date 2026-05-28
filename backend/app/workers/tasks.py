@@ -1039,3 +1039,230 @@ def _sync_comfyui_models() -> list[dict]:
             })
 
     return discovered
+
+
+# ======================================================================
+# Task: generate_quick_media (job-less quick-create)
+# ======================================================================
+
+
+@celery_app.task(bind=True, time_limit=600, max_retries=4, default_retry_delay=10)
+def generate_quick_media(
+    self,
+    user_id: str,
+    model_id: str,
+    prompt: str,
+    aspect_ratio: str = "1:1",
+    duration: int = 5,
+    negative_prompt: str | None = None,
+    seed: int | None = None,
+) -> dict:
+    """Generate a single image or video without a full job pipeline.
+
+    Dispatches to :func:`generate_image` or :func:`generate_video` based
+    on the model's configured modality.  Recoverable errors are retried
+    with exponential back-off (10 s, 20 s, 40 s, 80 s).  Successful
+    outputs are auto-imported into the user's media library.
+    """
+    return ctx.run(_generate_quick_media(
+        self, user_id, model_id, prompt, aspect_ratio,
+        duration, negative_prompt, seed,
+    ))
+
+
+async def _generate_quick_media(
+    self,
+    user_id: str,
+    model_id: str,
+    prompt: str,
+    aspect_ratio: str,
+    duration: int,
+    negative_prompt: str | None,
+    seed: int | None,
+) -> dict:
+    import uuid as _uuid
+    from datetime import datetime as _datetime
+    from app.database import ModelConfig, Provider
+    from app.models.media import MediaAsset, SourceType
+    from app.services.media_generator import generate_image, generate_video
+
+    user_uuid = UUID(user_id)
+
+    async with ctx.session_factory() as db:
+        try:
+            # ------------------------------------------------------------------
+            # 1. Resolve model config
+            # ------------------------------------------------------------------
+            result = await db.execute(
+                select(ModelConfig).where(
+                    ModelConfig.model_id == model_id,
+                    ModelConfig.is_active == True,  # noqa: E712
+                )
+            )
+            config = result.scalars().first()
+            if not config:
+                raise ValueError(f"Unknown or inactive model: {model_id}")
+
+            # ------------------------------------------------------------------
+            # 2. Resolve provider
+            # ------------------------------------------------------------------
+            provider_result = await db.execute(
+                select(Provider).where(
+                    Provider.id == config.provider_id,
+                    Provider.is_active == True,  # noqa: E712
+                )
+            )
+            provider = provider_result.scalar_one_or_none()
+            if not provider:
+                raise ValueError(
+                    f"Provider {config.provider_id} for model {model_id} "
+                    "is not available"
+                )
+
+            # ------------------------------------------------------------------
+            # 3. Build a lightweight mock-job so we can reuse
+            #    generate_image / generate_video
+            # ------------------------------------------------------------------
+            quick_job_id = _uuid.uuid4()
+
+            class _QuickJob:
+                id: UUID = quick_job_id
+                image_provider_id: UUID | None = None
+                video_provider_id: UUID | None = None
+
+                def __init__(self, uid: UUID) -> None:
+                    self.user_id: UUID = uid
+
+            quick_job = _QuickJob(user_uuid)
+            # Set the relevant provider id on the mock job
+            if config.modality == "image":
+                quick_job.image_provider_id = provider.id
+            elif config.modality == "video":
+                quick_job.video_provider_id = provider.id
+
+            # ------------------------------------------------------------------
+            # 4. Generate
+            # ------------------------------------------------------------------
+            if config.modality == "image":
+                path, model_used, prov_id = await generate_image(
+                    db=db,
+                    job=quick_job,  # type: ignore[arg-type]
+                    prompt=prompt,
+                    scene_number=0,
+                    provider_id=provider.id,
+                    model_preference=model_id,
+                    aspect_ratio=aspect_ratio,
+                )
+                content_type = "image/png"
+
+            elif config.modality == "video":
+                path, model_used, prov_id, dur_out = await generate_video(
+                    db=db,
+                    job=quick_job,  # type: ignore[arg-type]
+                    prompt=prompt,
+                    scene_number=0,
+                    provider_id=provider.id,
+                    model_preference=model_id,
+                    duration=duration,
+                    aspect_ratio=aspect_ratio,
+                )
+                content_type = "video/mp4"
+            else:
+                raise ValueError(
+                    f"Unsupported modality '{config.modality}' "
+                    f"for model {model_id}"
+                )
+
+            # ------------------------------------------------------------------
+            # 5. Auto-import to media library
+            # ------------------------------------------------------------------
+            full_path = Path(settings.storage_path) / path
+            if not full_path.exists():
+                raise RuntimeError(
+                    f"Generated file not found at: {full_path}"
+                )
+
+            asset = MediaAsset(
+                user_id=user_uuid,
+                name=full_path.name,
+                file_path=path,
+                file_type=config.modality,
+                mime_type=content_type,
+                size_bytes=full_path.stat().st_size,
+                source_type=SourceType.GENERATED.value,
+                created_at=_datetime.utcnow(),
+                updated_at=_datetime.utcnow(),
+            )
+            db.add(asset)
+            await db.commit()
+
+            # ------------------------------------------------------------------
+            # 6. Clean up the temp job output dir
+            # ------------------------------------------------------------------
+            import shutil
+            job_output_dir = Path(settings.storage_path) / "output" / str(quick_job_id)
+            if job_output_dir.exists():
+                try:
+                    shutil.rmtree(job_output_dir)
+                except OSError:
+                    logger.debug(
+                        "Could not remove temp job output dir: %s",
+                        job_output_dir,
+                    )
+
+            return {
+                "status": "completed",
+                "path": path,
+                "model": model_used,
+                "asset_id": str(asset.id),
+            }
+
+        except Exception as exc:
+            # --- recoverable vs non-recoverable classification ---
+            if _is_quick_recoverable(exc):
+                if self.request.retries < self.max_retries:
+                    countdown = 10 * (2 ** self.request.retries)
+                    logger.warning(
+                        "[quick_create] Attempt %d/%d failed for model=%s "
+                        "(recoverable): %s — retrying in %ds",
+                        self.request.retries + 1,
+                        self.max_retries + 1,
+                        model_id,
+                        exc,
+                        countdown,
+                    )
+                    raise self.retry(exc=exc, countdown=countdown)
+                raise
+            raise
+
+
+# ------------------------------------------------------------------
+# Recoverable-error classification (shared with PluginBase markers
+# plus a few extras relevant to quick-create).
+# ------------------------------------------------------------------
+
+_QUICK_RECOVERABLE_MARKERS = (
+    "overloaded",
+    "rate limit",
+    "429",
+    "502",
+    "503",
+    "504",
+    "timeout",
+    "timed out",
+    "connection",
+    "connection refused",
+    "capacity",
+    "queue is full",
+    "queue full",
+    "server error",
+    "temporary",
+    "too many requests",
+    "try again",
+    "busy",
+)
+
+
+def _is_quick_recoverable(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _QUICK_RECOVERABLE_MARKERS)

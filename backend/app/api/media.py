@@ -9,12 +9,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user_from_bearer_or_cookie
-from app.database import get_db
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.database import User, get_db
 from app.models.media import MediaAsset, MediaAssetReference, MediaAssetTag, MediaFolder, MediaTag
 from app.schemas.media import (
     AssetListQuery,
@@ -941,3 +942,40 @@ async def get_media_stats(
         total_bytes=total_bytes,
         by_type=by_type,
     )
+
+
+# ============== QUICK GENERATE ==============
+
+
+class QuickGenerateRequest(BaseModel):
+    model_id: str
+    prompt: str
+    aspect_ratio: str = "1:1"
+    duration: int = 5
+    negative_prompt: str | None = None
+    seed: int | None = None
+
+
+class QuickGenerateResponse(BaseModel):
+    task_id: str
+    status: str = "queued"
+
+
+@router.post("/media/generate", status_code=202)
+async def quick_generate_media(
+    req: QuickGenerateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Queue quick media generation. Media appears in library when done."""
+    from app.workers.tasks import generate_quick_media
+
+    task = generate_quick_media.delay(
+        user_id=str(current_user.id),
+        model_id=req.model_id,
+        prompt=req.prompt,
+        aspect_ratio=req.aspect_ratio,
+        duration=req.duration,
+        negative_prompt=req.negative_prompt,
+        seed=req.seed,
+    )
+    return QuickGenerateResponse(task_id=task.id)

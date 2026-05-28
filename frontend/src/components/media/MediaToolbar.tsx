@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { AssetListQuery, FileType } from '../../api/types/media'
+import QuickCreateMedia from '../QuickCreateMedia'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
@@ -53,6 +55,7 @@ export function MediaToolbar({
   breadcrumbs = [],
   stats,
 }: MediaToolbarProps) {
+  const queryClient = useQueryClient()
   const [searchValue, setSearchValue] = useState(query.search || '')
 
   // Debounced search - 300ms delay
@@ -237,6 +240,11 @@ export function MediaToolbar({
               <Upload className="h-4 w-4 mr-2" />
               Upload
             </Button>
+
+            {/* Quick Create Media */}
+            <QuickCreateMedia
+              onSuccess={() => queryClient.invalidateQueries({ queryKey: ['media'] })}
+            />
           </div>
         </div>
 
