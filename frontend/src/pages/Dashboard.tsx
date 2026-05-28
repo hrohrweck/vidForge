@@ -1,10 +1,12 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Plus, Video, Clock, CheckCircle, XCircle } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { jobsApi, templatesApi } from '../api/client'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
-import TokenUsageHistogram from '../components/dashboard/TokenUsageHistogram'
+import TokenUsageChart from '../components/dashboard/TokenUsageChart'
+import CostChart from '../components/dashboard/CostChart'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -31,6 +33,12 @@ export default function Dashboard() {
     completed: CheckCircle,
     failed: XCircle,
   }
+
+  const timeframe = useMemo(() => {
+    const to = new Date().toISOString().split('T')[0]
+    const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    return { from, to, groupBy: 'day' as const }
+  }, [])
 
   return (
     <div className="space-y-8">
@@ -86,7 +94,16 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <TokenUsageHistogram />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="border rounded-lg bg-card text-card-foreground shadow-sm p-4">
+          <h2 className="text-xl font-semibold mb-4">Token Usage</h2>
+          <TokenUsageChart from={timeframe.from} to={timeframe.to} groupBy={timeframe.groupBy} />
+        </div>
+        <div className="border rounded-lg bg-card text-card-foreground shadow-sm p-4">
+          <h2 className="text-xl font-semibold mb-4">Cost</h2>
+          <CostChart from={timeframe.from} to={timeframe.to} groupBy={timeframe.groupBy} />
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>

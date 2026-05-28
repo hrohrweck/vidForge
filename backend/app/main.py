@@ -11,6 +11,7 @@ from app.api import (
     auth,
     avatars,
     chat,
+    dashboard,
     jobs,
     media,
     models,
@@ -115,6 +116,7 @@ app.include_router(scenes.router, prefix="/api/jobs", tags=["scenes"])
 app.include_router(media.router, prefix="/api/media", tags=["media"])
 app.include_router(audio.router, prefix="/api/audio", tags=["audio"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+app.include_router(dashboard.router, prefix="/api", tags=["dashboard"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 
 

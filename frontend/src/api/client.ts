@@ -1026,6 +1026,38 @@ export const chatApi = {
   },
 }
 
+export interface TokenUsageBucket {
+  timestamp: string
+  model_id: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface CostBucket {
+  timestamp: string
+  model_id: string
+  cost: number
+}
+
+export const dashboardApi = {
+  getTokenUsageOverTime: async (from: string, to: string, groupBy: string) => {
+    const response = await api.get<{ buckets: TokenUsageBucket[] }>(
+      '/dashboard/token-usage',
+      { params: { from, to, group_by: groupBy } }
+    )
+    return response.data
+  },
+
+  getCostOverTime: async (from: string, to: string, groupBy: string) => {
+    const response = await api.get<{ buckets: CostBucket[] }>(
+      '/dashboard/cost',
+      { params: { from, to, group_by: groupBy } }
+    )
+    return response.data
+  },
+}
+
 // MCP Admin API types and namespace
 
 export interface MCPServer {
