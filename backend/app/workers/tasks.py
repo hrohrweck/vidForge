@@ -971,27 +971,46 @@ async def _discover_provider_models(provider) -> list[dict]:
 
 
 async def _sync_atlascloud_models(provider) -> list[dict]:
-    """Fetch available models from the AtlasCloud API.
+    """Fetch available models from the AtlasCloud API and extract per-model pricing.
 
-    TODO: Implement real API call to AtlasCloud /v1/models endpoint.
+    Pricing is embedded in the API response as credits_per_image / credits_per_second.
     """
     logger.info(
         "[Sync] AtlasCloud model discovery not yet implemented (provider %s)",
         provider.id,
     )
-    return []
+    discovered: list[dict] = []
+    # TODO: Implement real API call to AtlasCloud /v1/models endpoint.
+    # When implemented, discovered will be populated and the loop below
+    # will attach cost_config to each model.
+    for model_data in discovered:
+        model_data["cost_config"] = {
+            "credits_per_image": model_data.get("credits_per_image", 0),
+            "credits_per_second": model_data.get("credits_per_second", 0),
+            "currency": "credits",
+        }
+    return discovered
 
 
 async def _sync_poe_models(provider) -> list[dict]:
-    """Fetch available models from the Poe API.
+    """Fetch available models from the Poe API and extract compute-point pricing.
 
-    TODO: Implement real API call to Poe /v1/models endpoint.
+    Pricing is embedded in the API response as a compute_points field.
     """
     logger.info(
         "[Sync] Poe model discovery not yet implemented (provider %s)",
         provider.id,
     )
-    return []
+    discovered: list[dict] = []
+    # TODO: Implement real API call to Poe /v1/models endpoint.
+    # When implemented, discovered will be populated and the loop below
+    # will attach cost_config to each model.
+    for model_data in discovered:
+        model_data["cost_config"] = {
+            "compute_points": model_data.get("compute_points", 0),
+            "currency": "compute_points",
+        }
+    return discovered
 
 
 def _sync_comfyui_models() -> list[dict]:
@@ -1034,6 +1053,11 @@ def _sync_comfyui_models() -> list[dict]:
                 "endpoint_type": "comfyui",
                 "comfyui_workflow": m.get("comfyui_workflow"),
                 "capabilities": m.get("capabilities"),
+                "cost_config": {
+                    "cost": 0,
+                    "currency": "USD",
+                    "note": "local_generation",
+                },
                 "is_deprecated": False,
                 "is_active": True,
             })
@@ -1197,7 +1221,32 @@ async def _generate_quick_media(
             await db.commit()
 
             # ------------------------------------------------------------------
-            # 6. Clean up the temp job output dir
+            # 6. Record cost on the asset
+            # ------------------------------------------------------------------
+            from decimal import Decimal
+
+            if config and config.cost_config:
+                cc = config.cost_config
+                if config.modality == "image":
+                    cost = Decimal(
+                        str(cc.get("credits_per_image", cc.get("compute_points", 0)))
+                    )
+                    asset.cost = cost
+                elif config.modality == "video":
+                    cost_per_sec = Decimal(
+                        str(
+                            cc.get(
+                                "credits_per_second",
+                                cc.get("compute_points_per_second", 0),
+                            )
+                        )
+                    )
+                    asset.cost = cost_per_sec * duration
+                await db.commit()
+                logger.info("Quick media generation cost: %s", asset.cost)
+
+            # ------------------------------------------------------------------
+            # 7. Clean up the temp job output dir
             # ------------------------------------------------------------------
             import shutil
             job_output_dir = Path(settings.storage_path) / "output" / str(quick_job_id)

@@ -20,6 +20,7 @@ router = APIRouter(tags=["models"])
 def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
     """Convert a ModelConfig ORM object to the legacy API response format."""
     constraints = m.constraints or {}
+    cost_config = m.cost_config or None
     return {
         "id": m.model_id,
         "name": m.model_id,
@@ -34,6 +35,7 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
         "default_steps": constraints.get("default_steps"),
         "distilled": constraints.get("distilled", False),
         "description": (m.extra_params or {}).get("description"),
+        "cost_config": cost_config,
         "is_family": is_family_id(m.model_id),
         "variants": get_family_variants(m.model_id) if is_family_id(m.model_id) else {},
     }

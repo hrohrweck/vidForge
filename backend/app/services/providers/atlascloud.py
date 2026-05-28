@@ -456,7 +456,20 @@ class AtlasCloudProvider(ComfyUIProvider):
 
         raise LLMError("Video generation timed out")
 
-    def estimate_cost(self, workflow: dict[str, Any]) -> float:
+    async def estimate_cost(self, workflow: dict[str, Any]) -> float:
+        model = workflow.get("model", "")
+        try:
+            config = await self._get_model_config(model)
+        except Exception:
+            return 0.0
+        if not config or not config.cost_config:
+            return 0.0
+        cc = config.cost_config
+        if config.modality == "image":
+            return float(cc.get("credits_per_image", 0))
+        elif config.modality == "video":
+            duration = workflow.get("duration", 5)
+            return float(cc.get("credits_per_second", 0)) * duration
         return 0.0
 
     def estimate_duration(self, workflow: dict[str, Any]) -> float:

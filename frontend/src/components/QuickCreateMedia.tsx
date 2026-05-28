@@ -21,6 +21,7 @@ interface ModelOption {
   name: string
   provider: string
   description?: string
+  costConfig?: Record<string, unknown> | null
 }
 
 export interface QuickCreateMediaProps {
@@ -34,6 +35,7 @@ function toModelOption(m: ModelConfig): ModelOption {
     name: m.name,
     provider: m.provider,
     description: m.description,
+    costConfig: m.cost_config,
   }
 }
 
@@ -88,6 +90,22 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
       setSubmitting(false)
     }
   }
+
+  const getEstimatedCost = () => {
+    if (!selectedModel?.costConfig) return null
+    const cc = selectedModel.costConfig
+    if (cc.cost === 0) return 'Free (local)'
+    const credits =
+      (cc.credits_per_image as number) ||
+      (cc.credits_per_second as number) ||
+      (cc.compute_points as number) ||
+      0
+    const total = credits * duration
+    const currency = (cc.currency as string) || 'credits'
+    return `~${total} ${currency}`
+  }
+
+  const estimatedCost = getEstimatedCost()
 
   return (
     <>
@@ -217,6 +235,15 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                   rows={4}
                 />
               </div>
+
+              {estimatedCost && (
+                <div className="border-t pt-3 mt-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Estimated cost:</span>
+                    <span className="font-medium">{estimatedCost}</span>
+                  </div>
+                </div>
+              )}
 
               <Button
                 onClick={handleGenerate}

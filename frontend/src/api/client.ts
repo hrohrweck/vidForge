@@ -818,6 +818,7 @@ export interface ModelConfig {
   license: string
   provider: string
   default: boolean
+  cost_config?: Record<string, unknown> | null
   variants?: Record<string, { workflow: string; description: string }>
 }
 

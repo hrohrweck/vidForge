@@ -670,6 +670,20 @@ class PoeProvider(ComfyUIProvider):
         )
 
     async def estimate_cost(self, workflow: dict[str, Any]) -> float:
+        model = workflow.get("model", "")
+        try:
+            config = await self._get_model_config(model)
+        except Exception:
+            return 0.0
+        if not config or not config.cost_config:
+            return 0.0
+        cc = config.cost_config
+        if config.modality == "image":
+            return float(cc.get("compute_points", 0))
+        elif config.modality == "video":
+            duration = workflow.get("duration", 5)
+            per_sec = cc.get("compute_points_per_second", cc.get("compute_points", 0) / 5)
+            return float(per_sec) * duration
         return 0.0
 
     async def estimate_duration(self, workflow: dict[str, Any]) -> float:
