@@ -487,7 +487,12 @@ async def generate_avatar_poses(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    avatar = await db.get(Avatar, avatar_id)
+    result = await db.execute(
+        select(Avatar)
+        .options(selectinload(Avatar.images), selectinload(Avatar.primary_image))
+        .where(Avatar.id == avatar_id)
+    )
+    avatar = result.scalar_one_or_none()
     if not avatar or avatar.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Avatar not found")
     if not avatar.primary_image:
