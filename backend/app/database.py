@@ -7,6 +7,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Enum,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -702,7 +703,11 @@ class Avatar(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     gender: Mapped[str] = mapped_column(String(20), nullable=False)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
-    consistency_strategy: Mapped[str] = mapped_column(String(20), default="ip_adapter")
+    consistency_strategy: Mapped[str] = mapped_column(
+        Enum("ip_adapter", "face_swap", "lora", "prompt_only",
+             name="consistency_strategy_enum", create_type=False),
+        default="ip_adapter",
+    )
     primary_image_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("avatar_images.id", use_alter=True, name="fk_avatar_primary_image"),

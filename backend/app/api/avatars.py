@@ -1,6 +1,6 @@
 import logging
 import uuid as uuid_mod
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
@@ -267,7 +267,7 @@ async def update_avatar(
     for field, value in update_data.items():
         setattr(avatar, field, value)
 
-    avatar.updated_at = datetime.now(timezone.utc)
+    avatar.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(avatar, attribute_names=["images", "job_assignments"])
     return _avatar_to_response(avatar)
