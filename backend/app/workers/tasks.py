@@ -974,25 +974,44 @@ async def _discover_provider_models(provider) -> list[dict]:
 
 
 async def _sync_atlascloud_models(provider) -> list[dict]:
-    """Fetch available models from the AtlasCloud API and extract per-model pricing.
-
-    Pricing is embedded in the API response as credits_per_image / credits_per_second.
-    """
-    logger.info(
-        "[Sync] AtlasCloud model discovery not yet implemented (provider %s)",
-        provider.id,
-    )
-    discovered: list[dict] = []
-    # TODO: Implement real API call to AtlasCloud /v1/models endpoint.
-    # When implemented, discovered will be populated and the loop below
-    # will attach cost_config to each model.
-    for model_data in discovered:
-        model_data["cost_config"] = {
-            "credits_per_image": model_data.get("credits_per_image", 0),
-            "credits_per_second": model_data.get("credits_per_second", 0),
-            "currency": "credits",
-        }
-    return discovered
+    """Fetch available chat models from AtlasCloud's OpenAI-compatible /v1/models endpoint."""
+    from app.services.providers.atlascloud import AtlasCloudProvider, ATLAS_LLM_BASE
+    
+    instance = AtlasCloudProvider(provider.id, provider.config)
+    try:
+        await instance.initialize(provider.config)
+        if not instance.client:
+            return []
+        
+        resp = await instance.client.get(
+            f"{ATLAS_LLM_BASE}/models",
+            headers={"Authorization": f"Bearer {instance.api_key}"},
+        )
+        if resp.status_code != 200:
+            return []
+        
+        data = resp.json()
+        models = data.get("data", data.get("models", []))
+        
+        discovered = []
+        for m in models:
+            model_id = m.get("id", "")
+            if not model_id:
+                continue
+            discovered.append({
+                "model_id": model_id,
+                "provider_model_id": model_id,
+                "display_name": model_id,
+                "modality": "text",
+                "endpoint_type": "chat_completions",
+                "capabilities": {"supports_chat": True},
+                "cost_config": {"currency": "credits"},
+            })
+        return discovered
+    except Exception:
+        return []
+    finally:
+        await instance.shutdown()
 
 
 async def _sync_poe_models(provider) -> list[dict]:
