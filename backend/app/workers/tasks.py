@@ -844,3 +844,198 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
         return {"status": "completed", "avatar_id": avatar_id}
     finally:
         await ctx.redis.delete(lock_key)
+
+
+# ======================================================================
+# Task 12: sync_provider_models
+# ======================================================================
+
+
+@celery_app.task(bind=True, time_limit=600)
+def sync_provider_models(self, provider_type: str) -> dict:
+    """Sync ModelConfig rows for all active providers of the given type.
+
+    Discovers available models (via API for remote providers, static
+    list for local providers), upserts them, and marks any previously
+    known but now-missing models as deprecated.
+
+    Called by the Celery beat scheduler once per day per provider type
+    at staggered times to avoid simultaneous API calls.
+    """
+    return ctx.run(_sync_provider_models(provider_type))
+
+
+async def _sync_provider_models(provider_type: str) -> dict:
+    from datetime import datetime, timezone
+
+    from app.database import Provider
+    from app.services.model_config_service import ModelConfigService
+
+    async with ctx.session_factory() as db:
+        result = await db.execute(
+            select(Provider).where(
+                Provider.provider_type == provider_type,
+                Provider.is_active == True,  # noqa: E712
+            )
+        )
+        providers = result.scalars().all()
+
+        if not providers:
+            logger.info(
+                "[Sync] No active providers found for type '%s'", provider_type
+            )
+            return {"provider_type": provider_type, "synced": 0, "deprecated": 0}
+
+        total_synced = 0
+        total_deprecated = 0
+
+        for provider in providers:
+            discovered = await _discover_provider_models(provider)
+
+            service = ModelConfigService()
+            discovered_ids = {m["model_id"] for m in discovered}
+
+            for model_data in discovered:
+                existing = await service.get_by_id(
+                    db, model_data["model_id"], provider.id
+                )
+                if existing:
+                    update_data = {
+                        k: v
+                        for k, v in model_data.items()
+                        if k not in ("model_id", "provider_id")
+                    }
+                    update_data["is_deprecated"] = False
+                    update_data["is_active"] = True
+                    update_data["last_synced_at"] = datetime.now(timezone.utc)
+                    await service.update(
+                        db, model_data["model_id"], provider.id, update_data
+                    )
+                else:
+                    create_data = {
+                        **model_data,
+                        "provider_id": provider.id,
+                        "last_synced_at": datetime.now(timezone.utc),
+                    }
+                    await service.create(db, create_data)
+                total_synced += 1
+
+            # Mark models not in discovered set as deprecated
+            all_configs = await service.list_by_provider(
+                db, provider.id, active_only=False
+            )
+            for config in all_configs:
+                if (
+                    config.model_id not in discovered_ids
+                    and not config.is_deprecated
+                ):
+                    config.is_deprecated = True
+                    config.is_active = False
+                    total_deprecated += 1
+
+        await db.commit()
+
+    logger.info(
+        "[Sync] provider_type=%s synced=%d deprecated=%d",
+        provider_type,
+        total_synced,
+        total_deprecated,
+    )
+    return {
+        "provider_type": provider_type,
+        "synced": total_synced,
+        "deprecated": total_deprecated,
+    }
+
+
+# ------------------------------------------------------------------
+# Per-provider discovery helpers
+# ------------------------------------------------------------------
+
+
+async def _discover_provider_models(provider) -> list[dict]:
+    """Route to the correct discovery strategy based on provider type."""
+    if provider.provider_type == "atlascloud":
+        return await _sync_atlascloud_models(provider)
+    elif provider.provider_type == "poe":
+        return await _sync_poe_models(provider)
+    elif provider.provider_type == "comfyui_direct":
+        return _sync_comfyui_models()
+    else:
+        logger.warning(
+            "[Sync] No model discovery for provider type '%s' (provider %s)",
+            provider.provider_type,
+            provider.id,
+        )
+        return []
+
+
+async def _sync_atlascloud_models(provider) -> list[dict]:
+    """Fetch available models from the AtlasCloud API.
+
+    TODO: Implement real API call to AtlasCloud /v1/models endpoint.
+    """
+    logger.info(
+        "[Sync] AtlasCloud model discovery not yet implemented (provider %s)",
+        provider.id,
+    )
+    return []
+
+
+async def _sync_poe_models(provider) -> list[dict]:
+    """Fetch available models from the Poe API.
+
+    TODO: Implement real API call to Poe /v1/models endpoint.
+    """
+    logger.info(
+        "[Sync] Poe model discovery not yet implemented (provider %s)",
+        provider.id,
+    )
+    return []
+
+
+def _sync_comfyui_models() -> list[dict]:
+    """Return the static ComfyUI model list from inline definitions.
+
+    Each entry is a dict ready for ModelConfig creation/update.
+    """
+    _AVAILABLE_IMAGE_MODELS = [
+        {"id": "flux1-schnell", "name": "FLUX.1-schnell",
+         "comfyui_workflow": "flux_image.json", "capabilities": ["text-to-image"]},
+        {"id": "sdxl", "name": "Stable Diffusion XL",
+         "comfyui_workflow": "sdxl_image.json", "capabilities": ["text-to-image"]},
+    ]
+    _AVAILABLE_VIDEO_MODELS = [
+        {"id": "wan2.2", "name": "WAN 2.2",
+         "capabilities": ["text-to-video", "image-to-video", "scene-to-video"]},
+        {"id": "ltx2.3", "name": "LTX 2.3",
+         "capabilities": ["text-to-video", "image-to-video"]},
+        {"id": "ltx2.3-fast", "name": "LTX 2.3 Fast",
+         "capabilities": ["text-to-video"]},
+    ]
+    _AVAILABLE_TEXT_MODELS: list[dict] = [
+        {"id": "qwen3.6:35b", "name": "Qwen 3.6 35B", "capabilities": ["chat"]},
+        {"id": "llama3.3", "name": "Llama 3.3", "capabilities": ["chat"]},
+    ]
+
+    discovered: list[dict] = []
+
+    for source_list, modality in (
+        (_AVAILABLE_IMAGE_MODELS, "image"),
+        (_AVAILABLE_VIDEO_MODELS, "video"),
+        (_AVAILABLE_TEXT_MODELS, "text"),
+    ):
+        for m in source_list:
+            discovered.append({
+                "model_id": m["id"],
+                "provider_model_id": m["id"],
+                "display_name": m["name"],
+                "modality": modality,
+                "endpoint_type": "comfyui",
+                "comfyui_workflow": m.get("comfyui_workflow"),
+                "capabilities": m.get("capabilities"),
+                "is_deprecated": False,
+                "is_active": True,
+            })
+
+    return discovered

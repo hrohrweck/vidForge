@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://developers.openai.com/api/docs/guides/image-generation",
+    "name": "Image generation | OpenAI API",
+    "snippet": "You can set the n parameter to generate multiple images at once in a single request (by default, the API returns a single image). Responses API Image API.",
+    "host_name": "developers.openai.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+    "name": "Nano Banana image generation - Google AI for Developers",
+    "snippet": "Gemini can generate and process images conversationally with text, images, or a combination of both. This lets you create, edit, and iterate on ...",
+    "host_name": "ai.google.dev",
+    "rank": 1,
+    "date": "May 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.thehive.ai/docs/image-generation-models",
+    "name": "Image Generation APIs - Documentation | Hive",
+    "snippet": "To generate images using the V3 API, you need to send a POST request with a JSON payload that includes details about your prompt and desired output settings.",
+    "host_name": "docs.thehive.ai",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://leonardo.ai/api",
+    "name": "AI Image & Video Generation API for Developers - Leonardo.Ai",
+    "snippet": "You can control the visibility of generated images by setting the public parameter to false when creating a generation via the API. Are my generated images used ...",
+    "host_name": "leonardo.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.venice.ai/api-reference/endpoint/image/generations",
+    "name": "Generate Images (OpenAI Compatible API) - Venice API",
+    "snippet": "Generate an image based on input parameters using an OpenAI compatible endpoint. This endpoint does not support the full feature set of the Venice Image ...",
+    "host_name": "docs.venice.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://community.make.com/t/issue-with-leonardo-ai-api-call-image-generation-with-guidance-controlnet/68037",
+    "name": "Issue with Leonardo AI API Call – Image Generation with Guidance",
+    "snippet": "I've been working with Leonardo AI's API, and I've successfully managed to: :white_check_mark: Upload an image using the init-image endpoint.",
+    "host_name": "community.make.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/SamurAIGPT/muapi-cli",
+    "name": "Official CLI for muapi.ai — generate images, videos & audio  - GitHub",
+    "snippet": "Official command-line interface for muapi.ai — generate images, videos, and audio directly from your terminal.",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "May 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://wavespeed.ai/blog/posts/complete-guide-ai-image-apis-2026",
+    "name": "Complete Guide to AI Image Generation APIs in 2026 - WaveSpeed AI",
+    "snippet": "Complete guide to AI image generation APIs in 2026 with LM Arena rankings. Compare GPT Image, Gemini, Flux, Seedream, and more.",
+    "host_name": "wavespeed.ai",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=jRloQJvekHA",
+    "name": "How to Generate Text and Images with OpenAI API - YouTube",
+    "snippet": "... API, write code for text generation, and create stunning images using advanced AI models. Whether you're a developer or an AI enthusiast ...",
+    "host_name": "www.youtube.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openrouter.ai/docs/guides/overview/multimodal/image-generation",
+    "name": "OpenRouter Image Generation | Complete Documentation",
+    "snippet": "To generate images, send a request to the /api/v1/chat/completions endpoint with the modalities parameter. The value depends on the model's capabilities: Models ...",
+    "host_name": "openrouter.ai",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

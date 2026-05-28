@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/external-applications/openai-compatible-api",
+    "name": "OpenAI Compatible API | Poe Creator Platform",
+    "snippet": "- You can pass custom bot parameters through the OpenAI SDK using the extra_body parameter. For example: extra_body={\"aspect\": \"1280x720\"} for Sora-2.",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/external-applications/external-application-guide",
+    "name": "External Application Guide | Poe Creator Platform",
+    "snippet": "Use the parameters field in ProtocolMessage to send custom parameters to bots. This includes model-specific parameters like thinking_budget for Claude models, ...",
+    "host_name": "creator.poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/external-applications/interface-configuration",
+    "name": "Interface Configuration - Poe Creator Guide",
+    "snippet": "This guide walks you through setting up Poe API with popular AI coding tools. With Poe's OpenAI-compatible API, you can access hundreds of AI models ...",
+    "host_name": "creator.poe.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://reference.langchain.com/python/langchain-openai/chat_models/base/BaseChatOpenAI/extra_body",
+    "name": "extra_body | langchain_openai - LangChain Reference Docs",
+    "snippet": "This is the recommended way to pass custom parameters that are specific to your OpenAI-compatible API provider but not part of the standard OpenAI API.",
+    "host_name": "reference.langchain.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.vllm.ai/en/v0.8.3/serving/openai_compatible_server.html",
+    "name": "OpenAI-Compatible Server - vLLM Documentation",
+    "snippet": "You can pass these parameters to vLLM using the OpenAI client in the extra_body parameter of your requests, i.e. extra_body={\"top_k\": 50} for top_k . Important.",
+    "host_name": "docs.vllm.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/blog/introducing-the-poe-api",
+    "name": "Introducing the Poe API",
+    "snippet": "The new Poe API provides a single, OpenAI-compatible interface to the entire ecosystem of top-tier AI, giving developers the power to access ...",
+    "host_name": "poe.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/nicepkg/poe2gpt",
+    "name": "GitHub - nicepkg/poe2gpt: Unimpeded: Convert Poe.com to OpenAI",
+    "snippet": "With poe2gpt, all you need is a nodejs environment, and you can start it with a single command—very convenient. Important. Currently, only Poe ...",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.threads.com/@poe_platform/post/DMx7UEpJ0LB/introducing-the-poe-api-for-developers-with-three-important-features1-access-to-",
+    "name": "Introducing the Poe API for developers, with three important features",
+    "snippet": "Our API is now compatible with OpenAI chat completions, so tools like Cursor, Cline, and Continue are immediately usable with your Poe account.",
+    "host_name": "www.threads.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/external-applications/anthropic-compatible-api",
+    "name": "Anthropic Compatible API | Poe Creator Platform",
+    "snippet": "The Poe API provides access to Claude models through an Anthropic-compatible endpoint. Use your Poe API key to access Claude without needing a separate ...",
+    "host_name": "creator.poe.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://x.com/poe_platform/status/1950967460125131047",
+    "name": "Introducing the Poe API for developers, with three important features",
+    "snippet": "Introducing the Poe API for developers, with three important features: 1) Access to all models and bots on Poe across all modalities",
+    "host_name": "x.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.youtube.com/watch?v=L-RVyipLHQQ&vl=en",
+    "name": "Aspect Ratios & Resolution with ChatGPT Images 2.0 - YouTube",
+    "snippet": "OpenAI researcher Dibya Bhattacharjee shows the variety of aspect ratios you can prompt with ChatGPT Images 2.0, plus the jump in maximum ...",
+    "host_name": "www.youtube.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai-sdk.dev/v4/docs/ai-sdk-core/image-generation",
+    "name": "Image Generation - AI SDK Core",
+    "snippet": "The aspect ratio is specified as a string in the format {width}:{height} . Models only support a few aspect ratios, and the supported aspect ratios are ...",
+    "host_name": "ai-sdk.dev",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://community.openai.com/t/gtp4-with-dall-e-3-image-custom-aspect-ratio/863185",
+    "name": "Gtp4 with dall-e 3 image custom aspect ratio - ChatGPT",
+    "snippet": "When using DALL-E on ChatGPT and referring to image sizes in terms of aspect ratios, we can use the following aspect ratio labels: 1024x1024 ...",
+    "host_name": "community.openai.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aspectratiotool.com/ai-image-aspect-ratio",
+    "name": "AI Image Generator Aspect Ratio Guide | DALL-E, Stable Diffusion",
+    "snippet": "Flux uses a simple aspect_ratio parameter with nine presets. The Pro Ultra model generates images up to 4 megapixels — among the highest native resolutions in ...",
+    "host_name": "aspectratiotool.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://framia.pro/page/en-US/news/gpt-image-2-resolution",
+    "name": "GPT Image 2 Resolution: Native 2K Image Generation Explained",
+    "snippet": "GPT Image 2 generates at native 2K resolution (up to 2048px) — a major upgrade over prior OpenAI models. Learn how to access it, when to use ...",
+    "host_name": "framia.pro",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openrouter.ai/docs/guides/overview/multimodal/image-generation",
+    "name": "OpenRouter Image Generation | Complete Documentation",
+    "snippet": "Image Configuration Options. Some image generation models support additional configuration through the image_config parameter. Aspect Ratio. Set image_config.",
+    "host_name": "openrouter.ai",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://help.apiyi.com/en/gpt-image-2-vip-size-resolution-complete-guide-en.html",
+    "name": "GPT-Image-2-VIP Size Complete Guide: 30 Resolution",
+    "snippet": "It features three key upgrades in dimension support: added 5:4 aspect ratio (10 total), full coverage across 3 resolution tiers (1K/2K/4K), and ...",
+    "host_name": "help.apiyi.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=C7fUUdmu_XA",
+    "name": "How to generate images with OpenAI's DALL-E models using R",
+    "snippet": "In this video, we learn how to use the OpenAI Images API to generate images based on text prompts using OpenAI's DALL-E models.",
+    "host_name": "www.youtube.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://uxmag.com/articles/flux-1-is-a-mind-blowing-open-weights-ai-image-generator-with-12b-parameters",
+    "name": "Flux.1 is a Mind-Blowing Open-Weights AI Image Generator with",
+    "snippet": "All Flux.1 model variants support a diverse range of aspect ratios and resolutions between 0.1 and 2.0 megapixels, as shown in the following example. Example ...",
+    "host_name": "uxmag.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://wavespeed.ai/blog/posts/complete-guide-ai-image-apis-2026",
+    "name": "Complete Guide to AI Image Generation APIs in 2026 - WaveSpeed AI",
+    "snippet": "OpenAI (GPT Image, DALL-E): Commercial use permitted; Google (Gemini) ... Custom aspect ratios: Many models support 1:1, 4:3, 16:9, 9:16 ...",
+    "host_name": "wavespeed.ai",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

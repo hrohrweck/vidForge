@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/server-bots/parameter-controls",
+    "name": "Parameter Controls | Poe Creator Platform",
+    "snippet": "The aspect ratio control lets users choose from predefined aspect ratios with visual previews for easy comparison—especially useful for image and video ...",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.openai.com/api/docs/guides/images-vision",
+    "name": "Images and vision | OpenAI API",
+    "snippet": "Use GPT Image models to generate or edit images. ... When using high input fidelity, we add a set number of tokens based on the image's aspect ratio in addition ...",
+    "host_name": "developers.openai.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openrouter.ai/docs/guides/overview/multimodal/image-generation",
+    "name": "OpenRouter Image Generation | Complete Documentation",
+    "snippet": "Some image generation models support additional configuration through the image_config parameter. Aspect Ratio. Set image_config.aspect_ratio to request ...",
+    "host_name": "openrouter.ai",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/PoeAI/comments/1tfrc2i/how_to_use_gptimage2_via_poe_api",
+    "name": "How to use gpt-image-2 via Poe API : r/PoeAI - Reddit",
+    "snippet": "One important note: make sure to pass an actual resolution string for the size/aspect parameter (e.g., 1024x1024 , 1024x1536 , or 1536x1024 ).",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/vercel/ai/issues/9239",
+    "name": "Add support for aspectRatio in Google Gemini Image Generation",
+    "snippet": "The Imagen 3.0 model, accessible through the Gemini API, now supports several standard aspect ratios, including 4:3, 3:4, 16:9, and 9:16, in ...",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://discuss.ai.google.dev/t/subject-imagen-models-aspect-ratio-issues-model-behavior/99081",
+    "name": "Subject: Imagen Models - Aspect Ratio Issues & Model Behavior",
+    "snippet": "Description: When using the imagen-3.0-generate-002 model, the generated images consistently come out in a 1:1 (square) aspect ratio, even when ...",
+    "host_name": "discuss.ai.google.dev",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.together.ai/docs/inference/images/parameters",
+    "name": "Image generation parameters - Together AI docs",
+    "snippet": "Available parameters vary by model. FLUX Schnell and the Kontext family (Pro, Max, Dev) use aspect_ratio to set the output size, while FLUX.1 Pro, FLUX 1.1 Pro, ...",
+    "host_name": "docs.together.ai",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.venice.ai/api-reference/endpoint/image/generations",
+    "name": "Generate Images (OpenAI Compatible API) - Venice API",
+    "snippet": "Generate an image based on input parameters using an OpenAI compatible endpoint. This endpoint does not support the full feature set of the Venice Image ...",
+    "host_name": "docs.venice.ai",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/openai",
+    "name": "OpenAI - Poe",
+    "snippet": "For a conversational image generation and editing experience use: https://poe.com/GPT-5.2 Optional Parameters: Set aspect ratio, with options 3:2, 1:1 and 2:3.",
+    "host_name": "poe.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=YmHtMrySZDw",
+    "name": "OpenAI Image API: How to Set Image Size and Dimensions - YouTube",
+    "snippet": "API. We cover the specific size options available for the appropriate image models, including square, wide, and tall aspect ratios. You'll ...",
+    "host_name": "www.youtube.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

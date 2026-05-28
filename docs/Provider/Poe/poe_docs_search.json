@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/external-applications/openai-compatible-api",
+    "name": "OpenAI Compatible API | Poe Creator Platform",
+    "snippet": "Access models across all modalities: text, image, video, and audio generation; OpenAI-compatible interface works with existing tools like Cursor, Cline ...",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/prompt-bots/best-practices-image-generation-bots",
+    "name": "Best practices for image generation prompts | Poe Creator Platform",
+    "snippet": "Be descriptive, rather than instructive. Unlike for text generation bots, the style prompt should describe the desired image, not be an instruction to the bot.",
+    "host_name": "creator.poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/server-bots/parameter-controls",
+    "name": "Parameter Controls | Poe Creator Platform",
+    "snippet": "Parameter Controls allow server bots to add additional input elements to their UI on Poe, enabling users to configure settings and provide structured input ...",
+    "host_name": "creator.poe.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/sora-2-pro/api",
+    "name": "Sora-2-Pro API - Build AI Apps - Poe",
+    "snippet": "... video and image-to-video generation. Optional parameters: - Duration. Video output duration in seconds (options: 4, 8, 12) - Size. Resolution of the output ...",
+    "host_name": "poe.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/server-bots/server-bots-functional-guides",
+    "name": "Functional Guides | Poe Creator Platform",
+    "snippet": "The Poe API allows you to embed images in your bot's response using Markdown syntax. The following is an example implementation describing a bot that returns a ...",
+    "host_name": "creator.poe.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/prompt-bots/best-practices-for-video-generation-prompts",
+    "name": "Best practices for video generation prompts | Poe Creator Platform",
+    "snippet": "Keep prompts concise. Unlike for image generation bots (such as Midjourney), shorter prompts tend to work better. · Add camera motions Adding camera motions can ...",
+    "host_name": "creator.poe.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/explore",
+    "name": "Explore - Poe",
+    "snippet": "OpenAI's state-of-the-art image generation model as of April 21, 2026, designed for fast, high-quality image generation and editing with strong prompt adherence ...",
+    "host_name": "poe.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/flux-schnell/api",
+    "name": "FLUX-schnell API - Build AI Apps - Poe",
+    "snippet": "Turbo speed image generation with strengths in prompt following, visual quality, image detail and output diversity. This is the fastest version of FLUX.1.",
+    "host_name": "poe.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/blog/introducing-the-poe-api",
+    "name": "Introducing the Poe API",
+    "snippet": "In addition to the best models for coding, Poe has almost all of the best image, video, and audio generation models, including Imagen 4, GPT ...",
+    "host_name": "poe.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/novitaai",
+    "name": "Novita AI - Poe",
+    "snippet": "Tongyi Wanxiang 2.6 (also known as Wan 2.6) is the latest generation of professional-grade AI video and image generation models developed by Alibaba Cloud.",
+    "host_name": "poe.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

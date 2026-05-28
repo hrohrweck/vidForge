@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://developers.openai.com/api/docs/guides/images-vision",
+    "name": "Images and vision | OpenAI API",
+    "snippet": "In this guide, you will learn about building applications involving images with the OpenAI API. If you know what you want to build, find your use case below ...",
+    "host_name": "developers.openai.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://anil-matcha-open-higgsfield-ai.mintlify.app/api/muapi-client",
+    "name": "MuapiClient - Open Higgsfield AI",
+    "snippet": "The MuapiClient class provides a JavaScript interface for generating images and videos through the Muapi API. It handles authentication, request submission, and ...",
+    "host_name": "anil-matcha-open-higgsfield-ai.mintlify.app",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai-sdk.dev/docs/ai-sdk-core/image-generation",
+    "name": "Image Generation - AI SDK Core",
+    "snippet": "The aspect ratio is specified as a string in the format {width}:{height} . Models only support a few aspect ratios, and the supported aspect ratios are ...",
+    "host_name": "ai-sdk.dev",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.dumplingai.com/api-reference/endpoint/generate-ai-image",
+    "name": "Generate AI Image - DumplingAI Docs",
+    "snippet": "Generate an AI image using DumplingAI's image generation providers.",
+    "host_name": "docs.dumplingai.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.meshy.ai/en/api/text-to-image",
+    "name": "Text to Image API - Meshy Docs",
+    "snippet": "Text to Image API is a feature that allows you to integrate Meshy's AI image generation capabilities into your own application. Generate high-quality images ...",
+    "host_name": "docs.meshy.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.laozhang.ai/en/api-reference/images",
+    "name": "AI Image Generation & Editing | LaoZhang API",
+    "snippet": "OpenAI-compatible Images API. Generate, edit and analyze images with DALL-E, Flux, Sora and more. Text-to-image, image editing and image understanding in one ...",
+    "host_name": "docs.laozhang.ai",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.llmgateway.io/features/image-generation",
+    "name": "Image Generation - LLM Gateway",
+    "snippet": "Generate images using AI models through the OpenAI-compatible images API or chat completions API.",
+    "host_name": "docs.llmgateway.io",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.modular.com/max/inference/image-generation",
+    "name": "Image generation | Modular",
+    "snippet": "For text-to-image generation, set input to a plain string describing the image you want. The model returns the generated image as base64-encoded data in output[ ...",
+    "host_name": "docs.modular.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai.google.dev/gemini-api/docs/image-generation",
+    "name": "Nano Banana image generation - Google AI for Developers",
+    "snippet": "Nano Banana is the name for Gemini's native image generation capabilities. Gemini can generate and process images conversationally with text, ...",
+    "host_name": "ai.google.dev",
+    "rank": 8,
+    "date": "May 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.leonardo.ai/docs/gpt-image-1-5",
+    "name": "GPT Image-1.5 - Quick Start Guide - Leonardo.Ai",
+    "snippet": "This guide shows how to generate images using GPT Image-1.5 model via the Leonardo.AI REST API.",
+    "host_name": "docs.leonardo.ai",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

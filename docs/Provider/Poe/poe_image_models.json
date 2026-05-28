@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://poe.com/explore",
+    "name": "Explore - Poe",
+    "snippet": "It supports generating, editing, restyling, and combining images attached to the latest user query. Optional Parameters: Set aspect ratio, with options 3:2, 1:1 ...\nOpenAI's state-of-the-art image generation model as of April 21, 2026, designed for fast, high-quality image generation and editing with strong prompt adherence ...",
+    "host_name": "poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/openai",
+    "name": "OpenAI - Poe",
+    "snippet": "For a conversational image generation and editing experience use: https://poe.com/GPT-5.2 Optional Parameters: Set aspect ratio, with options 3:2, 1:1 and 2:3.\nOpenAI's state-of-the-art image generation model as of April 21, 2026, designed for fast, high-quality image generation and editing with strong prompt ...",
+    "host_name": "poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/prompt-bots/best-practices-image-generation-bots",
+    "name": "Best practices for image generation prompts | Poe Creator Platform",
+    "snippet": "You can build image generation prompt bots on top of several available models, including: GPT-Image-1.5 · Imagen-4 · FLUX-pro-1.1 · DALL-E-3 ...",
+    "host_name": "creator.poe.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://community.openai.com/t/problem-with-aspect-ratio-wide-landscape-dall-e-3/564997",
+    "name": "Problem with aspect ratio wide/landscape Dall e 3 - Prompting",
+    "snippet": "When generating images in ChatGPT, I've observed that DALL-E 3 struggles to create images with a 16:9 aspect ratio. There are always some ...",
+    "host_name": "community.openai.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/PoeAI/comments/1k67myw/gpt_image_generation_is_here",
+    "name": "GPT image generation is here! : r/PoeAI - Reddit",
+    "snippet": "This is one of the best image models yet and pushes the boundaries of image quality and prompt adherence. Unique to Poe, you can generate many…",
+    "host_name": "www.reddit.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=bQzCHZzLFY0",
+    "name": "Create Stunning AI Images and Videos with Poe - Tutorial & Overview",
+    "snippet": "... DALL-E 3, Stable Diffusion, and the new Flux Pro. These models make ... For image generation, choose models based on desired style ...\n... models like DALL-E 3, Stable Diffusion, and the new Flux Pro. These models make generating images and animations a breeze. Accessing the ...",
+    "host_name": "www.youtube.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/fal",
+    "name": "fal - Poe",
+    "snippet": "Send up to 3 images (jpeg/ png/ webp) to use for image editing or as references. Optional parameters: - Set aspect ratio. Select from (16:9, 4:3, 1:1, 3:4, 9:16) ...",
+    "host_name": "poe.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai-sdk.dev/v4/docs/ai-sdk-core/image-generation",
+    "name": "Image Generation - AI SDK Core",
+    "snippet": "The aspect ratio is specified as a string in the format {width}:{height} . Models only support a few aspect ratios, and the supported aspect ratios are ...",
+    "host_name": "ai-sdk.dev",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://info.invictai.io/tools/image-generation",
+    "name": "Image Generation Tools - Invicta AI",
+    "snippet": "DALL·E Image Generator uses OpenAI's DALL·E 3 model to create high-quality images from text descriptions. It offers control over image style and dimensions, ...",
+    "host_name": "info.invictai.io",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/blog/introducing-gpt-image-generation-on-poe",
+    "name": "Introducing GPT Image Generation on Poe",
+    "snippet": "GPT image generation is here! OpenAI's best image model yet has been integrated directly into GPT-4o and Assistant, letting you create and ...",
+    "host_name": "poe.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

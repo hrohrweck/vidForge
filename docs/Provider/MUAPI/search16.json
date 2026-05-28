@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://api.market/category/text-to-video",
+    "name": "Text to Video APIs - Sora 2, Veo 3, Kling, Wan & More | api.market",
+    "snippet": "Turn plain text into photorealistic 5-second 720 p videos via Ark's SedDance 1.0-Pro model. Secure, token-based REST API with fast async processing. By byteplus.",
+    "host_name": "api.market",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/muapi",
+    "name": "muapi · GitHub Topics",
+    "snippet": "Powerful n8n community node for ByteDance Seedance 2.0. Automate AI video generation, Text-to-Video, and Image-to-Video in n8n workflows.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "May 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://n8n.io/workflows/12250-generate-video-from-an-image-with-bytedance-seedance-15-pro-via-kieai",
+    "name": "Generate video from an image with ByteDance Seedance 1.5 Pro",
+    "snippet": "This n8n template demonstrates how to generate animated videos from static images using ByteDance Seedance 1.5 Pro model through the KIE.AI API.",
+    "host_name": "n8n.io",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/StableDiffusion/comments/1lzw0ii/comparison_of_the_9_leading_ai_video_models",
+    "name": "Comparison of the 9 leading AI Video Models : r/StableDiffusion",
+    "snippet": "To generate these videos I used 3 different tools For Seedance, Veo 3, Hailuo 2.0, Kling 2.1, Runway Gen 4, LTX 13B and Wan I used Remade's ...",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://kie.ai",
+    "name": "One API for All the Best AI Models – Try Affordable AI API on Kie.ai",
+    "snippet": "Access video, image, audio, and LLM models through one unified API. Switch between Veo, Kling, Seedance, Runway, Claude, GPT, Gemini, Nano Banana, Suno, and ...",
+    "host_name": "kie.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@jankammerath/tech-stack-deep-dive-into-ai-video-generator-apis-platforms-models-7e6ab63997e7",
+    "name": "Tech Stack Deep Dive Into AI Video Generator APIs, Platforms",
+    "snippet": "... Veo 3, Kling AI and WAN 2.2. These models support both Text-To-Video (T2V) as well as Image-To-Video (I2V). T2V workflows of these models ...",
+    "host_name": "medium.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/KLING/comments/1sifu2w/new_to_ai_video_tools_kling_30_or_seedance_20_for",
+    "name": "New to AI video tools — Kling 3.0 or Seedance 2.0 for better visuals?",
+    "snippet": "In my opinion, if you want good visual quality, then Kling 3.0 is very good. It understands your prompt well and gives better results. And if ...",
+    "host_name": "www.reddit.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://forum.devtalk.com/t/which-ai-video-api-should-you-choose-in-2026/240371",
+    "name": "Which AI Video API Should You Choose in 2026? - Devtalk",
+    "snippet": "As of March 2026, there are really three contenders – Seedance 2.0, Kling 3.0, and Sora 2. ... Kling 3.0 is available now with text-to-video and ...",
+    "host_name": "forum.devtalk.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poyo.ai/changelog",
+    "name": "API Updates - PoYo.ai",
+    "snippet": "• veo3.1-lite supports text-to-video • It does not support image-related fields such as image_urls or generation_type https://poyo.ai/models/veo-3-1 ❤️ ...",
+    "host_name": "poyo.ai",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/playground/group/text-to-video",
+    "name": "AI Video Generator API | MuApi.ai",
+    "snippet": "Generate videos from text prompts using 20+ AI models — Veo 3, Kling, Seedance, Hunyuan, Runway, Pixverse, Vidu, Hailuo — through one MuApi.ai endpoint.",
+    "host_name": "muapi.ai",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

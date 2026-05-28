@@ -394,6 +394,9 @@ class Provider(Base):
     atlascloud_models: Mapped[list["AtlasCloudModel"]] = relationship(
         back_populates="provider", cascade="all, delete-orphan"
     )
+    model_configs: Mapped[list["ModelConfig"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan"
+    )
 
 
 class AtlasCloudModel(Base):
@@ -410,6 +413,71 @@ class AtlasCloudModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     provider: Mapped["Provider"] = relationship(back_populates="atlascloud_models")
+
+
+class ModelConfig(Base):
+    __tablename__ = "model_configs"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    provider_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False, index=True
+    )
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    modality: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_format: Mapped[str] = mapped_column(String(10), default="string")
+    endpoint_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    parameter_map: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extra_params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    capabilities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    constraints: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    cost_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    comfyui_workflow: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_deprecated: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("provider_id", "model_id", name="uq_provider_model"),
+    )
+
+    provider: Mapped["Provider"] = relationship(back_populates="model_configs")
+
+    def build_payload(self, **kwargs) -> dict:
+        """Build an API payload dict using parameter_map, extra_params, and prompt_format."""
+        param_map = self.parameter_map or {}
+        payload: dict = {}
+
+        # Apply parameter_map: translate our param names → provider's
+        for our_key, value in kwargs.items():
+            provider_key = param_map.get(our_key, our_key)
+            payload[provider_key] = value
+
+        # Format prompt according to prompt_format
+        if "prompt" in payload and self.prompt_format == "array":
+            payload["prompt"] = (
+                [payload["prompt"]] if isinstance(payload["prompt"], str) else payload["prompt"]
+            )
+
+        # Merge extra_params (provider-specific defaults)
+        if self.extra_params:
+            for k, v in self.extra_params.items():
+                if k not in payload:
+                    payload[k] = v
+
+        # Always include model
+        payload["model"] = self.provider_model_id
+        return payload
+
+    def supports(self, capability: str) -> bool:
+        """Check if model supports a capability from JSONB."""
+        caps = self.capabilities or {}
+        return caps.get(capability, False)
 
 
 class PoeModel(Base):

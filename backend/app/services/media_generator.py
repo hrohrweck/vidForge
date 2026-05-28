@@ -9,11 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import Job, Provider, UserSettings
+from app.database import Job, ModelConfig, Provider, UserSettings
 from app.services.job_router import JobRouter
-from app.services.model_config import get_default_model_preferences
+from app.services.model_config_service import ModelConfigService
 from app.services.lora_registry import get_lora
-from app.services.model_registry import get_model
 from app.services.model_resolver import (
     get_family_from_legacy_id,
     resolve_model_variant,
@@ -28,21 +27,15 @@ from app.services.providers import (
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-
-VIDEO_WORKFLOW_MAP: dict[str, str] = {
-    "wan2.2_t2v": "wan_t2v.json",
-    "wan2.2_s2v": "wan_s2v.json",
-    "wan2.2_i2v": "wan_i2v.json",
-    "wan_t2v": "wan_t2v.json",
-    "wan_s2v": "wan_s2v.json",
-    "wan_i2v": "wan_i2v.json",
-    "ltx2.3_t2v": "ltx_t2v.json",
-    "ltx2.3_i2v": "ltx_i2v.json",
-    "ltx_t2v": "ltx_t2v.json",
-    "ltx_i2v": "ltx_i2v.json",
-    "ltx_distilled": "ltx_distilled.json",
-    "ltx2.3_distilled": "ltx_distilled.json",
+_DEFAULT_MODEL_PREFERENCES: dict[str, str] = {
+    "image_model": "flux1-schnell",
+    "video_model": "wan2.2",
+    "text_model": "qwen3.6:35b",
+    "image_provider": "local",
+    "video_provider": "local",
+    "text_provider": "local",
 }
+
 
 
 async def get_provider_instance(
@@ -149,11 +142,11 @@ async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[st
     user_settings = result.scalar_one_or_none()
 
     if not user_settings or not user_settings.preferences:
-        return get_default_model_preferences()
+        return dict(_DEFAULT_MODEL_PREFERENCES)
 
     model_prefs = user_settings.preferences.get("models", {})
     if not model_prefs:
-        return get_default_model_preferences()
+        return dict(_DEFAULT_MODEL_PREFERENCES)
 
     return {
         "image_model": model_prefs.get("image_model", "flux1-schnell"),
@@ -475,7 +468,13 @@ async def generate_video(
         has_seed_image=bool(reference_image_path),
         is_scene_continuation=False,
     )
-    model_info = get_model(variant_id)
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.model_id == variant_id,
+            ModelConfig.is_active == True,  # noqa: E712
+        )
+    )
+    model_info = result.scalars().first()
     if not model_info:
         raise ValueError(f"Unknown model variant: {variant_id}")
 
@@ -509,6 +508,7 @@ async def generate_video(
             variant_id=variant_id,
             reference_image_path=reference_image_path,
             instance=instance,
+            db=db,
         )
     else:
         raise ValueError(f"Unsupported model variant: {variant_id}")
@@ -712,13 +712,13 @@ async def _build_ltx_workflow(
     variant_id: str,
     reference_image_path: str | None,
     instance: ComfyUIDirectProvider,
+    db: AsyncSession,
 ) -> dict[str, Any]:
     """Load and parameterise an LTX workflow JSON for the requested variant."""
-    from pathlib import Path
-
-    workflow_file = VIDEO_WORKFLOW_MAP.get(variant_id)
-    if not workflow_file:
-        raise ValueError(f"No workflow file mapped for variant {variant_id}")
+    config = await ModelConfigService.get_by_id(db, variant_id, instance.provider_id)
+    if not config or not config.comfyui_workflow:
+        raise ValueError(f"No workflow config for variant: {variant_id}")
+    workflow_file = config.comfyui_workflow
 
     workflow_path = Path(__file__).resolve().parent.parent / "comfyui" / "workflows" / workflow_file
     if not workflow_path.exists():

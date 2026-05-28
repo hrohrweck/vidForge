@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/server-bots/parameter-controls",
+    "name": "Parameter Controls | Poe Creator Platform",
+    "snippet": "The aspect ratio control lets users choose from predefined aspect ratios with visual previews for easy comparison—especially useful for image and video ...",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/fal",
+    "name": "fal - Poe",
+    "snippet": "Optional parameters: Set aspect ratio. Supported aspect ratios - 16:9, 4:3 ... Optional parameters: Set Duration. Select from (5 seconds, 10 seconds) ...",
+    "host_name": "poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/fal-ai/seedance-2.0-api",
+    "name": "fal-ai/seedance-2.0-api - GitHub",
+    "snippet": "The Seedance 2.0 video generation API produces up to 15-second clips at 720p across multiple aspect ratios. ... video API by ByteDance, available on fal.ai. fal.",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://fal.ai/docs/model-api-reference/video-generation-api/bytedance-seedance-v1-pro-image-to-video",
+    "name": "Bytedance Seedance V1 Pro Image To Video API - Fal.ai",
+    "snippet": "AspectRatioEnum. default:\"auto\". The aspect ratio of the generated video Default value: \"auto\" Possible values: 21:9 , 16:9 , 4:3 , 1:1 , 3:4 , 9:16 , auto.",
+    "host_name": "fal.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/runway-gen-4-turbo/api",
+    "name": "Runway-Gen-4-Turbo API - Build AI Apps - Poe",
+    "snippet": "... Optional parameters: Aspect ratio (16:9, 1:1, 9:16) for landscape/portrait videos. Duration (5, 10) to specify video length in seconds. Full prompting guide ...",
+    "host_name": "poe.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -16,9 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot.mcp_client import MCPClientManager
 from app.chatbot.streaming import SSEEventType
 from app.chatbot.tools import ToolContext, ToolRegistry, create_builtin_registry, dispatch
-from app.database import ChatTokenUsage, Conversation, MCPServer, Message, Provider
+from app.database import ChatTokenUsage, Conversation, MCPServer, Message, ModelConfig, Provider
 from app.services.llm_service import LLMClient
-from app.services.model_config import get_model_config
 
 
 SYSTEM_PROMPT = (
@@ -355,8 +354,17 @@ class ChatOrchestrator:
             attachments=attachments,
         )
 
-        model_config = get_model_config(model_id)
-        supports_vision = model_config.get("supports_vision", False) if model_config else False
+        result = await self.db.execute(
+            select(ModelConfig).where(
+                ModelConfig.model_id == model_id,
+                ModelConfig.is_active == True,  # noqa: E712
+            )
+        )
+        model_config = result.scalars().first()
+        supports_vision = (
+            bool(model_config.capabilities and "vision" in model_config.capabilities)
+            if model_config else False
+        )
         history = await self._load_history(user_id, conversation_id, supports_vision=supports_vision)
         tools = await self._compose_tools()
         tokens_in = 0

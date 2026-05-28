@@ -18,26 +18,6 @@ from app.services.providers.base import ComfyUIProvider, ProviderInfo
 class PoeProvider(ComfyUIProvider):
     _models_without_tools: set[str] = set()  # Cache of models that don't support tool calling
 
-    _TOOL_CAPABLE_TEXT_MODELS = {
-        "claude-opus-4.7",
-        "claude-sonnet-4.6",
-        "gemini-3.1-pro",
-        "gpt-5.4",
-        "o3-mini",
-        "glm-5.1-t",
-    }
-
-    _POE_TEXT_MODELS = (
-        "claude",
-        "gemini",
-        "gpt",
-        "o1",
-        "o3",
-        "o4",
-        "qwen",
-        "glm",
-    )
-
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
         self.config = config
@@ -48,6 +28,7 @@ class PoeProvider(ComfyUIProvider):
         self._current_jobs = 0
         self._available_models: list[dict] = []
         self._model_cache: dict[str, dict] = {}
+        self._model_configs_cache: dict[str, Any] = {}
 
     async def initialize(self, config: dict) -> None:
         if not config.get("api_key"):
@@ -55,6 +36,7 @@ class PoeProvider(ComfyUIProvider):
         self.api_key = config["api_key"]
         self.client = httpx.AsyncClient(timeout=300.0)
         await self._discover_models()
+        await self._enrich_with_model_configs()
 
     async def _discover_models(self) -> None:
         if not self.client:
@@ -73,6 +55,44 @@ class PoeProvider(ComfyUIProvider):
                 }
         except Exception:
             pass
+
+    async def _enrich_with_model_configs(self) -> None:
+        """Load ModelConfig data from DB and merge into _available_models."""
+        try:
+            from app.database import async_session
+            from app.services.model_config_service import ModelConfigService
+            async with async_session() as db:
+                configs = await ModelConfigService.list_by_provider(db, self.provider_id)
+                for config in configs:
+                    key = config.provider_model_id.lower()
+                    self._model_configs_cache[key] = config
+        except Exception:
+            pass
+
+    async def _get_model_config(self, model: str, db_session=None) -> Any | None:
+        cached = self._model_configs_cache.get(model.lower())
+        if cached is not None:
+            return cached
+        if db_session:
+            from app.services.model_config_service import ModelConfigService
+            config = await ModelConfigService.get_by_provider_model_id(
+                db_session, model.lower(), self.provider_id
+            )
+            if config is not None:
+                self._model_configs_cache[model.lower()] = config
+            return config
+        try:
+            from app.database import async_session
+            from app.services.model_config_service import ModelConfigService
+            async with async_session() as db:
+                config = await ModelConfigService.get_by_provider_model_id(
+                    db, model.lower(), self.provider_id
+                )
+                if config is not None:
+                    self._model_configs_cache[model.lower()] = config
+                return config
+        except Exception:
+            return None
 
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         raise NotImplementedError("Poe provider uses different method for media generation")
@@ -265,16 +285,6 @@ class PoeProvider(ComfyUIProvider):
         "2:3": "960x1440",
     }
 
-    # Models that use the /v1/videos (async polling) API
-    _VIDEO_API_MODELS = {
-        "veo-3.1", "veo-3.1-fast", "veo-3", "veo-2", "veo-2-video",
-        "veo-v3.1", "veo-v3.1-fast", "veo-3-vfast", "veo-3-fast",
-    }
-
-    def _is_video_api_model(self, model: str) -> bool:
-        """True if the model uses /v1/videos; False means chat-completions style."""
-        return model.lower() in self._VIDEO_API_MODELS
-
     async def generate_video(
         self,
         prompt: str,
@@ -288,7 +298,8 @@ class PoeProvider(ComfyUIProvider):
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
-        if self._is_video_api_model(model):
+        config = await self._get_model_config(model)
+        if config and config.endpoint_type == "video_endpoint":
             return await self._generate_video_api(
                 prompt, model, duration, aspect_ratio, image_path,
             )
@@ -685,24 +696,25 @@ class PoeProvider(ComfyUIProvider):
         text_only = [
             {
                 **m,
-                "supports_tools": self._model_supports_tools(m.get("id", "")),
+                "supports_tools": self._model_config_supports_tools(m),
             }
             for m in self._available_models
-            if self._is_text_model(m)
+            if self._is_text_model_by_config(m)
         ]
         return text_only
 
-    @classmethod
-    def _is_text_model(cls, model: dict[str, Any]) -> bool:
+    def _is_text_model_by_config(self, model: dict[str, Any]) -> bool:
+        config = self._model_configs_cache.get(str(model.get("id", "")).lower())
+        if config is not None:
+            return config.modality == "text"
         output_modalities = model.get("architecture", {}).get("output_modalities")
-        if output_modalities == ["text"]:
-            return True
-        model_id = str(model.get("id", "")).lower()
-        return any(model_id.startswith(prefix) for prefix in cls._POE_TEXT_MODELS)
+        return output_modalities == ["text"]
 
-    @classmethod
-    def _model_supports_tools(cls, model_id: str) -> bool:
-        return model_id.lower() in cls._TOOL_CAPABLE_TEXT_MODELS
+    def _model_config_supports_tools(self, model: dict[str, Any]) -> bool:
+        config = self._model_configs_cache.get(str(model.get("id", "")).lower())
+        if config is not None and config.capabilities:
+            return config.capabilities.get("supports_tools", False)
+        return False
 
 
 async def create_poe_provider(provider_id: UUID, config: dict) -> PoeProvider:

@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://muapi.ai",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "Muapi is a high-performance AI Image and Video generation API platform. Build advanced AI workflows effortlessly.",
+    "host_name": "muapi.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://anil-matcha-open-higgsfield-ai.mintlify.app/guides/api-configuration",
+    "name": "API Configuration - Open Higgsfield AI",
+    "snippet": "1. Open Settings. Click the Settings icon in the application header. ; 2. Enter API Key. Paste your Muapi.ai API key into the “API Key” field. ; 3. Save Settings.",
+    "host_name": "anil-matcha-open-higgsfield-ai.mintlify.app",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/muapi",
+    "name": "muapi · GitHub Topics",
+    "snippet": "Open-source alternative to AI video platforms — Free AI image & video generation studio with 200+ models (Flux, Midjourney, Kling, Sora, ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "May 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://platform.stability.ai/docs/api-reference",
+    "name": "StabilityAI REST API (v2beta) - Stability AI - Developer Platform",
+    "snippet": "As of March 2024, we are building the REST v2beta API service to be the primary API service for the Stability Platform. All AI services on other APIs (gRPC, ...",
+    "host_name": "platform.stability.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.box.com/reference",
+    "name": "API Reference - Box Dev Docs",
+    "snippet": "API Reference ; AI. AI-powered features for asking questions and extracting data ; AI Studio. Build and manage custom AI agents ; App item associations. Associate ...",
+    "host_name": "developer.box.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://lyricvideo.studio/muapi",
+    "name": "MuApi - Lyric Video Studio",
+    "snippet": "MuApi is the latest and greatest plugin in Lyric Video Studio. It's API aggregator, just like Fal AI. Seedance 2 is implemented in this plugin.",
+    "host_name": "lyricvideo.studio",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/docs/introduction",
+    "name": "MuAPI Documentation",
+    "snippet": "MuAPI is a high-performance AI API provider, offering curated access to industry-leading generation models with extreme speed and reliability—similar to fal.ai ...",
+    "host_name": "muapi.ai",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://theresanaiforthat.com/ai/muapi",
+    "name": "Muapi v1.1.0 - AI Tool For Content",
+    "snippet": "Overview. Muapi is an AI image and video API platform where users can generate videos and animate images from text prompts.",
+    "host_name": "theresanaiforthat.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.convai.com/api-docs/api-reference/core-api-reference",
+    "name": "Core API Reference | Convai Documentation",
+    "snippet": "Convai's Core API empowers developers to create, customize, and deploy AI-driven characters across various use cases — from immersive games to ...",
+    "host_name": "docs.convai.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aimlapi.com/api-references/model-database",
+    "name": "All Model IDs | AI/ML API Documentation",
+    "snippet": "On the selected model's page, you can find detailed technical and commercial information. To fetch the complete model list via the API, see the API reference ...",
+    "host_name": "docs.aimlapi.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

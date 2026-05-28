@@ -14,7 +14,7 @@ from app.models.media import MediaAsset
 from app.models.media import FileType
 from app.plugins.registry import get_all_plugins
 from app.services.llm_service import LLMClient
-from app.services.model_config import get_available_models
+from app.api.models import get_available_models as _get_available_models
 
 
 @dataclass
@@ -190,7 +190,9 @@ async def _handle_list_styles(ctx: ToolContext, args: dict[str, Any]) -> dict[st
 
 async def _handle_list_models(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """List available AI models, optionally filtered by modality."""
-    models = get_available_models()
+    if ctx.db is None:
+        return {"error": "missing_db", "message": "Database session required"}
+    models = await _get_available_models(ctx.db)
     modality = args.get("modality")
 
     if modality:

@@ -9,7 +9,9 @@ from uuid import UUID
 
 import httpx
 
+from app.database import ModelConfig
 from app.services.llm_service import LLMChunk, LLMError
+from app.services.model_config_service import ModelConfigService
 from app.services.providers.base import ComfyUIProvider, JobResult, ProviderInfo
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,18 @@ class AtlasCloudProvider(ComfyUIProvider):
             else:
                 target[key] = value
 
+    # ── Model Config helper ───────────────────────────────────────
+
+    async def _get_model_config(self, model: str) -> ModelConfig | None:
+        """Resolve a ModelConfig for the given model ID on this provider."""
+        from app.database import async_session
+
+        async with async_session() as db:
+            config = await ModelConfigService.get_by_id(
+                db, model_id=model, provider_id=self.provider_id
+            )
+            return config
+
     # ── Image Generation (AtlasCloud async API) ───────────────────
 
     async def generate_image(
@@ -234,9 +248,12 @@ class AtlasCloudProvider(ComfyUIProvider):
         if not client:
             raise RuntimeError("Provider not initialized")
 
-        # Some models (Kling, WAN) expect prompt as array, others (Flux) as string
-        prompt_val = [prompt] if any(m in model.lower() for m in ("kling", "wan", "spicy", "seedance", "vidu")) else prompt
-        payload: dict[str, Any] = {"model": model, "prompt": prompt_val}
+        model_config = await self._get_model_config(model)
+        if model_config is None:
+            raise LLMError(
+                f"No model config found for model={model} provider_id={self.provider_id}"
+            )
+        payload = model_config.build_payload(prompt=prompt, aspect_ratio=aspect_ratio)
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
 
@@ -333,10 +350,23 @@ class AtlasCloudProvider(ComfyUIProvider):
             raise RuntimeError("Provider not initialized")
 
         ref_url = image_path or reference_image_url
-        # Some models (Kling, WAN) expect prompt as array, others (Veo Lite) as string
-        prompt_val = [prompt] if any(m in model.lower() for m in ("kling", "wan", "spicy", "seedance", "vidu")) else prompt
-        is_veo_lite = "veo3.1-lite" in model.lower()
-        payload: dict[str, Any] = {"model": model, "prompt": prompt_val}
+
+        model_config = await self._get_model_config(model)
+        if model_config is None:
+            raise LLMError(
+                f"No model config found for model={model} provider_id={self.provider_id}"
+            )
+
+        build_kwargs: dict[str, Any] = {"prompt": prompt}
+        if duration is not None:
+            build_kwargs["duration"] = duration
+        if aspect_ratio:
+            build_kwargs["aspect_ratio"] = aspect_ratio
+        # Only pass ref_url if it's an HTTP URL (local paths are uploaded separately)
+        if ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
+            build_kwargs["image_url"] = ref_url
+
+        payload = model_config.build_payload(**build_kwargs)
 
         # Upload local image to AtlasCloud first for I2V models
         if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
@@ -358,8 +388,6 @@ class AtlasCloudProvider(ComfyUIProvider):
                             payload["image_url"] = uploaded_url
             except Exception as e:
                 logger.warning(f"Failed to upload image for I2V: {e}")
-        elif ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
-            payload["image_url"] = ref_url
 
         resp = await client.post(
             f"{ATLAS_API_BASE}/model/generateVideo",

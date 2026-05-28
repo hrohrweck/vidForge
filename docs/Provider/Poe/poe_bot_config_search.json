@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://www.youtube.com/watch?v=bQzCHZzLFY0",
+    "name": "Create Stunning AI Images and Videos with Poe - Tutorial & Overview",
+    "snippet": "... models like DALL-E 3, Stable Diffusion, and the new Flux Pro. These models make generating images and animations a breeze. Accessing the ...",
+    "host_name": "www.youtube.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/prompt-bots/best-practices-image-generation-bots",
+    "name": "Best practices for image generation prompts | Poe Creator Platform",
+    "snippet": "You can build image generation prompt bots on top of several available models, including: GPT-Image-1.5 · Imagen-4 · FLUX-pro-1.1 · DALL-E-3 ...",
+    "host_name": "creator.poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/iOfficeAI/AionUi/wiki/AionUi-Image-Generation-Tool-Model-Configuration-Guide",
+    "name": "AionUi Image Generation Tool Model Configuration Guide - GitHub",
+    "snippet": "Open AionUi → Settings → Tools Configuration → Image Generation Tool. · In model selection, choose models with image generation capabilities from OpenRouter ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.stackademic.com/ai-image-generators-compared-flux-pro-dall-e-3-and-midjourney-7d6898e11d8e",
+    "name": "AI Image Generators Compared: Flux Pro, DALL·E 3, and MidJourney",
+    "snippet": "Among the most prominent are Flux Pro (1.1), DALL·E 3, and MidJourney. Each excels in its own domain: Flux Pro offers speed and advanced API ...",
+    "host_name": "blog.stackademic.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openai.com/index/dall-e-2",
+    "name": "DALL·E 2 | OpenAI",
+    "snippet": "DALL-E 2 can create original, realistic images and art from a text description. It can combine concepts, attributes, and styles.",
+    "host_name": "openai.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://carletontorpin.com/ai/poe-ai-image-generators-stable-diffusion-3-flux-pro",
+    "name": "Poe Ai Image Generators - 'Stable Diffusion 3' + 'Flux Pro'",
+    "snippet": "Poe's platform offers it's users a variety of Ai image generators, including 'cutting-edge' models like Stable Diffusion 3 and FLUX Pro.",
+    "host_name": "carletontorpin.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.instagram.com/reel/DXjOFRPk2DN",
+    "name": "Claude Code didn't build this one — but if you're paying  - Instagram",
+    "snippet": "Image Studio: Access 50+ models like Flux and Midjourney. Switch ... It replaces DALL-E 3 entirely on the API side. Any code in your ...",
+    "host_name": "www.instagram.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://kingy.ai/ai/discover-poe-the-ultimate-hub-for-ai-powered-image-and-video-creation",
+    "name": "Discover Poe: The Ultimate Hub for AI-Powered Image and Video",
+    "snippet": "Poe simplifies access to AI tools, hosting models like DALL-E 3, Stable Diffusion, and the new Flux Pro. These models make generating images and ...",
+    "host_name": "kingy.ai",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=poNZBfX5GDw",
+    "name": "Poe Ai Image Generators - 'Stable Diffusion 3' + 'Flux Pro' - YouTube",
+    "snippet": "... DALL-E Exploration 28:50 - Turbo Testing. ... AI Headshots by Training a Doppleganger Using Flux Image Model.",
+    "host_name": "www.youtube.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/groups/698593531630485/posts/1374781217345043",
+    "name": "Quora quietly launched the Poe developer API. 100+ different AI",
+    "snippet": "When you need image generation... Access DALL-E, Midjourney, or Stable Diffusion. When you need text analysis... Choose Claude, GPT, or Gemini.",
+    "host_name": "www.facebook.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

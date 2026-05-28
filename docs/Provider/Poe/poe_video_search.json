@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/server-bots/parameter-controls",
+    "name": "Parameter Controls | Poe Creator Platform",
+    "snippet": "The aspect ratio control lets users choose from predefined aspect ratios with visual previews for easy comparison—especially useful for image and video ...",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.x.ai/developers/model-capabilities/video/generation",
+    "name": "Video Generation - xAI Docs",
+    "snippet": "The video generation API lets you control the output format of your generated videos. You can specify the duration, aspect ratio, and resolution ...",
+    "host_name": "docs.x.ai",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.dev.runwayml.com/assets/inputs",
+    "name": "API Input Parameters - Runway API",
+    "snippet": "Learn about input parameters for Runway's API. Understand how to format images, videos, text prompts and other inputs for AI generation requests.",
+    "host_name": "docs.dev.runwayml.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ai-sdk.dev/docs/ai-sdk-core/video-generation",
+    "name": "Video Generation - AI SDK Core",
+    "snippet": "The aspect ratio is specified as a string in the format {width}:{height} . Models only support a few aspect ratios, and the supported aspect ratios are ...",
+    "host_name": "ai-sdk.dev",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.litellm.ai/docs/providers/vertex_ai/videos",
+    "name": "Vertex AI Video Generation (Veo) - LiteLLM Docs",
+    "snippet": "Video Generation Parameters​ ; size, parameters.aspectRatio, Converted to 16:9 or 9:16 ; seconds, parameters.durationSeconds, Clip length in seconds ...",
+    "host_name": "docs.litellm.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aimlapi.com/api-references/video-models/kling-ai/v1-standard-image-to-video",
+    "name": "v1-standard/image-to-video - AI/ML API Documentation",
+    "snippet": "A direct link to an online image or a Base64-encoded local image that will serve as the visual base or the first frame for the video.",
+    "host_name": "docs.aimlapi.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.openai.com/api/docs/guides/images-vision",
+    "name": "Images and vision | OpenAI API",
+    "snippet": "Video generation ... When using high input fidelity, we add a set number of tokens based on the image's aspect ratio in addition to the image tokens described ...",
+    "host_name": "developers.openai.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.alibabacloud.com/help/en/model-studio/legacy-image-to-video-by-first-and-last-frame-api-reference",
+    "name": "Wan - image-to-video - first and last frames API reference",
+    "snippet": "The model uses your input image aspect ratio as a baseline and calculates the closest valid resolution based on the resolution setting's pixel ...",
+    "host_name": "www.alibabacloud.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openrouter.ai/docs/guides/overview/multimodal/image-generation",
+    "name": "OpenRouter Image Generation | Complete Documentation",
+    "snippet": "Some image generation models support additional configuration through the image_config parameter. Aspect Ratio. Set image_config.aspect_ratio to request ...",
+    "host_name": "openrouter.ai",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/runway-gen-4-turbo/api",
+    "name": "Runway-Gen-4-Turbo API - Build AI Apps - Poe",
+    "snippet": "Optional parameters: Aspect ratio (16:9, 1:1, 9:16) for landscape/portrait videos. Duration (5, 10) to specify video length in seconds. Full prompting guide ...",
+    "host_name": "poe.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

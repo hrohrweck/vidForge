@@ -37,6 +37,21 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.reset_daily_budgets",
         "schedule": crontab(hour=0, minute=0),
     },
+    "sync-atlascloud-models": {
+        "task": "app.workers.tasks.sync_provider_models",
+        "schedule": crontab(hour=2, minute=0),
+        "args": ("atlascloud",),
+    },
+    "sync-poe-models": {
+        "task": "app.workers.tasks.sync_provider_models",
+        "schedule": crontab(hour=2, minute=30),
+        "args": ("poe",),
+    },
+    "sync-comfyui-models": {
+        "task": "app.workers.tasks.sync_provider_models",
+        "schedule": crontab(hour=3, minute=0),
+        "args": ("comfyui_direct",),
+    },
 }
 
 

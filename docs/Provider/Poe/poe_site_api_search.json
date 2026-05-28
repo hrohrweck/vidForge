@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://creator.poe.com/docs/server-bots/parameter-controls",
+    "name": "Parameter Controls | Poe Creator Platform",
+    "snippet": "Bots calling other Bots through the Bot Query API can include arbitrary parameters in the parameter dictionary. ... Optional default selected aspect ratio ...\nThe aspect ratio control lets users choose from predefined aspect ratios with visual previews for easy comparison—especially useful for image and video ...",
+    "host_name": "creator.poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/runway-gen-4-turbo/api",
+    "name": "Runway-Gen-4-Turbo API - Build AI Apps - Poe",
+    "snippet": "Optional parameters: Aspect ratio (16:9, 1:1, 9:16) for landscape ... api.poe.com/v1\", ) chat = client.chat.completions.create( model = \"runway ...\n... image inputs for ... Optional parameters: Aspect ratio (16:9, 1:1, 9:16) for landscape/portrait videos. Duration (5, 10) to specify video length in seconds.",
+    "host_name": "poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/explore",
+    "name": "Explore - Poe",
+    "snippet": "Optimized for multi-step tool use and subagent orchestration through platforms like Google Antigravity and the Gemini API. Serves the latest gemini-3.5-flash ...\nIt supports generating, editing, restyling, and combining images attached to the latest user query. Optional Parameters: Set aspect ratio, with options 3:2 ...",
+    "host_name": "poe.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/Kling-O3",
+    "name": "Kling-O3 - Poe",
+    "snippet": "... video, no images This bot supports optional parameters for additional customization ... API · Send feedback · Download app. Poe - Fast AI Chat. Chat with the best ...\nKling O3 is a versatile AI video generation model capable of creating high-quality videos in Standard or Pro modes, with resolution varying by aspect ratio.",
+    "host_name": "poe.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/google",
+    "name": "Google - Poe",
+    "snippet": "... API. Serves the latest gemini-3.5-flash release. OFFICIAL. Bot image for ... Optional parameters: Aspect ratio of your image (1:1, 16:9, 9:16, 4:3, 3:4) ...",
+    "host_name": "poe.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/external-applications/openai-compatible-api",
+    "name": "OpenAI Compatible API | Poe Creator Platform",
+    "snippet": "The Poe API provides access to hundreds of AI models and bots through a single OpenAI-compatible endpoint. Switch between frontier models from all major ...\nCustom parameters (aspect, size, etc.) - You can pass custom bot parameters through the OpenAI SDK using the extra_body parameter. For example: extra_body ...",
+    "host_name": "creator.poe.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/Runway-Gen-4.5",
+    "name": "Runway-Gen-4.5 - Poe",
+    "snippet": "API · Send feedback · Download app. Poe - Fast AI Chat. Chat with the best AI ... Optional parameters: Set aspect ratio. Select from (21:9, 16:9, 4:3, 1:1, 3 ...",
+    "host_name": "poe.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/Bytedance",
+    "name": "Bytedance - Poe",
+    "snippet": "API · Send feedback · Download app. Poe - Fast AI Chat. Chat with the best AI ... Optional parameters: Aspect ratio (available values: `21:9`, `16:9`, `4:3 ...",
+    "host_name": "poe.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/fal",
+    "name": "fal - Poe",
+    "snippet": "Optional parameters: Set aspect ratio. Supported aspect ratios - 16:9, 4:3 ... Optional parameters: Set Duration. Select from (5 seconds, 10 seconds) ...",
+    "host_name": "poe.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://creator.poe.com/docs/external-applications/external-application-guide",
+    "name": "External Application Guide | Poe Creator Platform",
+    "snippet": "Note: When using the Poe client UI, parameters like aspect ratio or quality can be specified using flags (e.g., --aspect_ratio 9:16 ). When using the API, these ...",
+    "host_name": "creator.poe.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

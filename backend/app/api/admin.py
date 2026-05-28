@@ -14,12 +14,14 @@ from app.database import (
     Group,
     GroupPermission,
     Job,
+    ModelConfig,
     Permission,
     Template,
     User,
     UserGroup,
     get_db,
 )
+from app.services.model_config_service import ModelConfigService
 from app.services.app_settings import get_setting, set_setting
 from app.services.permissions import get_user_permissions
 
@@ -644,3 +646,143 @@ async def trigger_avatar_cleanup(
 
     cleanup_orphaned_avatars.delay()
     return {"status": "cleanup_queued"}
+
+
+# === Model Config Management ===
+
+
+class ModelConfigResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    provider_id: UUID
+    model_id: str
+    provider_model_id: str
+    display_name: str
+    modality: str
+    prompt_format: str
+    endpoint_type: str
+    parameter_map: dict | None = None
+    extra_params: dict | None = None
+    capabilities: dict | None = None
+    constraints: dict | None = None
+    cost_config: dict | None = None
+    comfyui_workflow: str | None = None
+    is_active: bool
+    is_deprecated: bool
+    last_synced_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ModelConfigCreate(BaseModel):
+    provider_id: UUID
+    model_id: str
+    provider_model_id: str
+    display_name: str
+    modality: str
+    prompt_format: str = "string"
+    endpoint_type: str
+    parameter_map: dict | None = None
+    extra_params: dict | None = None
+    capabilities: dict | None = None
+    constraints: dict | None = None
+    cost_config: dict | None = None
+    comfyui_workflow: str | None = None
+
+
+class ModelConfigUpdate(BaseModel):
+    display_name: str | None = None
+    modality: str | None = None
+    prompt_format: str | None = None
+    endpoint_type: str | None = None
+    parameter_map: dict | None = None
+    extra_params: dict | None = None
+    capabilities: dict | None = None
+    constraints: dict | None = None
+    cost_config: dict | None = None
+    comfyui_workflow: str | None = None
+    is_active: bool | None = None
+    is_deprecated: bool | None = None
+
+
+@router.get("/model-configs", response_model=list[ModelConfigResponse])
+async def list_model_configs(
+    provider_id: UUID | None = None,
+    modality: str | None = None,
+    is_active: bool | None = None,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> list[ModelConfig]:
+    stmt = select(ModelConfig)
+
+    if provider_id is not None:
+        stmt = stmt.where(ModelConfig.provider_id == provider_id)
+    if modality is not None:
+        stmt = stmt.where(ModelConfig.modality == modality)
+    if is_active is not None:
+        stmt = stmt.where(ModelConfig.is_active == is_active)
+
+    stmt = stmt.order_by(ModelConfig.modality, ModelConfig.display_name)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post("/model-configs", status_code=201, response_model=ModelConfigResponse)
+async def create_model_config(
+    data: ModelConfigCreate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> ModelConfig:
+    create_data = data.model_dump()
+    config = await ModelConfigService.create(db, create_data)
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+@router.put("/model-configs/{config_id}", response_model=ModelConfigResponse)
+async def update_model_config(
+    config_id: UUID,
+    data: ModelConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> ModelConfig:
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == config_id))
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Model config not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    config = await ModelConfigService.update(
+        db, config.model_id, config.provider_id, update_data
+    )
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+@router.delete("/model-configs/{config_id}", status_code=204)
+async def delete_model_config(
+    config_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> None:
+    result = await db.execute(select(ModelConfig).where(ModelConfig.id == config_id))
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Model config not found")
+
+    await ModelConfigService.delete(db, config.model_id, config.provider_id)
+    await db.commit()
+
+
+@router.post("/model-configs/{provider}/sync", status_code=202)
+async def sync_provider_models(
+    provider: str,
+    admin: User = Depends(require_admin),
+) -> dict[str, str]:
+    from app.workers.tasks import sync_provider_models_task
+
+    sync_provider_models_task.delay(provider)
+    return {"status": "syncing", "provider": provider}

@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://github.com/topics/muapi",
+    "name": "muapi · GitHub Topics",
+    "snippet": "Open-source alternative to AI video platforms — Free AI image & video generation studio with 200+ models (Flux, Midjourney, Kling, Sora, ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "May 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.github.com/en/rest?apiVersion=2026-03-10",
+    "name": "GitHub REST API documentation - GitHub Docs",
+    "snippet": "Create integrations, retrieve data, and automate your workflows with the GitHub REST API.",
+    "host_name": "docs.github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/SamurAIGPT/muapi-cli",
+    "name": "Official CLI for muapi.ai — generate images, videos & audio  - GitHub",
+    "snippet": "Official command-line interface for muapi.ai — generate images, videos, and audio directly from your terminal.",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "May 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/muapi-ai",
+    "name": "muapi-ai · GitHub Topics",
+    "snippet": "Python wrapper for ByteDance's Seedance 2.0 API — realistic human faces, 1080p video, less censorship, Text-to-Video, Image-to-Video, and consistent character ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=-kFyPaHNgXo",
+    "name": "GitHub API Tutorial | 2023 - YouTube",
+    "snippet": "In this GitHub API Tutorial, I show you step by step how to make API calls to the GitHub API! Download GitHub API Postman Collection for ...",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://anil-matcha-open-higgsfield-ai.mintlify.app/quickstart",
+    "name": "Quickstart - Open Higgsfield AI",
+    "snippet": "1. Enter your API key. Paste your Muapi API key (starts with sk- ) into the input field. ; 2. Initialize the studio. Click the “Initialize Studio” button to save ...",
+    "host_name": "anil-matcha-open-higgsfield-ai.mintlify.app",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/SamurAIGPT/muapi-comfyui",
+    "name": "MuAPI ComfyUI Nodes - GitHub",
+    "snippet": "MuAPI is a generative media API aggregator giving you access to 100+ cutting-edge models: Seedance 2.0, Kling, Veo3, Flux, HiDream, GPT-image-1.5, Imagen4, and ...",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/analytics-vidhya/getting-started-with-github-api-dc7057e2834d",
+    "name": "Getting Started with Github API. REST API v3 using Python - Medium",
+    "snippet": "In this article, learn how to use Github API to create, delete a repository; create an issue, comment, and close an issue and many more ...",
+    "host_name": "medium.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=OvfLavRD1Os",
+    "name": "[Tutorial] - How to use GitHub REST API for Beginners - YouTube",
+    "snippet": "... GitHub REST API Documentation link: https://docs.github.com/en/rest/guides/getting-started-with-the-rest-api #github #restapi #api Want ...",
+    "host_name": "www.youtube.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/muapi?o=asc&s=forks",
+    "name": "muapi · GitHub Topics",
+    "snippet": "Python wrapper for HappyHorse 1.0 API by Alibaba — #1 ranked AI video generator. Generate native 1080p HD videos with integrated audio from text and images.",
+    "host_name": "github.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

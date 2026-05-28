@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://poe.com/Kling-O3",
+    "name": "Kling-O3 - Poe",
+    "snippet": "Kling O3 is a versatile AI video generation model capable of creating high-quality videos in Standard or Pro modes, with resolution varying by aspect ratio.",
+    "host_name": "poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.atlascloud.ai/models/kwaivgi/kling-video-o3-std/reference-to-video",
+    "name": "Kling Video O3 Std Reference-to-Video API by Kuaishou - Atlas Cloud",
+    "snippet": "Set duration — choose any length from 3 to 15 seconds. Choose aspect ratio — select the format that fits your platform. Add reference video (optional) — provide ...",
+    "host_name": "www.atlascloud.ai",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.leonardo.ai/docs/kling-o3",
+    "name": "Kling O3 - Quick Start Guide - Leonardo.Ai",
+    "snippet": "Sets the width of the video in pixels. Dimensions. The API accepts width and height parameters in the following aspect ratio combinations: Resolution, Aspect ...",
+    "host_name": "docs.leonardo.ai",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://fal.ai/models/fal-ai/kling-video/o3/standard/image-to-video/api",
+    "name": "Kling O3 [Pro] Image to Video API Docs - Fal.ai",
+    "snippet": "The duration of the generated video in seconds Default value: \"5\" ... The aspect ratio of the generated video frame Default value: \"16:9\". Possible ...",
+    "host_name": "fal.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poyo.ai/models/kling-o3-api",
+    "name": "Affordable Kling O3 API - Standard, Pro, and 4K AI Video Generation",
+    "snippet": "PoYo supports 3-15 second duration control, aspect ratios for landscape, portrait, and square output, and an optional sound toggle for single- ...",
+    "host_name": "poyo.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

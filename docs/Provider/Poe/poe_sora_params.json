@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://poe.com/sora-2-pro/api",
+    "name": "Sora-2-Pro API - Build AI Apps - Poe",
+    "snippet": "... Optional parameters: - Duration. Video output duration in seconds (options: 4, 8, 12) - Size. Resolution of the output video. Options: [Landscape] ...",
+    "host_name": "poe.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/Sora-2-Pro",
+    "name": "Sora-2-Pro - Poe",
+    "snippet": "... Optional parameters: - Duration. Video output duration in seconds (options: 4, 8, 12) - Size. Resolution of the output video. Options: [Landscape] ...",
+    "host_name": "poe.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.openai.com/api/docs/guides/video-generation",
+    "name": "Video generation with Sora | OpenAI API",
+    "snippet": "Generate videos up to 20 seconds when you need longer beats, fuller scenes, or fuller spots. Use sora-2-pro for higher-resolution exports in 1920x1080 or ...",
+    "host_name": "developers.openai.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://poe.com/sora-2",
+    "name": "Sora-2 - Poe",
+    "snippet": "Optional parameters: - Set Duration. Select from (4 seconds, 8 seconds or 12 seconds) to specify video length in seconds. Set to 4 seconds as default. - Set ...",
+    "host_name": "poe.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=xf_Y4eMuklY",
+    "name": "Sora 2 API Deep Dive | On The Edge #6 - YouTube",
+    "snippet": "Sora 2 API Deep Dive | On The Edge #6 Become a YouTube Member to Support Me: https://www.youtube.com/c/AllAboutAI/join My AI Video Course: ...",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -3,7 +3,6 @@ import { cleanup } from '@testing-library/react'
 import { server } from './mocks/server'
 import '@testing-library/jest-dom/vitest'
 
-// Ensure localStorage is available for Zustand persist middleware
 if (typeof globalThis.localStorage === 'undefined') {
   const store: Record<string, string> = {}
   globalThis.localStorage = {
@@ -14,6 +13,14 @@ if (typeof globalThis.localStorage === 'undefined') {
     get length() { return Object.keys(store).length },
     key: (index: number) => Object.keys(store)[index] ?? null,
   } as Storage
+}
+
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false
+}
+
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'warn' }))

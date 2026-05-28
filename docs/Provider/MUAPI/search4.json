@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://muapi.ai",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "It delivers intelligent, context-aware responses for creative writing, summarization, dialogue, code generation, and automation — all at low latency and cost.",
+    "host_name": "muapi.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/agents",
+    "name": "AI Agents | Muapi Intelligent Assistants",
+    "snippet": "Interact with specialized AI agents designed to help you architect and execute advanced workflows.",
+    "host_name": "muapi.ai",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/playground",
+    "name": "Explore AI Models | Muapi Playground",
+    "snippet": "ResourcesDocsDiscord. ✨ Gemini Omni is Now Available on MuAPI! New Releasev1. ✨ Gemini Omni is Now Available on MuAPI! Experience next-generation multimodal ...",
+    "host_name": "muapi.ai",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/blog",
+    "name": "Blog | Muapi AI Insights",
+    "snippet": "Stay updated with the latest in AI image and video generation. Tutorials, news, and insights from the Muapi team.",
+    "host_name": "muapi.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/models",
+    "name": "LoRA Models | Muapi Custom AI",
+    "snippet": "The AI Video Upscaler is a powerful tool designed to enhance the resolution and quality of videos. Whether you're working with low-resolution videos that need a ...",
+    "host_name": "muapi.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/workflow",
+    "name": "AI Workflows | Muapi Builder",
+    "snippet": "It enables realistic motion, synchronized audio-video, cinematic camera moves and stylized visuals. Ideal for your timeline-based video interface: you supply a ...",
+    "host_name": "muapi.ai",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/login",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "Muapi is a high-performance AI Image and Video generation API platform. Build advanced AI workflows effortlessly.",
+    "host_name": "muapi.ai",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/signup",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "Muapi is a high-performance AI Image and Video generation API platform. Build advanced AI workflows effortlessly.",
+    "host_name": "muapi.ai",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/assistant",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "Muapi is a high-performance AI Image and Video generation API platform. Build advanced AI workflows effortlessly.",
+    "host_name": "muapi.ai",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/docs/vfx",
+    "name": "vfx - Muapi | AI",
+    "snippet": "The VFX model enables cinematic, high-impact visual effects to be applied to videos or images. It is designed to simulate large-scale visual effects such as ...",
+    "host_name": "muapi.ai",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

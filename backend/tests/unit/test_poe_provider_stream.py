@@ -188,7 +188,7 @@ async def test_chat_stream_raises_llm_error_on_streamed_error():
         await anext(stream)
 
 
-def test_get_text_models_marks_tool_support_from_allowlist():
+def test_get_text_models_filters_by_output_modalities_without_config():
     provider = PoeProvider(uuid4(), {"api_key": "test-token"})
     provider._available_models = [
         {"id": "GPT-5.4", "architecture": {"output_modalities": ["text"]}},
@@ -202,7 +202,7 @@ def test_get_text_models_marks_tool_support_from_allowlist():
         {
             "id": "GPT-5.4",
             "architecture": {"output_modalities": ["text"]},
-            "supports_tools": True,
+            "supports_tools": False,
         },
         {
             "id": "Some-Text-Bot",

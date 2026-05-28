@@ -16,6 +16,7 @@ import Avatars from './pages/Avatars'
 import { MediaLibrary } from './pages/MediaLibrary'
 import { AssetDetail } from './pages/AssetDetail'
 import MCPServersPage from './pages/MCPServersPage'
+import ModelManagement from './pages/admin/ModelManagement'
 import { ThemeProvider } from './components/ThemeProvider'
 
 function App() {
@@ -49,6 +50,7 @@ function App() {
             <Route path="admin/providers" element={<Providers />} />
             <Route path="admin/mcp-servers" element={<MCPServersPage />} />
             <Route path="admin/groups" element={<Groups />} />
+            <Route path="admin/models" element={<ModelManagement />} />
             <Route path="media" element={<MediaLibrary />} />
             <Route path="media/asset/:id" element={<AssetDetail />} />
             <Route path="avatars" element={<Avatars />} />

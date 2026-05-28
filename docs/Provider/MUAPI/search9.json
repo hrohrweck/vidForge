@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://muapi.ai",
+    "name": "Muapi | AI Image & Video API Platform",
+    "snippet": "Muapi is a high-performance AI Image and Video generation API platform. Build advanced AI workflows effortlessly.",
+    "host_name": "muapi.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://muapi.ai/docs/introduction",
+    "name": "MuAPI Documentation",
+    "snippet": "High-Performance API Provider: Instant access to SOTA models for image, video, and audio generation with optimized inference. Multimodal AI Orchestration: ...",
+    "host_name": "muapi.ai",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/SamurAIGPT/muapi-cli",
+    "name": "Official CLI for muapi.ai — generate images, videos & audio  - GitHub",
+    "snippet": "Official command-line interface for muapi.ai — generate images, videos, and audio directly from your terminal.",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "May 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://anil-matcha-open-higgsfield-ai.mintlify.app/guides/api-configuration",
+    "name": "API Configuration - Open Higgsfield AI",
+    "snippet": "API Configuration. Set up and manage your Muapi.ai API key for image and video generation. Documentation Index. Fetch the complete documentation index at ...",
+    "host_name": "anil-matcha-open-higgsfield-ai.mintlify.app",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://theresanaiforthat.com/ai/muapi",
+    "name": "Muapi v1.1.0 - AI Tool For Content",
+    "snippet": "Overview. Muapi is an AI image and video API platform where users can generate videos and animate images from text prompts.",
+    "host_name": "theresanaiforthat.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://topfreeaitools.com/ai/muapi",
+    "name": "Muapi - TopFreeAITools",
+    "snippet": "Muapi is an AI platform that provides tools for accelerating AI image and video generation. It offers advanced features like AI video effects, VFX, ...",
+    "host_name": "topfreeaitools.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aidoos.com/products/muapi/?srsltid=AfmBOorEFnL6GPwpawfayKgujtJEhE3eMhpEOnn77XrNdec4DoJSWswR",
+    "name": "Muapi - AiDOOS",
+    "snippet": "Muapi is an AI-powered API platform that transforms text prompts into high-quality images and videos, enabling automated visual content creation at scale.",
+    "host_name": "aidoos.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://surgent.dev/inspirations/muapi",
+    "name": "Muapi — Revenue, Growth & Stats - Surgent.dev",
+    "snippet": "MuAPI is a serverless AI API aggregator and provider that allows developers to access over 100 state-of-the-art AI models for image, video, ...",
+    "host_name": "surgent.dev",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@anilmatcha/nano-banana-api-on-muapi-cheapest-api-with-exclusive-multi-aspect-ratio-support-7140121494ae",
+    "name": "Nano-Banana API on MuAPI: Cheapest API with Exclusive Multi",
+    "snippet": "Why $0.03 per Image Makes MuAPI the Cheapest Option. Competing API providers typically charge around $0.039 per image, including Google's Gemini ...",
+    "host_name": "medium.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://lyricvideo.studio/muapi",
+    "name": "MuApi - Lyric Video Studio",
+    "snippet": "MuApi is the latest and greatest plugin in Lyric Video Studio. It's API aggregator, just like Fal AI. Seedance 2 is implemented in this plugin.",
+    "host_name": "lyricvideo.studio",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]
