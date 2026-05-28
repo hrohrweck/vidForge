@@ -25,8 +25,10 @@ def upgrade() -> None:
     if not result.fetchone():
         conn.execute(
             text(
-                "INSERT INTO providers (id, name, provider_type, config, is_active, created_at) "
-                "VALUES (:id, 'Ollama (Local)', 'ollama', :config, true, NOW())"
+                "INSERT INTO providers (id, name, provider_type, config, is_active, "
+                "daily_budget_limit, current_daily_spend, spend_reset_at, priority, created_at, updated_at) "
+                "VALUES (:id, 'Ollama (Local)', 'ollama', :config, true, "
+                "NULL, 0, NOW(), 0, NOW(), NOW())"
             ),
             {"id": str(uuid4()), "config": '{"base_url": "http://ollama:11434"}'},
         )
@@ -34,7 +36,7 @@ def upgrade() -> None:
     conn.execute(
         text(
             "DELETE FROM model_configs WHERE model_id IN ('qwen3.6:35b', 'llama3.3') "
-            "AND endpoint_type = 'comfyui'"
+            "AND endpoint_type = 'comfyui_workflow'"
         ),
     )
 
