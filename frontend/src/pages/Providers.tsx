@@ -17,7 +17,7 @@ import {
 interface ProviderFormState {
   id: string | null
   name: string
-  providerType: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud'
+  providerType: 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud' | 'ollama'
   comfyuiUrl: string
   maxConcurrentJobs: string
   endpointId: string
@@ -593,7 +593,7 @@ export default function Providers() {
                   onChange={(e) =>
                     setFormState((prev) => ({
                       ...prev,
-                      providerType: e.target.value as 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud',
+                      providerType: e.target.value as 'comfyui_direct' | 'runpod' | 'poe' | 'atlascloud' | 'ollama',
                       apiKey: (e.target.value === 'poe' || e.target.value === 'atlascloud') ? '' : prev.apiKey,
                     }))
                   }
@@ -602,6 +602,7 @@ export default function Providers() {
                   <option value="runpod">RunPod</option>
                   <option value="poe">Poe</option>
                   <option value="atlascloud">AtlasCloud</option>
+                  <option value="ollama">Ollama (Local)</option>
                 </select>
               </div>
 
