@@ -1015,24 +1015,47 @@ async def _sync_atlascloud_models(provider) -> list[dict]:
 
 
 async def _sync_poe_models(provider) -> list[dict]:
-    """Fetch available models from the Poe API and extract compute-point pricing.
-
-    Pricing is embedded in the API response as a compute_points field.
-    """
-    logger.info(
-        "[Sync] Poe model discovery not yet implemented (provider %s)",
-        provider.id,
-    )
-    discovered: list[dict] = []
-    # TODO: Implement real API call to Poe /v1/models endpoint.
-    # When implemented, discovered will be populated and the loop below
-    # will attach cost_config to each model.
-    for model_data in discovered:
-        model_data["cost_config"] = {
-            "compute_points": model_data.get("compute_points", 0),
-            "currency": "compute_points",
-        }
-    return discovered
+    """Fetch available models from Poe's /v1/models endpoint."""
+    from app.services.providers.poe import PoeProvider
+    
+    instance = PoeProvider(provider.id, provider.config)
+    try:
+        await instance.initialize(provider.config)
+        if not instance.client:
+            return []
+        
+        resp = await instance.client.get(
+            "https://api.poe.com/v1/models",
+            headers={"Authorization": f"Bearer {instance.api_key}"},
+        )
+        if resp.status_code != 200:
+            return []
+        
+        data = resp.json()
+        models = data.get("data", data.get("models", []))
+        
+        discovered = []
+        for m in models:
+            model_id = m.get("id", "")
+            if not model_id:
+                continue
+            discovered.append({
+                "model_id": model_id,
+                "provider_model_id": model_id,
+                "display_name": model_id,
+                "modality": "text",
+                "endpoint_type": "chat_completions",
+                "capabilities": {"supports_chat": True},
+                "cost_config": {
+                    "compute_points": m.get("compute_points", 0),
+                    "currency": "compute_points",
+                },
+            })
+        return discovered
+    except Exception:
+        return []
+    finally:
+        await instance.shutdown()
 
 
 def _sync_comfyui_models() -> list[dict]:
