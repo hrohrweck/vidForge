@@ -969,7 +969,7 @@ class QuickGenerateResponse(BaseModel):
     status: str = "queued"
 
 
-@router.post("/media/generate", status_code=202)
+@router.post("/generate", status_code=202)
 async def quick_generate_media(
     req: QuickGenerateRequest,
     current_user: User = Depends(get_current_user),
