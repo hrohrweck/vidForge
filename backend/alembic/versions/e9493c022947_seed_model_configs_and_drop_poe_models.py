@@ -274,7 +274,7 @@ def upgrade() -> None:
     if poe_uuid:
         _seed_from_poe_models(conn, poe_uuid)
 
-    op.drop_index("ix_poe_models_provider_id", "poe_models")
+    op.execute("DROP INDEX IF EXISTS ix_poe_models_provider_id")
     op.drop_table("poe_models")
 
 
