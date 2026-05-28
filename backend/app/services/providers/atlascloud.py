@@ -234,7 +234,9 @@ class AtlasCloudProvider(ComfyUIProvider):
         if not client:
             raise RuntimeError("Provider not initialized")
 
-        payload: dict[str, Any] = {"model": model, "prompt": [prompt]}
+        # Some models (Kling, WAN) expect prompt as array, others (Flux) as string
+        prompt_val = [prompt] if any(m in model.lower() for m in ("kling", "wan", "spicy", "seedance", "vidu")) else prompt
+        payload: dict[str, Any] = {"model": model, "prompt": prompt_val}
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
 
