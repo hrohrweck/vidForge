@@ -62,6 +62,11 @@ async def get_provider_instance(
         instance = RunPodProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
+    elif provider.provider_type == "ollama":
+        from app.services.providers.ollama import OllamaProvider
+        instance = OllamaProvider(provider.id, provider.config)
+        await instance.initialize(provider.config)
+        return instance
     else:
         raise ValueError(f"Unknown provider type: {provider.provider_type}")
 

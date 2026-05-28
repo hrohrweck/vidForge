@@ -961,6 +961,8 @@ async def _discover_provider_models(provider) -> list[dict]:
         return await _sync_poe_models(provider)
     elif provider.provider_type == "comfyui_direct":
         return _sync_comfyui_models()
+    elif provider.provider_type == "ollama":
+        return await _sync_ollama_models(provider)
     else:
         logger.warning(
             "[Sync] No model discovery for provider type '%s' (provider %s)",
@@ -1032,17 +1034,11 @@ def _sync_comfyui_models() -> list[dict]:
         {"id": "ltx2.3-fast", "name": "LTX 2.3 Fast",
          "capabilities": ["text-to-video"]},
     ]
-    _AVAILABLE_TEXT_MODELS: list[dict] = [
-        {"id": "qwen3.6:35b", "name": "Qwen 3.6 35B", "capabilities": ["chat"]},
-        {"id": "llama3.3", "name": "Llama 3.3", "capabilities": ["chat"]},
-    ]
-
     discovered: list[dict] = []
 
     for source_list, modality in (
         (_AVAILABLE_IMAGE_MODELS, "image"),
         (_AVAILABLE_VIDEO_MODELS, "video"),
-        (_AVAILABLE_TEXT_MODELS, "text"),
     ):
         for m in source_list:
             discovered.append({
@@ -1063,6 +1059,39 @@ def _sync_comfyui_models() -> list[dict]:
             })
 
     return discovered
+
+
+async def _sync_ollama_models(provider) -> list[dict]:
+    """Fetch available models from the local Ollama instance.
+
+    Queries Ollama for installed models and returns ModelConfig-ready dicts.
+    """
+    from app.services.model_manager import ModelManager
+
+    mgr = ModelManager()
+    try:
+        models = await mgr.list_available_models()
+    finally:
+        await mgr.close()
+
+    return [
+        {
+            "model_id": name,
+            "provider_model_id": name,
+            "display_name": name.removesuffix(":latest"),
+            "modality": "text",
+            "endpoint_type": "chat_completions",
+            "capabilities": {"supports_chat": True},
+            "cost_config": {
+                "cost": 0,
+                "currency": "USD",
+                "note": "local_generation",
+            },
+            "is_deprecated": False,
+            "is_active": True,
+        }
+        for name in models
+    ]
 
 
 # ======================================================================
