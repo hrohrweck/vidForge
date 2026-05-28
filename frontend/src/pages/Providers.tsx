@@ -822,6 +822,27 @@ export default function Providers() {
                     <PoeModelsSection providerId={formState.id} />
                   )}
                 </>
+              ) : formState.providerType === 'ollama' ? (
+                <>
+                  <div className="space-y-2">
+                    <label htmlFor="ollama-url" className="text-sm font-medium">
+                      Ollama Base URL
+                    </label>
+                    <input
+                      id="ollama-url"
+                      type="text"
+                      className="w-full border rounded-md px-3 py-2"
+                      value={formState.comfyuiUrl}
+                      placeholder="http://ollama:11434"
+                      onChange={(e) =>
+                        setFormState((prev) => ({ ...prev, comfyuiUrl: e.target.value }))
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Default: http://ollama:11434 (Docker service name)
+                    </p>
+                  </div>
+                </>
               ) : null}
 
               <div className="grid gap-3 md:grid-cols-2">

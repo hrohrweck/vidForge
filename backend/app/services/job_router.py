@@ -51,6 +51,9 @@ class JobRouter:
             instance = AtlasCloudProvider(provider.id, provider.config)
         elif provider.provider_type == "poe":
             instance = PoeProvider(provider.id, provider.config)
+        elif provider.provider_type == "ollama":
+            from app.services.providers.ollama import OllamaProvider
+            instance = OllamaProvider(provider.id, provider.config)
         else:
             raise JobRouterError(f"Unknown provider type: {provider.provider_type}")
 
