@@ -65,15 +65,19 @@ function parseThinking(content: string): { thinking: string; answer: string } {
     }
   }
 
-  // Inline thinking (GLM / Poe / OpenAI reasoning models)
-  // GLM often starts with "Thinking..." followed by blockquote (> ) reasoning
-  // and then the plain-text answer. Split where the blockquotes end.
+  // Inline thinking (GLM / Poe / OpenAI / Claude reasoning models)
+  // Handles: "Thinking\n[plain text]\n\n[answer]" and blockquoted reasoning
   if (content.startsWith('Thinking')) {
     const lines = content.split('\n')
     let splitIdx = 0
     let inReasoning = false
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]
+      // Stop at <think> tags — those are handled by the tag parser
+      if (line.includes('<think>') || line.includes('</think>')) {
+        splitIdx = i
+        break
+      }
       if (line.startsWith('>') || line.trim() === '') {
         inReasoning = true
         splitIdx = i + 1
@@ -90,6 +94,8 @@ function parseThinking(content: string): { thinking: string; answer: string } {
         return { thinking, answer }
       }
     }
+    // If no clear split found, treat entire content after header as thinking
+    // (the <think> tag parser above will further refine)
   }
 
   // Look for generation markers using plain string search
