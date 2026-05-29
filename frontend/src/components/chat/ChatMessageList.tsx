@@ -35,6 +35,17 @@ function parseThinking(content: string): { thinking: string; answer: string } {
   // <think>...</think> (DeepSeek / Ollama format)
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
   if (thinkMatch) {
+    // Detect per-token think blocks (3+ tags = many small blocks)
+    const thinkTagCount = (content.match(/<think>/g) || []).length
+    if (thinkTagCount >= 3) {
+      // Many think blocks — extract entire region between first <think> and last </think>
+      const firstThink = content.indexOf('<think>')
+      const lastClose = content.lastIndexOf('</think>')
+      const thinking = content.slice(firstThink + 7, lastClose).replace(/<\/?think>/g, '').trim()
+      const answer = content.slice(lastClose + 8).trim()
+      return { thinking, answer }
+    }
+    
     const before = content.slice(0, thinkMatch.index)
     const after = content.slice(thinkMatch.index! + thinkMatch[0].length)
     return {
