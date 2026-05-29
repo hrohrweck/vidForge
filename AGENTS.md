@@ -6,6 +6,10 @@ This file provides guidance for AI agents working on the VidForge project.
 
 VidForge is a web application for automated social media video generation using local AI models. It targets AMD R9 AI HX470 hardware with Radeon 890M iGPU and 128GB RAM.
 
+## Development Guidelines
+
+- **Keep documentation current**: After any architectural change, new feature, or significant refactoring, update the relevant documentation in `docs/`. If a pattern introduced in your changes is reusable (e.g., a new provider interface, a sync function, a normalization utility), document it so future agents can follow the same pattern.
+
 ## Technology Stack
 
 - **Frontend**: React + TypeScript + Vite
