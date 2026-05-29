@@ -664,7 +664,7 @@ class ModelConfigResponse(BaseModel):
     endpoint_type: str
     parameter_map: dict | None = None
     extra_params: dict | None = None
-    capabilities: dict | None = None
+    capabilities: dict | list | None = None
     constraints: dict | None = None
     cost_config: dict | None = None
     comfyui_workflow: str | None = None
@@ -685,7 +685,7 @@ class ModelConfigCreate(BaseModel):
     endpoint_type: str
     parameter_map: dict | None = None
     extra_params: dict | None = None
-    capabilities: dict | None = None
+    capabilities: dict | list | None = None
     constraints: dict | None = None
     cost_config: dict | None = None
     comfyui_workflow: str | None = None
@@ -698,7 +698,7 @@ class ModelConfigUpdate(BaseModel):
     endpoint_type: str | None = None
     parameter_map: dict | None = None
     extra_params: dict | None = None
-    capabilities: dict | None = None
+    capabilities: dict | list | None = None
     constraints: dict | None = None
     cost_config: dict | None = None
     comfyui_workflow: str | None = None
