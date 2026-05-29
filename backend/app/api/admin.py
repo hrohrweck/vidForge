@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.config import get_settings
@@ -723,7 +724,7 @@ async def list_model_configs(
     if is_active is not None:
         stmt = stmt.where(ModelConfig.is_active == is_active)
 
-    stmt = stmt.order_by(ModelConfig.modality, ModelConfig.display_name)
+        stmt = stmt.options(selectinload(ModelConfig.provider)).order_by(ModelConfig.modality, ModelConfig.display_name)
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
