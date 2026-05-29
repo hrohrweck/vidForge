@@ -24,7 +24,7 @@ def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
         else:
             caps.update({"accepts_text": True, "outputs_image": True})
     elif atype == "video":
-        if "image-to-video" in model_id or "/i2v" in model_id:
+        if "image-to-video" in model_id or "/i2v" in model_id or "start-end-frame-to-video" in model_id:
             caps.update({"accepts_image": True, "outputs_video": True})
         elif "reference-to-video" in model_id:
             caps.update({"accepts_image": True, "accepts_video": True, "outputs_video": True})
