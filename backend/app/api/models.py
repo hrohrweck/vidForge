@@ -20,6 +20,33 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
     """Convert a ModelConfig ORM object to the legacy API response format."""
     constraints = m.constraints or {}
     cost_config = m.cost_config or None
+
+    # Ensure capabilities have proper accepts_/outputs_ keys based on modality
+    caps = m.capabilities
+    has_keys: bool
+    if isinstance(caps, list):
+        has_keys = False
+    elif isinstance(caps, dict):
+        has_keys = any(k.startswith(("accepts_", "outputs_")) for k in caps)
+    else:
+        has_keys = False
+
+    if not has_keys:
+        modality = m.modality
+        inferred: dict[str, bool] = {}
+        if modality == "image":
+            inferred = {"accepts_text": True, "outputs_image": True}
+        elif modality == "video":
+            inferred = {"accepts_text": True, "outputs_video": True}
+        elif modality == "text":
+            inferred = {"accepts_text": True, "outputs_text": True}
+        # Merge with existing caps if dict (preserve non-standard keys)
+        if isinstance(caps, dict):
+            inferred.update(
+                {k: v for k, v in caps.items() if not k.startswith(("accepts_", "outputs_"))}
+            )
+        caps = inferred
+
     return {
         "id": m.model_id,
         "name": m.model_id,
@@ -28,7 +55,7 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
         "provider_id": str(m.provider_id) if m.provider_id else None,
         "provider_type": m.provider.provider_type if m.provider else "local",
         "modality": m.modality,
-        "capabilities": m.capabilities or [],
+        "capabilities": caps or [],
         "max_duration": constraints.get("max_duration"),
         "max_resolution": constraints.get("max_resolution"),
         "default_steps": constraints.get("default_steps"),
