@@ -65,9 +65,44 @@ When adding a new provider, complete ALL of these steps:
    - Models with `is_active=true` automatically appear in model selection dropdowns
 
 7. **Add sync task** — `backend/app/workers/tasks.py`
-   - Create `_sync_yourprovider_models(provider)` function
-   - Call it from the `sync_provider_models` Celery task dispatch
-   - Add to Celery beat schedule for periodic auto-sync
+   - Create `_sync_yourprovider_models(provider)` function returning `list[dict]`
+   - Each dict: `model_id`, `provider_model_id`, `display_name`, `modality`, `endpoint_type`
+   - Add `elif` branch in `_discover_provider_models()` to route your provider type
+   - Add to Celery beat schedule in `celery_app.py`
+   - Use `model_normalizer.py` to translate provider API metadata — never hardcode modality
+   - Reference: see `_sync_atlascloud_models()` and `_sync_poe_models()` in `tasks.py`
+
+### Model Normalization
+
+All sync functions MUST use `backend/app/services/model_normalizer.py` to convert raw
+provider API responses into our standard `model_configs` format.
+
+```python
+from app.services.model_normalizer import normalize_provider_model
+
+async def _sync_yourprovider_models(provider) -> list[dict]:
+    instance = YourProvider(provider.id, provider.config)
+    await instance.initialize(provider.config)
+    try:
+        resp = await instance.client.get("https://api.example.com/v1/models",
+            headers={"Authorization": f"Bearer {instance.api_key}"})
+        return [normalize_provider_model("your_type", m) for m in resp.json().get("data", [])]
+    finally:
+        await instance.shutdown()
+```
+
+Add a `_normalize_yourprovider()` function in `model_normalizer.py` and register it in
+`normalize_provider_model()`. Map the provider's native fields:
+- `modality` — from provider's own classification (type field, output_modalities)
+- `endpoint_type` — `"chat_completions"`, `"generateImage"`, or `"generateVideo"`
+- `capabilities` — optional: `accepts_image`, `supports_tools`, etc.
+- `constraints` — optional: `context_length`, `max_output_tokens`
+- `cost_config` — optional: `currency`, `credits_per_image`
+
+### Sync Registration Checklist
+1. `_discover_provider_models()` in `tasks.py` — add `elif` branch
+2. `normalize_provider_model()` in `model_normalizer.py` — add normalization function
+3. Celery beat schedule in `celery_app.py` — add cron entry
 
 8. **Write tests** — TDD as usual
    - Unit tests for provider class
