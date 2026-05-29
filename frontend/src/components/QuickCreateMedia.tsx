@@ -36,7 +36,7 @@ export interface QuickCreateMediaProps {
 function toModelOption(m: ModelConfig): ModelOption {
   return {
     id: m.id,
-    name: m.name,
+    name: m.display_name || m.id,
     provider: m.provider,
     description: m.description,
     capabilities: m.capabilities,
@@ -45,10 +45,13 @@ function toModelOption(m: ModelConfig): ModelOption {
 }
 
 function hasCapability(
-  caps: Record<string, boolean> | undefined,
+  caps: Record<string, boolean> | string[] | undefined,
   ...keys: string[]
 ): boolean {
   if (!caps) return false
+  if (Array.isArray(caps)) {
+    return caps.some(v => keys.includes(v))
+  }
   return keys.some((k) => caps[k] === true)
 }
 
