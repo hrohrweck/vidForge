@@ -13,11 +13,23 @@ def normalize_provider_model(provider_type: str, model_data: dict[str, Any]) -> 
 
 def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
     atype = m.get("type", "Text").lower()
+    model_id = m.get("model", "").lower()
     caps = {"supports_chat": atype == "text"}
+    
+    # Parse model ID for task-type: {provider}/{family}/{task-type}
+    # Task-types: text-to-image, image-to-image, edit, text-to-video, image-to-video, etc.
     if atype == "image":
-        caps.update({"accepts_text": True, "outputs_image": True})
+        if "/edit" in model_id or "image-to-image" in model_id:
+            caps.update({"accepts_image": True, "accepts_text": True, "outputs_image": True})
+        else:
+            caps.update({"accepts_text": True, "outputs_image": True})
     elif atype == "video":
-        caps.update({"accepts_text": True, "outputs_video": True})
+        if "image-to-video" in model_id or "/i2v" in model_id:
+            caps.update({"accepts_image": True, "outputs_video": True})
+        elif "text-to-video" in model_id or "/t2v" in model_id:
+            caps.update({"accepts_text": True, "outputs_video": True})
+        else:
+            caps.update({"accepts_text": True, "outputs_video": True})
     elif atype == "text":
         caps.update({"accepts_text": True, "outputs_text": True})
     return {
