@@ -6,6 +6,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   createdAt: string
+  attachments?: Array<{url: string; type: string; name?: string}>
 }
 
 export interface Conversation {

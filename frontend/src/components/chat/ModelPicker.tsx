@@ -33,8 +33,9 @@ export function ModelPicker() {
             // Array format: check for chat capability
             return caps.includes('chat') || caps.some(c => c.includes('chat'))
           }
-          // Dict format: model outputs text
-          return caps.outputs_text !== false
+          // Dict format: must output text AND accept at least text or image input
+          return caps.outputs_text !== false &&
+                 (caps.accepts_text !== false || caps.accepts_image !== false)
         }))
         if (textModels.length > 0) {
           const current = useChatStore.getState().selectedModelId

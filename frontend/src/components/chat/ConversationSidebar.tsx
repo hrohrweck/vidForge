@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
+import { MessageSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
-import { chatApi } from '../../api/client'
+import api, { chatApi } from '../../api/client'
 import type { Conversation as ApiConversation } from '../../api/client'
 import type { Conversation } from '../../stores/chat'
 
@@ -92,6 +92,34 @@ export function ConversationSidebar() {
   const refreshConversations = useChatStore((s) => s.refreshConversations)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{
+    id: string
+    title: string
+    snippet: string
+    timestamp: string
+  }>>([])
+  const [isSearching, setIsSearching] = useState(false)
+
+  const handleSearch = useCallback(
+    async (q: string) => {
+      setSearchQuery(q)
+      if (q.length < 2) {
+        setSearchResults([])
+        return
+      }
+      setIsSearching(true)
+      try {
+        const resp = await api.get('/chat/search', { params: { q } })
+        setSearchResults(resp.data.items ?? resp.data)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
+    },
+    []
+  )
 
   const fetchConversations = useCallback(() => {
     chatApi.listConversations().then((data) => {
@@ -151,6 +179,30 @@ export function ConversationSidebar() {
   return (
     <div className="flex h-full flex-col rounded-[10px] border bg-card overflow-hidden">
       <div className="border-b p-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search conversations..."
+            className="w-full rounded-md bg-background pl-8 pr-8 py-1.5 text-sm border border-input focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery('')
+                setSearchResults([])
+              }}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-muted text-muted-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="border-b p-3">
         <button
           onClick={handleNewChat}
           className="flex w-full items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90"
@@ -160,7 +212,36 @@ export function ConversationSidebar() {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {conversations.length === 0 ? (
+        {searchQuery.length >= 2 ? (
+          isSearching ? (
+            <p className="p-4 text-sm text-muted-foreground">Searching...</p>
+          ) : searchResults.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">No results found.</p>
+          ) : (
+            <ul className="p-2">
+              {searchResults.map((result) => (
+                <li
+                  key={result.id}
+                  onClick={() => {
+                    selectConversation(result.id)
+                    setSearchQuery('')
+                    setSearchResults([])
+                  }}
+                  className="group flex items-start gap-2 rounded-md px-3 py-2 cursor-pointer hover:bg-muted"
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-sm font-medium">{result.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{result.snippet}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(result.timestamp).toLocaleDateString()}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : conversations.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No conversations yet.</p>
         ) : (
           <ul className="p-2">

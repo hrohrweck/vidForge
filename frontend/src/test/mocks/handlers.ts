@@ -339,7 +339,65 @@ export const handlers = [
 
   http.put('*/api/users/settings', () => {
     return HttpResponse.json({ status: 'success' })
-  })
+  }),
+
+  http.get('*/api/models/available', () => {
+    return HttpResponse.json({
+      image_models: [
+        {
+          id: 'flux-schnell', name: 'Flux.1 Schnell', description: 'Fast image gen',
+          size_gb: 12, speed: 'fast', quality: 'good', license: 'Apache-2.0',
+          provider: 'comfyui', provider_type: 'comfyui_direct', default: true,
+          capabilities: { outputs_image: true, accepts_text: true },
+        },
+        {
+          id: 'sd3', name: 'Stable Diffusion 3', description: 'Text to image',
+          size_gb: 8, speed: 'medium', quality: 'great', license: 'open',
+          provider: 'comfyui', provider_type: 'comfyui_direct', default: false,
+          capabilities: { outputs_image: true, accepts_text: true },
+        },
+      ],
+      video_models: [
+        {
+          id: 'wan2.2', name: 'Wan 2.2', description: 'Video generation',
+          size_gb: 16, speed: 'slow', quality: 'excellent', license: 'Apache-2.0',
+          provider: 'comfyui', provider_type: 'comfyui_direct', default: true,
+          capabilities: { outputs_video: true, accepts_text: true, accepts_image: true },
+        },
+      ],
+      text_models: [
+        {
+          id: 'qwen', name: 'Qwen 3.6', description: 'Local LLM via Ollama',
+          size_gb: 4, speed: 'fast', quality: 'great', license: 'Apache-2.0',
+          provider: 'ollama', provider_type: 'ollama', default: true,
+          capabilities: { outputs_text: true, accepts_text: true },
+        },
+        {
+          id: 'llama', name: 'Llama 3.3', description: 'Local LLM',
+          size_gb: 6, speed: 'medium', quality: 'great', license: 'open',
+          provider: 'ollama', provider_type: 'ollama', default: false,
+          capabilities: { outputs_text: true, accepts_text: true },
+        },
+        {
+          id: 'glm', name: 'GLM 5.1', description: 'Cloud LLM via Poe',
+          size_gb: 0, speed: 'fast', quality: 'excellent', license: 'proprietary',
+          provider: 'poe', provider_type: 'poe', default: false,
+          capabilities: { outputs_text: true, accepts_text: true, accepts_image: true },
+        },
+        {
+          id: 'image-only-model', name: 'Image Only', description: 'Only generates images',
+          size_gb: 12, speed: 'fast', quality: 'good', license: 'open',
+          provider: 'poe', provider_type: 'poe', default: false,
+          capabilities: { outputs_text: false, outputs_image: true, accepts_text: true },
+        },
+        {
+          id: 'no-caps-model', name: 'No Capabilities', description: 'Legacy model with no caps',
+          size_gb: 2, speed: 'fast', quality: 'good', license: 'open',
+          provider: 'ollama', provider_type: 'ollama', default: false,
+        },
+      ],
+    })
+  }),
 ]
 
 function paramsProvider(url: string) {

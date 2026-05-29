@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+from sqlalchemy import String, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -24,7 +25,7 @@ from app.api.schemas.chat import (
 from app.chatbot.service import ChatOrchestrator, ConversationService, TokenUsageService
 from app.chatbot.streaming import encode_sse_event
 from app.chatbot.tools import ToolContext
-from app.database import User, get_db
+from app.database import Conversation, Message, User, get_db
 from app.storage import get_storage_backend
 
 router = APIRouter()
@@ -352,3 +353,37 @@ async def create_message_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/search")
+async def search_chat(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Message, Conversation)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(
+            Conversation.user_id == current_user.id,
+            Conversation.archived_at.is_(None),
+            or_(
+                Message.content.ilike(f"%{q}%"),
+                Message.tool_calls.cast(String).ilike(f"%{q}%"),
+            ),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(50)
+    )
+    rows = result.all()
+    return [
+        {
+            "message_id": str(m.id),
+            "conversation_id": str(m.conversation_id),
+            "conversation_title": c.title,
+            "content": m.content[:200],
+            "role": m.role,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m, c in rows
+    ]

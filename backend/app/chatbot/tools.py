@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.models import get_available_models as _get_available_models
-from app.database import Job, Style, Template, UserSettings
+from app.database import Job, Project, Style, Template, UserSettings
 from app.models.media import MediaAsset
 from app.plugins.registry import get_all_plugins
 from app.services.llm_service import LLMClient
@@ -378,6 +378,102 @@ async def _handle_estimate_job_cost(ctx: ToolContext, args: dict[str, Any]) -> d
     }
 
 
+async def _handle_generate_media(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Queue a quick media generation task. Returns a task_id for polling."""
+    model_id = args.get("model_id")
+    prompt = args.get("prompt")
+
+    if not model_id:
+        return {"error": "missing_argument", "message": "'model_id' is required"}
+    if not prompt:
+        return {"error": "missing_argument", "message": "'prompt' is required"}
+
+    aspect_ratio = args.get("aspect_ratio", "1:1")
+    duration = args.get("duration", 5)
+    negative_prompt = args.get("negative_prompt")
+    seed = args.get("seed")
+    image_path = args.get("image_path")
+
+    try:
+        from app.workers.tasks import generate_quick_media
+
+        task = generate_quick_media.delay(
+            user_id=ctx.user_id,
+            model_id=model_id,
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            duration=duration,
+            negative_prompt=negative_prompt,
+            seed=seed,
+            image_path=image_path,
+        )
+        return {
+            "task_id": task.id,
+            "status": "queued",
+            "model_id": model_id,
+            "prompt": prompt,
+        }
+    except ImportError:
+        return {"error": "service_unavailable", "message": "Media generation worker not available"}
+    except Exception as exc:
+        return {"error": "generation_failed", "message": str(exc)}
+
+
+async def _handle_list_projects(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """List projects for the current user."""
+    if ctx.db is None:
+        return {"error": "missing_db", "message": "Database session required"}
+
+    db: AsyncSession = ctx.db
+    limit = args.get("limit", 50)
+    result = await db.execute(
+        select(Project)
+        .where(Project.user_id == UUID(ctx.user_id))
+        .order_by(Project.updated_at.desc())
+        .limit(limit)
+    )
+    projects = []
+    for project in result.scalars().all():
+        projects.append({
+            "id": str(project.id),
+            "title": project.title,
+            "description": project.description,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        })
+    return {"projects": projects, "count": len(projects)}
+
+
+async def _handle_create_project(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new project for the current user."""
+    if ctx.db is None:
+        return {"error": "missing_db", "message": "Database session required"}
+
+    title = args.get("title")
+    if not title:
+        return {"error": "missing_argument", "message": "'title' is required"}
+
+    description = args.get("description")
+
+    db: AsyncSession = ctx.db
+    project = Project(
+        user_id=UUID(ctx.user_id),
+        title=title,
+        description=description,
+    )
+    db.add(project)
+    await db.commit()
+    await db.refresh(project)
+
+    return {
+        "id": str(project.id),
+        "title": project.title,
+        "description": project.description,
+        "created_at": project.created_at.isoformat() if project.created_at else None,
+        "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+    }
+
+
 def create_builtin_registry() -> ToolRegistry:
     """Create and populate a ToolRegistry with all built-in tools."""
     registry = ToolRegistry()
@@ -519,6 +615,54 @@ def create_builtin_registry() -> ToolRegistry:
                 "required": ["duration_seconds"],
             },
             handler=_handle_estimate_job_cost,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="generate_media",
+            description="Generate an image or video using AI. Provide a prompt, model, and optional settings.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Model to use for generation"},
+                    "prompt": {"type": "string", "description": "Text description of what to generate"},
+                    "aspect_ratio": {"type": "string", "description": "e.g. 1:1, 16:9", "default": "1:1"},
+                    "duration": {"type": "integer", "description": "Video duration in seconds", "default": 5},
+                },
+                "required": ["model_id", "prompt"],
+            },
+            handler=_handle_generate_media,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="list_projects",
+            description="List projects for the current user, with optional limit.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Maximum number of projects to return", "default": 50},
+                },
+            },
+            handler=_handle_list_projects,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="create_project",
+            description="Create a new project with a title and optional description.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Project title"},
+                    "description": {"type": "string", "description": "Optional project description"},
+                },
+                "required": ["title"],
+            },
+            handler=_handle_create_project,
         )
     )
 
