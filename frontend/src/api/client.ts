@@ -818,6 +818,7 @@ export interface ModelConfig {
   license: string
   provider: string
   default: boolean
+  capabilities?: Record<string, boolean>
   cost_config?: Record<string, unknown> | null
   variants?: Record<string, { workflow: string; description: string }>
 }
@@ -829,6 +830,10 @@ export interface ModelPreferences {
   image_provider: string
   video_provider: string
   text_provider: string
+  text_to_image_model: string
+  image_to_image_model: string
+  text_to_video_model: string
+  image_to_video_model: string
 }
 
 // Chat API types and namespace

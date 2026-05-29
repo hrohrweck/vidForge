@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { screen, fireEvent, waitFor } from '@testing-library/react'
 import { renderWithProviders } from '../../test/utils'
 import QuickCreateMedia from '../../components/QuickCreateMedia'
-import api from '../../api/client'
+import api, { modelsApi } from '../../api/client'
 
 vi.mock('../../api/client', () => ({
   default: {
@@ -21,6 +21,7 @@ vi.mock('../../api/client', () => ({
           license: 'open',
           provider: 'comfyui_direct',
           default: true,
+          capabilities: { accepts_text: true },
         },
         {
           id: 'img-2',
@@ -32,6 +33,7 @@ vi.mock('../../api/client', () => ({
           license: 'open',
           provider: 'comfyui_direct',
           default: false,
+          capabilities: { accepts_text: true },
         },
       ],
       video_models: [
@@ -45,6 +47,7 @@ vi.mock('../../api/client', () => ({
           license: 'open',
           provider: 'video',
           default: false,
+          capabilities: { accepts_text: true },
         },
       ],
       text_models: [],
@@ -95,7 +98,6 @@ describe('QuickCreateMedia', () => {
     await waitFor(() => {
       expect(screen.getByText('Aspect Ratio')).toBeInTheDocument()
     })
-    expect(screen.getByText(/prompt \*/i)).toBeInTheDocument()
     expect(
       screen.getByPlaceholderText('Describe what you want to generate...'),
     ).toBeInTheDocument()
@@ -128,7 +130,6 @@ describe('QuickCreateMedia', () => {
           model_id: 'img-1',
           prompt: 'A beautiful landscape',
           aspect_ratio: '1:1',
-          duration: 5,
         }),
       )
     })
@@ -158,5 +159,115 @@ describe('QuickCreateMedia', () => {
       expect(screen.getByText('Image Models')).toBeInTheDocument()
       expect(screen.getByText('SDXL Turbo')).toBeInTheDocument()
     })
+  })
+
+  it('shows image upload for image-to-image capable models', async () => {
+    vi.mocked(modelsApi.getAvailableModels).mockResolvedValue({
+      image_models: [
+        {
+          id: 'img-i2i',
+          name: 'Image-to-Image Model',
+          description: 'Supports image input',
+          size_gb: 2.0,
+          speed: 'fast',
+          quality: 'high',
+          license: 'open',
+          provider: 'comfyui_direct',
+          default: false,
+          capabilities: { accepts_image: true },
+        },
+      ],
+      video_models: [],
+      text_models: [],
+    })
+
+    renderWithProviders(<QuickCreateMedia />)
+    fireEvent.click(screen.getByRole('button', { name: /create media/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Image-to-Image Model')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Image-to-Image Model'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/reference image/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByText(/image is required/i)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText('Describe what you want to generate...')).toBeNull()
+  })
+
+  it('hides image upload for text-only models without image-to-image capability', async () => {
+    vi.mocked(modelsApi.getAvailableModels).mockResolvedValue({
+      image_models: [
+        {
+          id: 'img-text-only',
+          name: 'Text-Only Image Model',
+          description: 'Only supports text-to-image',
+          size_gb: 1.5,
+          speed: 'fast',
+          quality: 'high',
+          license: 'open',
+          provider: 'comfyui_direct',
+          default: false,
+          capabilities: { accepts_text: true },
+        },
+      ],
+      video_models: [],
+      text_models: [],
+    })
+
+    renderWithProviders(<QuickCreateMedia />)
+    fireEvent.click(screen.getByRole('button', { name: /create media/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Text-Only Image Model')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Text-Only Image Model'))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Describe what you want to generate...')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText(/reference image/i)).toBeNull()
+  })
+
+  it('shows both image upload and prompt for multimodal models', async () => {
+    vi.mocked(modelsApi.getAvailableModels).mockResolvedValue({
+      image_models: [
+        {
+          id: 'img-multi',
+          name: 'Multimodal Model',
+          description: 'Accepts both text and image',
+          size_gb: 3.0,
+          speed: 'medium',
+          quality: 'high',
+          license: 'open',
+          provider: 'comfyui_direct',
+          default: false,
+          capabilities: { accepts_text: true, accepts_image: true },
+        },
+      ],
+      video_models: [],
+      text_models: [],
+    })
+
+    renderWithProviders(<QuickCreateMedia />)
+    fireEvent.click(screen.getByRole('button', { name: /create media/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Multimodal Model')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('Multimodal Model'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/reference image/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByText(/reference image \(optional\)/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Describe what you want to generate...')).toBeInTheDocument()
   })
 })

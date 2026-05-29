@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Loader2 } from 'lucide-react'
+import { Plus, Loader2, Upload, X, Image as ImageIcon } from 'lucide-react'
 import api, { modelsApi, type ModelConfig } from '../api/client'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
@@ -15,12 +15,16 @@ import {
 } from './ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Textarea } from './ui/textarea'
+import { AssetPickerModal } from './media/AssetPickerModal'
+import { useUploadAssets } from '../hooks/useMedia'
+import type { MediaAsset } from '../api/types/media'
 
 interface ModelOption {
   id: string
   name: string
   provider: string
   description?: string
+  capabilities?: Record<string, boolean>
   costConfig?: Record<string, unknown> | null
 }
 
@@ -35,8 +39,17 @@ function toModelOption(m: ModelConfig): ModelOption {
     name: m.name,
     provider: m.provider,
     description: m.description,
+    capabilities: m.capabilities,
     costConfig: m.cost_config,
   }
+}
+
+function hasCapability(
+  caps: Record<string, boolean> | undefined,
+  ...keys: string[]
+): boolean {
+  if (!caps) return false
+  return keys.some((k) => caps[k] === true)
 }
 
 export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickCreateMediaProps) {
@@ -49,7 +62,15 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   const [negativePrompt, setNegativePrompt] = useState('')
   const [seed, setSeed] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [showAssetPicker, setShowAssetPicker] = useState(false)
+  const [imageAsset, setImageAsset] = useState<MediaAsset | null>(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const uploadMutation = useUploadAssets()
 
   const { data: models, isLoading } = useQuery({
     queryKey: ['availableModels'],
@@ -65,26 +86,110 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
     [models],
   )
 
+  const caps = selectedModel?.capabilities
+  const acceptsText = caps ? hasCapability(caps, 'accepts_text') : true
+  const acceptsImage = hasCapability(caps, 'accepts_image')
+  const outputsImage = hasCapability(caps, 'outputs_image')
+  const outputsVideo = hasCapability(caps, 'outputs_video')
+  const isImageOnly = acceptsImage && !acceptsText
+  const promptRequired = acceptsText
+  const imageRequired = isImageOnly
+
+  const resetImage = useCallback(() => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview)
+    setImageAsset(null)
+    setImageFile(null)
+    setImagePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [imagePreview])
+
   const handleModelSelect = (model: ModelOption) => {
     setSelectedModel(model)
+    resetImage()
     setStep('configure')
   }
 
+  const handleAssetSelect = useCallback((asset: MediaAsset) => {
+    setImageAsset(asset)
+    setImageFile(null)
+    setImagePreview(asset.preview_path ?? null)
+    setShowAssetPicker(false)
+  }, [])
+
+  const uploadFile = useCallback(async (file: File) => {
+    setImageFile(file)
+    setImageAsset(null)
+    setImagePreview(URL.createObjectURL(file))
+    setIsUploading(true)
+    try {
+      const assets = await uploadMutation.mutateAsync({ files: [file] })
+      if (assets.length > 0) {
+        setImageAsset(assets[0])
+        setImageFile(null)
+        setImagePreview(assets[0].preview_path ?? null)
+      }
+    } catch {
+      void 0
+    } finally {
+      setIsUploading(false)
+    }
+  }, [uploadMutation])
+
+  const handleFileDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const file = e.dataTransfer.files[0]
+    if (!file || !file.type.startsWith('image/')) return
+    await uploadFile(file)
+  }, [uploadFile])
+
+  const handleFileInput = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await uploadFile(file)
+  }, [uploadFile])
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
   const handleGenerate = async () => {
-    if (!prompt.trim() || !selectedModel) return
+    if (!selectedModel) return
+    if (promptRequired && !prompt.trim()) return
+    if (imageRequired && !imageAsset && !imageFile) return
     setSubmitting(true)
     try {
-      await api.post('/media/generate', {
+      const payload: Record<string, unknown> = {
         model_id: selectedModel.id,
-        prompt: prompt.trim(),
+        prompt: prompt.trim() || '',
         aspect_ratio: aspectRatio,
-        duration: duration,
         negative_prompt: negativePrompt || undefined,
         seed: seed ? Number(seed) : undefined,
-      })
+      }
+      if (outputsVideo || selectedModel.provider === 'video') {
+        payload.duration = duration
+      }
+      if (imageAsset?.file_path) {
+        payload.image_path = imageAsset.file_path
+      } else if (imageFile) {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const result = reader.result as string
+            resolve(result.split(',')[1] ?? result)
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(imageFile)
+        })
+        payload.image = base64
+        payload.image_mime = imageFile.type
+      }
+      await api.post('/media/generate', payload)
       setOpen(false)
       setStep('select')
       setPrompt('')
+      resetImage()
       onSuccess?.()
     } finally {
       setSubmitting(false)
@@ -113,6 +218,15 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
         <Plus className="h-4 w-4 mr-2" />
         Create Media
       </Button>
+
+      {showAssetPicker && (
+        <AssetPickerModal
+          isOpen={showAssetPicker}
+          onClose={() => setShowAssetPicker(false)}
+          onSelect={handleAssetSelect}
+        />
+      )}
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -170,14 +284,34 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
               </TabsContent>
             </Tabs>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               <button
-                onClick={() => setStep('select')}
+                onClick={() => {
+                  setStep('select')
+                  resetImage()
+                }}
                 className="text-sm text-muted-foreground hover:text-foreground"
               >
                 &larr; Back to model selection
               </button>
               <div className="font-medium">{selectedModel?.name}</div>
+
+              {caps && (
+                <div className="flex flex-wrap gap-1">
+                  <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    Accepts: {[
+                      acceptsText && 'text',
+                      acceptsImage && 'image',
+                    ].filter(Boolean).join(', ') || 'none'}
+                  </span>
+                  <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    &rarr; Outputs: {[
+                      outputsImage && 'image',
+                      outputsVideo && 'video',
+                    ].filter(Boolean).join(', ') || 'none'}
+                  </span>
+                </div>
+              )}
 
               <div>
                 <Label>Aspect Ratio</Label>
@@ -195,7 +329,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                 </Select>
               </div>
 
-              {selectedModel && selectedModel.provider === 'video' && (
+              {outputsVideo && (
                 <div>
                   <Label>Duration (seconds)</Label>
                   <Input
@@ -208,33 +342,113 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                 </div>
               )}
 
-              <div>
-                <Label>Negative Prompt (optional)</Label>
-                <Input
-                  value={negativePrompt}
-                  onChange={(e) => setNegativePrompt(e.target.value)}
-                  placeholder="Things to avoid..."
-                />
-              </div>
+              {acceptsImage && (
+                <div className="space-y-2">
+                  <Label>
+                    {imageRequired
+                      ? 'Reference Image *'
+                      : acceptsText
+                        ? 'Reference Image (optional)'
+                        : 'Reference Image *'}
+                  </Label>
 
-              <div>
-                <Label>Seed (optional, -1 = random)</Label>
-                <Input
-                  value={seed}
-                  onChange={(e) => setSeed(e.target.value)}
-                  placeholder="-1"
-                />
-              </div>
+                  {!imagePreview ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowAssetPicker(true)}
+                        className="w-full flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/25 p-6 text-sm text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+                      >
+                        <ImageIcon className="h-5 w-5" />
+                        Choose from Media Library
+                      </button>
 
-              <div>
-                <Label>Prompt *</Label>
-                <Textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe what you want to generate..."
-                  rows={4}
-                />
-              </div>
+                      <div
+                        onDrop={handleFileDrop}
+                        onDragOver={handleDragOver}
+                        className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/25 p-6 text-sm text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors cursor-pointer"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        {isUploading ? (
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                        ) : (
+                          <Upload className="h-5 w-5" />
+                        )}
+                        <span>
+                          {isUploading ? 'Uploading...' : 'Drop an image here or click to browse'}
+                        </span>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleFileInput}
+                          className="hidden"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="relative rounded-lg overflow-hidden border max-h-40">
+                      <img
+                        src={imagePreview}
+                        alt="Reference preview"
+                        className="w-full h-40 object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={resetImage}
+                        className="absolute top-1 right-1 rounded-full bg-background/80 p-1 text-foreground hover:bg-background transition-colors"
+                        title="Remove reference image"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  {imageRequired && !imageAsset && !imageFile && (
+                    <p className="text-xs text-destructive">
+                      Image is required for this model
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {promptRequired && (
+                <>
+                  <div>
+                    <Label>Negative Prompt (optional)</Label>
+                    <Input
+                      value={negativePrompt}
+                      onChange={(e) => setNegativePrompt(e.target.value)}
+                      placeholder="Things to avoid..."
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Seed (optional, -1 = random)</Label>
+                    <Input
+                      value={seed}
+                      onChange={(e) => setSeed(e.target.value)}
+                      placeholder="-1"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>
+                      Prompt{imageRequired ? ' (optional)' : ' *'}
+                    </Label>
+                    <Textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder={
+                        imageRequired
+                          ? 'Additional prompt guidance...'
+                          : 'Describe what you want to generate...'
+                      }
+                      rows={4}
+                    />
+                  </div>
+                </>
+              )}
 
               {estimatedCost && (
                 <div className="border-t pt-3 mt-4">
@@ -247,7 +461,13 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
 
               <Button
                 onClick={handleGenerate}
-                disabled={!prompt.trim() || submitting}
+                disabled={
+                  submitting ||
+                  isUploading ||
+                  (imageRequired && !imageAsset && !imageFile) ||
+                  (promptRequired && !prompt.trim()) ||
+                  !selectedModel
+                }
                 className="w-full"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}

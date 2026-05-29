@@ -49,6 +49,10 @@ _DEFAULT_MODEL_PREFERENCES: dict[str, str] = {
     "image_provider": "local",
     "video_provider": "local",
     "text_provider": "local",
+    "text_to_image_model": "flux1-schnell",
+    "image_to_image_model": "flux1-schnell",
+    "text_to_video_model": "wan2.2",
+    "image_to_video_model": "wan2.2",
 }
 
 
@@ -74,7 +78,12 @@ async def validate_model_preferences(
     """Validate model preferences against currently active models in DB."""
     valid_ids = await _get_valid_model_ids(db)
     validated: dict[str, str] = {}
-    for field in ("image_model", "video_model", "text_model"):
+    model_fields = (
+        "image_model", "video_model", "text_model",
+        "text_to_image_model", "image_to_image_model",
+        "text_to_video_model", "image_to_video_model",
+    )
+    for field in model_fields:
         value = prefs.get(field, _DEFAULT_MODEL_PREFERENCES.get(field, ""))
         if value in valid_ids:
             validated[field] = value
@@ -158,6 +167,10 @@ class ModelPreferences(BaseModel):
     image_provider: str = "local"
     video_provider: str = "local"
     text_provider: str = "local"
+    text_to_image_model: str = "flux1-schnell"
+    image_to_image_model: str = "flux1-schnell"
+    text_to_video_model: str = "wan2.2"
+    image_to_video_model: str = "wan2.2"
 
 
 # ── Endpoints ───────────────────────────────────────────────────────

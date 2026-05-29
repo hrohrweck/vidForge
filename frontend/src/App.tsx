@@ -18,6 +18,7 @@ import { AssetDetail } from './pages/AssetDetail'
 import MCPServersPage from './pages/MCPServersPage'
 import ModelManagement from './pages/admin/ModelManagement'
 import { ThemeProvider } from './components/ThemeProvider'
+import { Toaster } from './components/ui/toaster'
 
 function App() {
   const { isAuthenticated } = useAuthStore()
@@ -31,6 +32,7 @@ function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
+        <Toaster />
       </ThemeProvider>
     )
   }
@@ -59,6 +61,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      <Toaster />
     </ThemeProvider>
   )
 }

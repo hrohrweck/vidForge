@@ -295,6 +295,19 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     }
   }
 
+  // Check if model capabilities include any of the given keys.
+  // Handles both object format (Record<string, boolean>) and array format (string[]).
+  const hasCapability = (
+    capabilities: Record<string, boolean> | string[] | undefined,
+    ...keys: string[]
+  ): boolean => {
+    if (!capabilities) return false
+    if (Array.isArray(capabilities)) {
+      return keys.some((k) => capabilities.includes(k))
+    }
+    return keys.some((k) => capabilities[k] === true)
+  }
+
   const renderModelSelect = (
     label: string,
     models: ModelOption[] | undefined,
@@ -428,13 +441,17 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               )}
               {renderModelSelect(
                 'Image Model',
-                availableModels?.image_models,
+                availableModels?.image_models?.filter((m) =>
+                  hasCapability(m.capabilities, 'text-to-image', 'accepts_text'),
+                ),
                 selectedImageModel,
                 setSelectedImageModel,
               )}
               {renderModelSelect(
                 'Video Model',
-                availableModels?.video_models,
+                availableModels?.video_models?.filter((m) =>
+                  hasCapability(m.capabilities, 'image-to-video', 'accepts_image'),
+                ),
                 selectedVideoModel,
                 setSelectedVideoModel,
               )}

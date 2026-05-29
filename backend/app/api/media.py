@@ -962,6 +962,7 @@ class QuickGenerateRequest(BaseModel):
     duration: int = 5
     negative_prompt: str | None = None
     seed: int | None = None
+    image_path: str | None = None
 
 
 class QuickGenerateResponse(BaseModel):
@@ -985,5 +986,6 @@ async def quick_generate_media(
         duration=req.duration,
         negative_prompt=req.negative_prompt,
         seed=req.seed,
+        image_path=req.image_path,
     )
     return QuickGenerateResponse(task_id=task.id)

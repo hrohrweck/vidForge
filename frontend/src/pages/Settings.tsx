@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Save, RefreshCw, Trash2, Folder, File, Sun, Moon, Monitor, Cpu } from 'lucide-react'
-import { storageApi, stylesApi, modelsApi } from '../api/client'
+import { storageApi, stylesApi, modelsApi, type ModelConfig, type ModelPreferences } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { Button } from '../components/ui/button'
@@ -60,6 +60,46 @@ export default function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['model-preferences'] })
     },
+  })
+
+  const allModels: ModelConfig[] = useMemo(() => {
+    if (!availableModels) return []
+    return [
+      ...(availableModels.image_models || []),
+      ...(availableModels.video_models || []),
+      ...(availableModels.text_models || []),
+    ]
+  }, [availableModels])
+
+  const textToImageModels = useMemo(() =>
+    allModels.filter(m => m.capabilities?.accepts_text && m.capabilities?.outputs_image),
+    [allModels]
+  )
+  const imageToImageModels = useMemo(() =>
+    allModels.filter(m => m.capabilities?.accepts_image && m.capabilities?.outputs_image),
+    [allModels]
+  )
+  const textToVideoModels = useMemo(() =>
+    allModels.filter(m => m.capabilities?.accepts_text && m.capabilities?.outputs_video),
+    [allModels]
+  )
+  const imageToVideoModels = useMemo(() =>
+    allModels.filter(m => m.capabilities?.accepts_image && m.capabilities?.outputs_video),
+    [allModels]
+  )
+
+  const buildPreferences = (overrides: Partial<ModelPreferences>): ModelPreferences => ({
+    image_model: modelPreferences?.image_model || 'flux1-schnell',
+    video_model: modelPreferences?.video_model || 'wan2.2',
+    text_model: modelPreferences?.text_model || 'qwen3.6:35b',
+    image_provider: modelPreferences?.image_provider || 'local',
+    video_provider: modelPreferences?.video_provider || 'local',
+    text_provider: modelPreferences?.text_provider || 'local',
+    text_to_image_model: modelPreferences?.text_to_image_model || 'flux1-schnell',
+    image_to_image_model: modelPreferences?.image_to_image_model || 'flux1-schnell',
+    text_to_video_model: modelPreferences?.text_to_video_model || 'wan2.2',
+    image_to_video_model: modelPreferences?.image_to_video_model || 'wan2.2',
+    ...overrides,
   })
 
   const updateSettingsMutation = useMutation({
@@ -465,111 +505,111 @@ export default function Settings() {
               <h2 className="text-lg font-semibold">AI Model Preferences</h2>
             </div>
             <p className="text-sm text-muted-foreground mb-6">
-              Choose which AI models to use for image generation, video generation, and text generation (story creation, scene planning). Local models run on your hardware.
+              Choose which AI models to use for each generation category. Only compatible models are shown based on their capabilities.
             </p>
 
             <div className="space-y-8">
-              <div className="space-y-4">
-                <h3 className="font-medium text-base">Image Generation Model</h3>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {availableModels?.image_models?.map((model) => (
-                    <div
-                      key={model.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition ${
-                        modelPreferences?.image_model === model.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      }`}
-                      onClick={() =>
-                        updateModelPreferencesMutation.mutate({
-                          image_model: model.id,
-                          video_model: modelPreferences?.video_model || 'wan2.2',
-                          text_model: modelPreferences?.text_model || 'qwen3.6:35b',
-                          image_provider: modelPreferences?.image_provider || 'local',
-                          video_provider: modelPreferences?.video_provider || 'local',
-                          text_provider: modelPreferences?.text_provider || 'local',
-                        })
-                      }
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-medium">{model.name}</p>
-                          <p className="text-sm text-muted-foreground mt-1">{model.description}</p>
-                        </div>
-                        {model.default && (
-                          <Badge variant="outline" className="text-xs">Default</Badge>
-                        )}
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
-                        <Badge variant="secondary" className="text-xs">{model.speed}</Badge>
-                        <Badge variant="secondary" className="text-xs">{model.quality}</Badge>
-                        {model.provider === 'local' ? (
-                          <Badge variant="outline" className="text-xs text-green-600">Local</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
-                        )}
-                      </div>
-                    </div>
+              {/* Text-to-Image */}
+              <div className="space-y-2">
+                <Label htmlFor="text-to-image">Text-to-Image</Label>
+                <p className="text-xs text-muted-foreground">Generate images from text prompts</p>
+                <select
+                  id="text-to-image"
+                  className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={modelPreferences?.text_to_image_model || 'flux1-schnell'}
+                  onChange={(e) =>
+                    updateModelPreferencesMutation.mutate(
+                      buildPreferences({ text_to_image_model: e.target.value })
+                    )
+                  }
+                >
+                  {textToImageModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.provider})
+                    </option>
                   ))}
-                </div>
+                  {textToImageModels.length === 0 && (
+                    <option value="" disabled>No compatible models available</option>
+                  )}
+                </select>
               </div>
 
-              <div className="space-y-4">
-                <h3 className="font-medium text-base">Video Generation Model</h3>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {availableModels?.video_models?.map((model) => (
-                    <div
-                      key={model.id}
-                      className={`p-4 border rounded-lg cursor-pointer transition ${
-                        modelPreferences?.video_model === model.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      }`}
-                      onClick={() =>
-                        updateModelPreferencesMutation.mutate({
-                          image_model: modelPreferences?.image_model || 'flux1-schnell',
-                          video_model: model.id,
-                          text_model: modelPreferences?.text_model || 'qwen3.6:35b',
-                          image_provider: modelPreferences?.image_provider || 'local',
-                          video_provider: modelPreferences?.video_provider || 'local',
-                          text_provider: modelPreferences?.text_provider || 'local',
-                        })
-                      }
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-medium">{model.name}</p>
-                          <p className="text-sm text-muted-foreground mt-1">{model.description}</p>
-                        </div>
-                        {model.default && (
-                          <Badge variant="outline" className="text-xs">Default</Badge>
-                        )}
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        <Badge variant="secondary" className="text-xs">{model.size_gb}GB</Badge>
-                        <Badge variant="secondary" className="text-xs">{model.speed}</Badge>
-                        <Badge variant="secondary" className="text-xs">{model.quality}</Badge>
-                        {model.provider === 'local' ? (
-                          <Badge variant="outline" className="text-xs text-green-600">Local</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-xs text-blue-600">Cloud</Badge>
-                        )}
-                      </div>
-                      {model.variants && (
-                        <div className="flex gap-1 mt-2 flex-wrap">
-                          {Object.entries(model.variants).map(([key, variant]: [string, any]) => (
-                            <Badge key={key} variant="outline" className="text-[10px] px-1.5 py-0">
-                              {variant.description}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+              {/* Image-to-Image */}
+              <div className="space-y-2">
+                <Label htmlFor="image-to-image">Image-to-Image</Label>
+                <p className="text-xs text-muted-foreground">Transform or enhance existing images</p>
+                <select
+                  id="image-to-image"
+                  className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={modelPreferences?.image_to_image_model || 'flux1-schnell'}
+                  onChange={(e) =>
+                    updateModelPreferencesMutation.mutate(
+                      buildPreferences({ image_to_image_model: e.target.value })
+                    )
+                  }
+                >
+                  {imageToImageModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.provider})
+                    </option>
                   ))}
-                </div>
+                  {imageToImageModels.length === 0 && (
+                    <option value="" disabled>No compatible models available</option>
+                  )}
+                </select>
               </div>
 
+              {/* Text-to-Video */}
+              <div className="space-y-2">
+                <Label htmlFor="text-to-video">Text-to-Video</Label>
+                <p className="text-xs text-muted-foreground">Generate videos from text prompts</p>
+                <select
+                  id="text-to-video"
+                  className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={modelPreferences?.text_to_video_model || 'wan2.2'}
+                  onChange={(e) =>
+                    updateModelPreferencesMutation.mutate(
+                      buildPreferences({ text_to_video_model: e.target.value })
+                    )
+                  }
+                >
+                  {textToVideoModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.provider})
+                    </option>
+                  ))}
+                  {textToVideoModels.length === 0 && (
+                    <option value="" disabled>No compatible models available</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Image-to-Video */}
+              <div className="space-y-2">
+                <Label htmlFor="image-to-video">Image-to-Video</Label>
+                <p className="text-xs text-muted-foreground">Animate existing images into videos</p>
+                <select
+                  id="image-to-video"
+                  className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={modelPreferences?.image_to_video_model || 'wan2.2'}
+                  onChange={(e) =>
+                    updateModelPreferencesMutation.mutate(
+                      buildPreferences({ image_to_video_model: e.target.value })
+                    )
+                  }
+                >
+                  {imageToVideoModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.provider})
+                    </option>
+                  ))}
+                  {imageToVideoModels.length === 0 && (
+                    <option value="" disabled>No compatible models available</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Text Generation */}
               <div className="space-y-4">
                 <h3 className="font-medium text-base">Text Generation Model</h3>
                 <p className="text-sm text-muted-foreground">Used for story creation, scene planning, prompt enhancement, and lyrics analysis.</p>
@@ -583,14 +623,9 @@ export default function Settings() {
                           : 'border-border hover:border-primary/50'
                       }`}
                       onClick={() =>
-                        updateModelPreferencesMutation.mutate({
-                          image_model: modelPreferences?.image_model || 'flux1-schnell',
-                          video_model: modelPreferences?.video_model || 'wan2.2',
-                          text_model: model.id,
-                          image_provider: modelPreferences?.image_provider || 'local',
-                          video_provider: modelPreferences?.video_provider || 'local',
-                          text_provider: modelPreferences?.text_provider || 'local',
-                        })
+                        updateModelPreferencesMutation.mutate(
+                          buildPreferences({ text_model: model.id })
+                        )
                       }
                     >
                       <div className="flex items-start justify-between">

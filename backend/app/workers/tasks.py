@@ -1115,6 +1115,7 @@ def generate_quick_media(
     duration: int = 5,
     negative_prompt: str | None = None,
     seed: int | None = None,
+    image_path: str | None = None,
 ) -> dict:
     """Generate a single image or video without a full job pipeline.
 
@@ -1125,7 +1126,7 @@ def generate_quick_media(
     """
     return ctx.run(_generate_quick_media(
         self, user_id, model_id, prompt, aspect_ratio,
-        duration, negative_prompt, seed,
+        duration, negative_prompt, seed, image_path,
     ))
 
 
@@ -1138,6 +1139,7 @@ async def _generate_quick_media(
     duration: int,
     negative_prompt: str | None,
     seed: int | None,
+    image_path: str | None = None,
 ) -> dict:
     import uuid as _uuid
     from datetime import datetime as _datetime
@@ -1212,6 +1214,7 @@ async def _generate_quick_media(
                     provider_id=provider.id,
                     model_preference=model_id,
                     aspect_ratio=aspect_ratio,
+                    reference_image_path=image_path,
                 )
                 content_type = "image/png"
 
@@ -1225,6 +1228,7 @@ async def _generate_quick_media(
                     model_preference=model_id,
                     duration=duration,
                     aspect_ratio=aspect_ratio,
+                    reference_image_path=image_path,
                 )
                 content_type = "video/mp4"
             else:

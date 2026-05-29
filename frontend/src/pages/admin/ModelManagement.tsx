@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import {
@@ -29,6 +29,7 @@ import { Input } from '../../components/ui/input'
 import { Label } from '../../components/ui/label'
 import { Textarea } from '../../components/ui/textarea'
 import { Switch } from '../../components/ui/switch'
+import { toast } from '../../hooks/use-toast'
 import {
   Select,
   SelectContent,
@@ -89,6 +90,7 @@ const jsonToPretty = (value: Record<string, unknown> | undefined): string =>
 
 // ─── Form types ───────────────────────────────────────────
 interface ModelFormState {
+  providerId: string
   modelId: string
   providerModelId: string
   displayName: string
@@ -106,6 +108,7 @@ interface ModelFormState {
 }
 
 const configToFormState = (c: ModelConfig): ModelFormState => ({
+  providerId: c.providerId,
   modelId: c.modelId,
   providerModelId: c.providerModelId,
   displayName: c.displayName,
@@ -123,6 +126,7 @@ const configToFormState = (c: ModelConfig): ModelFormState => ({
 })
 
 const defaultFormState: ModelFormState = {
+  providerId: '',
   modelId: '',
   providerModelId: '',
   displayName: '',
@@ -168,6 +172,11 @@ export default function ModelManagement() {
   const [deleteTarget, setDeleteTarget] = useState<ModelConfig | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  // ── Inline edit state ──
+  const [editingNameId, setEditingNameId] = useState<string | null>(null)
+  const [editingNameValue, setEditingNameValue] = useState('')
+  const editInputRef = useRef<HTMLInputElement>(null)
 
   // ── Queries ──
   const { data: providers } = useQuery<Provider[]>({
@@ -230,15 +239,27 @@ export default function ModelManagement() {
   const createMutation = useMutation({
     mutationFn: async (data: CreateModelConfigRequest) =>
       adminModelConfigsApi.create(data),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['admin-model-configs'] })
+      const previous = queryClient.getQueryData<ModelConfig[]>(['admin-model-configs'])
+      return { previous }
+    },
     onSuccess: () => {
       setFormError('')
       queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
       setDialogOpen(false)
       setFormState(defaultFormState)
       setEditingConfig(null)
+      toast('Model created', 'success')
     },
-    onError: (error) => {
+    onError: (error, _, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['admin-model-configs'], context.previous)
+      }
       setFormError(getErrorMessage(error))
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
     },
   })
 
@@ -265,25 +286,57 @@ export default function ModelManagement() {
   const toggleMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateModelConfigRequest }) =>
       adminModelConfigsApi.update(id, data),
+    onMutate: async ({ id, data }) => {
+      await queryClient.cancelQueries({ queryKey: ['admin-model-configs'] })
+      const previous = queryClient.getQueryData<ModelConfig[]>(['admin-model-configs'])
+      queryClient.setQueryData<ModelConfig[]>(['admin-model-configs'], (old) =>
+        old?.map((c) => (c.id === id ? { ...c, ...data } as ModelConfig : c))
+      )
+      return { previous }
+    },
     onSuccess: () => {
       setActionError('')
-      queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
+      toast('Model updated', 'success')
     },
-    onError: (error) => {
-      setActionError(getErrorMessage(error))
+    onError: (error, _, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['admin-model-configs'], context.previous)
+      }
+      const msg = getErrorMessage(error)
+      setActionError(msg)
+      toast(msg, 'error')
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => adminModelConfigsApi.remove(id),
-    onSuccess: () => {
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['admin-model-configs'] })
+      const previous = queryClient.getQueryData<ModelConfig[]>(['admin-model-configs'])
+      queryClient.setQueryData<ModelConfig[]>(['admin-model-configs'], (old) =>
+        old?.filter((c) => c.id !== id)
+      )
+      return { previous }
+    },
+    onSuccess: (_data, id) => {
       setDeleteError('')
-      queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
       setDeleteDialogOpen(false)
       setDeleteTarget(null)
+      toast(`Model "${id}" deleted`, 'success')
     },
-    onError: (error) => {
-      setDeleteError(getErrorMessage(error))
+    onError: (error, _id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['admin-model-configs'], context.previous)
+      }
+      const msg = getErrorMessage(error)
+      setDeleteError(msg)
+      toast(`Delete failed: ${msg}`, 'error')
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-model-configs'] })
     },
   })
 
@@ -321,6 +374,16 @@ export default function ModelManagement() {
   }
 
   const handleSave = () => {
+    // Validate required fields for create mode
+    if (isCreate && !formState.providerId.trim()) {
+      setFormError('Please select a provider.')
+      return
+    }
+    if (isCreate && !formState.modelId.trim()) {
+      setFormError('Model ID is required.')
+      return
+    }
+
     setFormBusy(true)
 
     // Validate JSON fields
@@ -346,9 +409,8 @@ export default function ModelManagement() {
     }
 
     if (isCreate) {
-      const provider = providers?.find((p) => p.id === providerFilter && providerFilter !== 'all')
       const payload: CreateModelConfigRequest = {
-        providerId: provider?.id ?? '',
+        providerId: formState.providerId,
         modelId: formState.modelId,
         providerModelId: formState.providerModelId,
         displayName: formState.displayName,
@@ -407,6 +469,43 @@ export default function ModelManagement() {
       id: config.id,
       data: { [field]: !config[field] },
     })
+  }
+
+  const startInlineEdit = (config: ModelConfig) => {
+    setEditingNameId(config.id)
+    setEditingNameValue(config.displayName)
+    requestAnimationFrame(() => editInputRef.current?.focus())
+  }
+
+  const commitInlineEdit = () => {
+    if (!editingNameId || !editingNameValue.trim()) {
+      setEditingNameId(null)
+      return
+    }
+    toggleMutation.mutate(
+      { id: editingNameId, data: { displayName: editingNameValue.trim() } },
+      {
+        onSuccess: () => {
+          toast('Display name updated', 'success')
+        },
+        onError: (err) => {
+          toast(getErrorMessage(err), 'error')
+        },
+      }
+    )
+    setEditingNameId(null)
+  }
+
+  const cancelInlineEdit = () => {
+    setEditingNameId(null)
+  }
+
+  const handleInlineKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      commitInlineEdit()
+    } else if (e.key === 'Escape') {
+      cancelInlineEdit()
+    }
   }
 
   const busy =
@@ -555,7 +654,23 @@ export default function ModelManagement() {
                   <TableCell className="font-mono text-xs">
                     {config.providerModelId}
                   </TableCell>
-                  <TableCell>{config.displayName}</TableCell>
+                  <TableCell
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={() => startInlineEdit(config)}
+                  >
+                    {editingNameId === config.id ? (
+                      <Input
+                        ref={editInputRef}
+                        value={editingNameValue}
+                        onChange={(e) => setEditingNameValue(e.target.value)}
+                        onBlur={commitInlineEdit}
+                        onKeyDown={handleInlineKeyDown}
+                        className="h-8 text-sm"
+                      />
+                    ) : (
+                      <span className="cursor-text">{config.displayName}</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{config.modality}</Badge>
                   </TableCell>
@@ -684,6 +799,29 @@ export default function ModelManagement() {
           </DialogHeader>
 
             <div className="grid gap-4 py-2">
+
+            {isCreate && (
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select
+                  value={formState.providerId}
+                  onValueChange={(v) =>
+                    setFormState({ ...formState, providerId: v })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a provider…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
