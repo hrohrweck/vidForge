@@ -64,6 +64,7 @@ const getNavEntries = (isSuperuser: boolean): NavEntry[] => [
           children: [
             { to: '/admin', label: 'Overview', icon: Users },
             { to: '/admin/providers', label: 'Providers', icon: Server },
+            { to: '/admin/models', label: 'Models', icon: Server },
             { to: '/admin/groups', label: 'Groups', icon: Users },
           ],
         } as NavGroup,
