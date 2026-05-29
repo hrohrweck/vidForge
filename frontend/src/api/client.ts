@@ -811,6 +811,7 @@ export const scenesApi = {
 export interface ModelConfig {
   id: string
   name: string
+  display_name?: string
   description: string
   size_gb: number
   speed: string
