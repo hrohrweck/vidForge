@@ -8,6 +8,7 @@ interface TextModel {
   provider: string
   provider_type?: string
   description?: string
+  capabilities?: string[] | Record<string, boolean>
 }
 
 export function ModelPicker() {
@@ -25,7 +26,16 @@ export function ModelPicker() {
         const data = await modelsApi.getAvailableModels()
         if (cancelled) return
         const textModels: TextModel[] = data.text_models || []
-        setModels(textModels)
+        setModels(textModels.filter(m => {
+          const caps = m.capabilities
+          if (!caps) return true  // no capabilities → include
+          if (Array.isArray(caps)) {
+            // Array format: check for chat capability
+            return caps.includes('chat') || caps.some(c => c.includes('chat'))
+          }
+          // Dict format: model outputs text
+          return caps.outputs_text !== false
+        }))
         if (textModels.length > 0) {
           const current = useChatStore.getState().selectedModelId
           if (!textModels.find((m) => m.id === current) && current) {
