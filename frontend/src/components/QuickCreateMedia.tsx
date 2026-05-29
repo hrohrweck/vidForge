@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Loader2, Upload, X, Image as ImageIcon } from 'lucide-react'
+import { Plus, Loader2, Search, Upload, X, Image as ImageIcon } from 'lucide-react'
 import api, { modelsApi, type ModelConfig } from '../api/client'
 import { Button } from './ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import {
@@ -91,6 +91,8 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [providerFilter, setProviderFilter] = useState('all')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const uploadMutation = useUploadAssets()
@@ -108,6 +110,34 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
     () => models?.video_models?.map(toModelOption) ?? [],
     [models],
   )
+
+  const filteredImageModels = useMemo(() => {
+    return imageModels.filter(m => {
+      const matchesSearch = !searchQuery ||
+        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.id.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesProvider = providerFilter === 'all' || m.provider === providerFilter
+      return matchesSearch && matchesProvider
+    })
+  }, [imageModels, searchQuery, providerFilter])
+
+  const filteredVideoModels = useMemo(() => {
+    return videoModels.filter(m => {
+      const matchesSearch = !searchQuery ||
+        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.id.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesProvider = providerFilter === 'all' || m.provider === providerFilter
+      return matchesSearch && matchesProvider
+    })
+  }, [videoModels, searchQuery, providerFilter])
+
+  const uniqueProviders = useMemo(() => {
+    const providers = new Set<string>()
+    for (const m of [...imageModels, ...videoModels]) {
+      if (m.provider) providers.add(m.provider)
+    }
+    return Array.from(providers).sort()
+  }, [imageModels, videoModels])
 
   const caps = selectedModel?.capabilities
   const acceptsText = caps ? hasCapability(caps, 'accepts_text') : true
@@ -254,24 +284,50 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Create Media</DialogTitle>
+            <DialogDescription>
+              Select a model and configure settings to generate media.
+            </DialogDescription>
           </DialogHeader>
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : step === 'select' ? (
+            <>
+            <div className="flex gap-2 mb-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search models..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+              <Select value={providerFilter} onValueChange={setProviderFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="All providers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All providers</SelectItem>
+                  {uniqueProviders.map(p => (
+                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Tabs defaultValue="image">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="image">Image Models</TabsTrigger>
                 <TabsTrigger value="video">Video Models</TabsTrigger>
               </TabsList>
               <TabsContent value="image" className="space-y-2 mt-4 max-h-64 overflow-y-auto">
-                {imageModels.length === 0 ? (
+                {filteredImageModels.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">
                     No image models available
                   </p>
                 ) : (
-                  imageModels.map((m) => (
+                  filteredImageModels.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => handleModelSelect(m)}
@@ -286,12 +342,12 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                 )}
               </TabsContent>
               <TabsContent value="video" className="space-y-2 mt-4 max-h-64 overflow-y-auto">
-                {videoModels.length === 0 ? (
+                {filteredVideoModels.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">
                     No video models available
                   </p>
                 ) : (
-                  videoModels.map((m) => (
+                  filteredVideoModels.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => handleModelSelect(m)}
@@ -306,6 +362,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                 )}
               </TabsContent>
             </Tabs>
+            </>
           ) : (
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               <button
