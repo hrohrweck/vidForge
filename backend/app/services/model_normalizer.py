@@ -13,6 +13,13 @@ def normalize_provider_model(provider_type: str, model_data: dict[str, Any]) -> 
 
 def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
     atype = m.get("type", "Text").lower()
+    caps = {"supports_chat": atype == "text"}
+    if atype == "image":
+        caps.update({"accepts_text": True, "outputs_image": True})
+    elif atype == "video":
+        caps.update({"accepts_text": True, "outputs_video": True})
+    elif atype == "text":
+        caps.update({"accepts_text": True, "outputs_text": True})
     return {
         "model_id": m["model"],
         "provider_model_id": m["model"],
@@ -23,7 +30,7 @@ def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
             "generateVideo" if atype == "video" else
             "chat_completions"
         ),
-        "capabilities": {"supports_chat": atype == "text"},
+        "capabilities": caps,
         "cost_config": {"currency": "credits"},
     }
 
