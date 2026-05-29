@@ -19,7 +19,7 @@ def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
     # Parse model ID for task-type: {provider}/{family}/{task-type}
     # Task-types: text-to-image, image-to-image, edit, text-to-video, image-to-video, etc.
     if atype == "image":
-        if "/edit" in model_id or "image-to-image" in model_id:
+        if any(x in model_id for x in ("/edit", "image-edit", "image-to-image", "img2img")):
             caps.update({"accepts_image": True, "accepts_text": True, "outputs_image": True})
         else:
             caps.update({"accepts_text": True, "outputs_image": True})
