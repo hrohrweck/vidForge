@@ -33,13 +33,33 @@ export interface QuickCreateMediaProps {
   onSuccess?: () => void
 }
 
+const ARRAY_CAP_MAP: Record<string, Record<string, boolean>> = {
+  'text-to-image': { accepts_text: true, outputs_image: true },
+  'image-to-image': { accepts_image: true, outputs_image: true },
+  'text-to-video': { accepts_text: true, outputs_video: true },
+  'image-to-video': { accepts_image: true, outputs_video: true },
+  'video-to-video': { accepts_video: true, outputs_video: true },
+  'scene-to-video': { accepts_video: true, outputs_video: true },
+  'audio-to-video': { accepts_audio: true, outputs_video: true },
+  chat: { accepts_text: true, outputs_text: true },
+}
+
 function toModelOption(m: ModelConfig): ModelOption {
+  let caps: Record<string, boolean> | undefined
+  if (Array.isArray(m.capabilities)) {
+    caps = {}
+    for (const c of m.capabilities) {
+      Object.assign(caps, ARRAY_CAP_MAP[c] || {})
+    }
+  } else {
+    caps = m.capabilities
+  }
   return {
     id: m.id,
     name: m.display_name || m.id,
     provider: m.provider,
     description: m.description,
-    capabilities: m.capabilities,
+    capabilities: caps,
     costConfig: m.cost_config,
   }
 }
