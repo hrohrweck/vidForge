@@ -116,6 +116,7 @@ export function ChatPanel() {
       kind: a.kind,
       url: a.url,
       name: a.name,
+      mime_type: a.mimeType,
     }))
     clearAttachments()
     setStreaming(true)
