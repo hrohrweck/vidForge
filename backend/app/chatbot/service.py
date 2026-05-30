@@ -392,7 +392,13 @@ class ChatOrchestrator:
         )
         model_config = result.scalars().first()
         supports_vision = (
-            bool(model_config.capabilities and "vision" in model_config.capabilities)
+            bool(
+                model_config.capabilities
+                and (
+                    "vision" in model_config.capabilities
+                    or model_config.capabilities.get("accepts_image") is True
+                )
+            )
             if model_config else False
         )
         history = await self._load_history(user_id, conversation_id, supports_vision=supports_vision)
@@ -476,6 +482,9 @@ class ChatOrchestrator:
                     )
 
                     tool_content = json.dumps(result, ensure_ascii=False)
+                    max_tool_content = 8000
+                    if len(tool_content) > max_tool_content:
+                        tool_content = tool_content[:max_tool_content] + "\n...[truncated]"
                     await self._append_tool_message(conversation_id, normalized["id"], tool_content)
                     history.append(
                         {

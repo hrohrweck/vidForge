@@ -38,6 +38,7 @@ export function ChatPanel() {
   const appendMessage = useChatStore((s) => s.appendMessage)
   const setStreaming = useChatStore((s) => s.setStreaming)
   const setStreamError = useChatStore((s) => s.setStreamError)
+  const streamError = useChatStore((s) => s.streamError)
   const selectedModelId = useChatStore((s) => s.selectedModelId)
 
   const [input, setInput] = useState('')
@@ -206,6 +207,11 @@ export function ChatPanel() {
                   onRemove={() => removeAttachment(att.id)}
                 />
               ))}
+            </div>
+          )}
+          {streamError && (
+            <div className="mb-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {streamError}
             </div>
           )}
           <div className="flex gap-2">
