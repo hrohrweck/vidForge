@@ -111,7 +111,15 @@ export function ConversationSidebar() {
       setIsSearching(true)
       try {
         const resp = await api.get('/chat/search', { params: { q } })
-        setSearchResults(resp.data.items ?? resp.data)
+        const items = resp.data.items ?? resp.data
+        setSearchResults(
+          items.map((item: any) => ({
+            id: item.conversation_id,
+            title: item.conversation_title,
+            snippet: item.content,
+            timestamp: item.created_at,
+          }))
+        )
       } catch {
         setSearchResults([])
       } finally {
