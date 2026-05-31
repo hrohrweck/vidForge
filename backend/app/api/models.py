@@ -65,6 +65,8 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
         "max_resolution": constraints.get("max_resolution"),
         "default_steps": constraints.get("default_steps"),
         "distilled": constraints.get("distilled", False),
+        "resolutions": constraints.get("resolutions"),
+        "size_param_family": constraints.get("size_param_family"),
         "description": (m.extra_params or {}).get("description"),
         "cost_config": cost_config,
         "is_family": is_family_id(m.model_id),
