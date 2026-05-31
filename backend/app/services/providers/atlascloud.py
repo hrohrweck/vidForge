@@ -255,20 +255,18 @@ class AtlasCloudProvider(ComfyUIProvider):
             )
         payload = model_config.build_payload(prompt=prompt, aspect_ratio=aspect_ratio)
 
-        # Fallback: ensure aspect_ratio is set with the key AtlasCloud expects
-        # (build_payload uses parameter_map which may not map the field correctly)
-        if not any(k in payload for k in ("aspect_ratio", "ratio", "aspectRatio")):
-            payload["aspect_ratio"] = aspect_ratio
-        # If a wrong key was used, also set the correct one
-        for wrong_key in ("ratio", "aspectRatio"):
-            if wrong_key in payload and "aspect_ratio" not in payload:
-                payload["aspect_ratio"] = payload.pop(wrong_key)
-
-        # Also send "size" (AtlasCloud models like qwen expect this key instead of aspect_ratio).
-        # Flux models will ignore "size" when "aspect_ratio" is present; qwen models
-        # will use "size" which accepts the same ratio preset strings.
-        if "size" not in payload:
+        size_family = (model_config.constraints or {}).get("size_param_family", "ratio")
+        if size_family == "pixel_x":
             payload["size"] = aspect_ratio
+        elif size_family == "pixel_star":
+            payload["size"] = aspect_ratio.replace("x", "*")
+        elif size_family == "wh_int":
+            w_str, h_str = aspect_ratio.split("x")
+            payload["width"] = int(w_str)
+            payload["height"] = int(h_str)
+        else:
+            if "aspect_ratio" not in payload:
+                payload["aspect_ratio"] = aspect_ratio
 
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
@@ -384,18 +382,18 @@ class AtlasCloudProvider(ComfyUIProvider):
 
         payload = model_config.build_payload(**build_kwargs)
 
-        # Fallback: ensure aspect_ratio is set with the key AtlasCloud expects
-        if not any(k in payload for k in ("aspect_ratio", "ratio", "aspectRatio")):
-            payload["aspect_ratio"] = aspect_ratio
-        for wrong_key in ("ratio", "aspectRatio"):
-            if wrong_key in payload and "aspect_ratio" not in payload:
-                payload["aspect_ratio"] = payload.pop(wrong_key)
-
-        # Also send "size" (AtlasCloud models like qwen expect this key instead of aspect_ratio).
-        # Flux models will ignore "size" when "aspect_ratio" is present; qwen models
-        # will use "size" which accepts the same ratio preset strings.
-        if "size" not in payload:
+        size_family = (model_config.constraints or {}).get("size_param_family", "ratio")
+        if size_family == "pixel_x":
             payload["size"] = aspect_ratio
+        elif size_family == "pixel_star":
+            payload["size"] = aspect_ratio.replace("x", "*")
+        elif size_family == "wh_int":
+            w_str, h_str = aspect_ratio.split("x")
+            payload["width"] = int(w_str)
+            payload["height"] = int(h_str)
+        else:
+            if "aspect_ratio" not in payload:
+                payload["aspect_ratio"] = aspect_ratio
 
         # Upload local image to AtlasCloud first for I2V models
         if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
