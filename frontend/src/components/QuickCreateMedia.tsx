@@ -85,6 +85,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   const [negativePrompt, setNegativePrompt] = useState('')
   const [seed, setSeed] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [title, setTitle] = useState('')
   const [showAssetPicker, setShowAssetPicker] = useState(false)
   const [imageAsset, setImageAsset] = useState<MediaAsset | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -219,6 +220,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
         aspect_ratio: aspectRatio,
         negative_prompt: negativePrompt || undefined,
         seed: seed ? Number(seed) : undefined,
+        title: title.trim() || undefined,
       }
       if (outputsVideo || selectedModel.provider === 'video') {
         payload.duration = duration
@@ -392,6 +394,15 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                   </span>
                 </div>
               )}
+
+              <div>
+                <Label>Title (optional)</Label>
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Enter a title for this media"
+                />
+              </div>
 
               <div>
                 <Label>Aspect Ratio</Label>
