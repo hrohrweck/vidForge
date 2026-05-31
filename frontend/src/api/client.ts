@@ -822,6 +822,8 @@ export interface ModelConfig {
   default: boolean
   capabilities?: Record<string, boolean>
   cost_config?: Record<string, unknown> | null
+  resolutions?: string[] | null
+  size_param_family?: string | null
   variants?: Record<string, { workflow: string; description: string }>
 }
 

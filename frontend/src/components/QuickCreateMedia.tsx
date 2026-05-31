@@ -26,6 +26,8 @@ interface ModelOption {
   description?: string
   capabilities?: Record<string, boolean>
   costConfig?: Record<string, unknown> | null
+  resolutions?: string[] | null
+  sizeParamFamily?: string | null
 }
 
 export interface QuickCreateMediaProps {
@@ -61,6 +63,8 @@ function toModelOption(m: ModelConfig): ModelOption {
     description: m.description,
     capabilities: caps,
     costConfig: m.cost_config,
+    resolutions: m.resolutions ?? null,
+    sizeParamFamily: m.size_param_family ?? null,
   }
 }
 
@@ -75,6 +79,30 @@ function hasCapability(
   return keys.some((k) => caps[k] === true)
 }
 
+const RESOLUTION_LABELS: Record<string, string> = {
+  '1536x1536': '1:1 square (1536×1536)',
+  '2688x1536': '16:9 landscape (2688×1536)',
+  '1536x2688': '9:16 portrait (1536×2688)',
+  '2048x1536': '4:3 landscape (2048×1536)',
+  '1536x2048': '3:4 portrait (1536×2048)',
+  '1024x1024': '1:1 square (1024×1024)',
+  '1024x1536': '9:16 portrait (1024×1536)',
+  '1536x1024': '16:9 landscape (1536×1024)',
+  '1440x1440': '1:1 square (1440×1440)',
+  '2560x1440': '16:9 landscape (2560×1440)',
+  '1440x2560': '9:16 portrait (1440×2560)',
+  '2048x1440': '4:3 landscape (2048×1440)',
+  '1440x2048': '3:4 portrait (1440×2048)',
+  '848x1264':  '3:4 portrait (848×1264)',
+  '1264x848':  '4:3 landscape (1264×848)',
+  '768x1376':  'portrait (768×1376)',
+  '1376x768':  'landscape (1376×768)',
+}
+
+function resolutionLabel(r: string): string {
+  return RESOLUTION_LABELS[r] ?? r
+}
+
 export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickCreateMediaProps) {
   const [open, setOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<ModelOption | null>(null)
@@ -86,6 +114,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   const [seed, setSeed] = useState('')
   const [prompt, setPrompt] = useState('')
   const [title, setTitle] = useState('')
+  const [resolution, setResolution] = useState('1536x2688')
   const [showAssetPicker, setShowAssetPicker] = useState(false)
   const [imageAsset, setImageAsset] = useState<MediaAsset | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -141,6 +170,8 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   }, [imageModels, videoModels])
 
   const caps = selectedModel?.capabilities
+  const usesPixelResolution = !!(selectedModel?.sizeParamFamily && selectedModel.sizeParamFamily !== 'ratio')
+  const availableResolutions = selectedModel?.resolutions ?? null
   const acceptsText = caps ? hasCapability(caps, 'accepts_text') : true
   const acceptsImage = hasCapability(caps, 'accepts_image')
   const outputsImage = hasCapability(caps, 'outputs_image')
@@ -160,6 +191,14 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
   const handleModelSelect = (model: ModelOption) => {
     setSelectedModel(model)
     resetImage()
+    setTitle('')
+    if (model.resolutions && model.sizeParamFamily !== 'ratio') {
+      const portrait = model.resolutions.find(r => {
+        const parts = r.split('x').map(Number)
+        return parts.length === 2 && parts[1] > parts[0]
+      })
+      setResolution(portrait ?? model.resolutions[0])
+    }
     setStep('configure')
   }
 
@@ -217,7 +256,7 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
       const payload: Record<string, unknown> = {
         model_id: selectedModel.id,
         prompt: prompt.trim() || '',
-        aspect_ratio: aspectRatio,
+        aspect_ratio: usesPixelResolution ? resolution : aspectRatio,
         negative_prompt: negativePrompt || undefined,
         seed: seed ? Number(seed) : undefined,
         title: title.trim() || undefined,
@@ -404,21 +443,39 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
                 />
               </div>
 
-              <div>
-                <Label>Aspect Ratio</Label>
-                <Select value={aspectRatio} onValueChange={setAspectRatio}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'].map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {r}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {usesPixelResolution && availableResolutions ? (
+                <div>
+                  <Label>Resolution</Label>
+                  <Select value={resolution} onValueChange={setResolution}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableResolutions.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {resolutionLabel(r)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div>
+                  <Label>Aspect Ratio</Label>
+                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'].map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {outputsVideo && (
                 <div>
