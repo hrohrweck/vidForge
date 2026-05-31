@@ -15,7 +15,7 @@ def _normalize_atlascloud(m: dict[str, Any]) -> dict[str, Any]:
     atype = m.get("type", "Text").lower()
     model_id = m.get("model", "").lower()
     caps = {"supports_chat": atype == "text"}
-    
+
     # Parse model ID for task-type: {provider}/{family}/{task-type}
     # Task-types: text-to-image, image-to-image, edit, text-to-video, image-to-video, etc.
     if atype == "image":

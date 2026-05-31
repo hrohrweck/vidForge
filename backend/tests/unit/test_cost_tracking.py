@@ -150,9 +150,10 @@ class TestSyncPopulatesCostConfig:
         assert empty_model["cost_config"]["credits_per_image"] == 0
         assert empty_model["cost_config"]["credits_per_second"] == 0
 
-        # Sanity: the real function returns an empty list for now
-        result = await _sync_atlascloud_models(provider)
-        assert result == []
+        # The real function now calls the AtlasCloud API; mock it to avoid network
+        with patch.object(AtlasCloudProvider, "initialize", AsyncMock(return_value=None)):
+            result = await _sync_atlascloud_models(provider)
+            assert result == []
 
 
 # ---------------------------------------------------------------------------

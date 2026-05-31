@@ -88,19 +88,38 @@ export default function Settings() {
     [allModels]
   )
 
-  const buildPreferences = (overrides: Partial<ModelPreferences>): ModelPreferences => ({
-    image_model: modelPreferences?.image_model || 'flux1-schnell',
-    video_model: modelPreferences?.video_model || 'wan2.2',
-    text_model: modelPreferences?.text_model || 'qwen3.6:35b',
-    image_provider: modelPreferences?.image_provider || 'local',
-    video_provider: modelPreferences?.video_provider || 'local',
-    text_provider: modelPreferences?.text_provider || 'local',
-    text_to_image_model: modelPreferences?.text_to_image_model || 'flux1-schnell',
-    image_to_image_model: modelPreferences?.image_to_image_model || 'flux1-schnell',
-    text_to_video_model: modelPreferences?.text_to_video_model || 'wan2.2',
-    image_to_video_model: modelPreferences?.image_to_video_model || 'wan2.2',
-    ...overrides,
-  })
+  const buildPreferences = (overrides: Partial<ModelPreferences>): ModelPreferences => {
+    const findProviderId = (modelId: string | undefined): string => {
+      if (!modelId || !availableModels) return ''
+      const all = [
+        ...(availableModels.image_models || []),
+        ...(availableModels.video_models || []),
+        ...(availableModels.text_models || []),
+      ]
+      const found = all.find(m => m.id === modelId)
+      return found?.provider_id || ''
+    }
+    return {
+      image_model: modelPreferences?.image_model || 'flux1-schnell',
+      video_model: modelPreferences?.video_model || 'wan2.2',
+      text_model: modelPreferences?.text_model || 'qwen3.6:35b',
+      image_provider: modelPreferences?.image_provider || 'local',
+      video_provider: modelPreferences?.video_provider || 'local',
+      text_provider: modelPreferences?.text_provider || 'local',
+      text_to_image_model: modelPreferences?.text_to_image_model || 'flux1-schnell',
+      image_to_image_model: modelPreferences?.image_to_image_model || 'flux1-schnell',
+      text_to_video_model: modelPreferences?.text_to_video_model || 'wan2.2',
+      image_to_video_model: modelPreferences?.image_to_video_model || 'wan2.2',
+      image_provider_id: modelPreferences?.image_provider_id || findProviderId(modelPreferences?.image_model),
+      video_provider_id: modelPreferences?.video_provider_id || findProviderId(modelPreferences?.video_model),
+      text_provider_id: modelPreferences?.text_provider_id || findProviderId(modelPreferences?.text_model),
+      text_to_image_provider_id: modelPreferences?.text_to_image_provider_id || findProviderId(modelPreferences?.text_to_image_model),
+      image_to_image_provider_id: modelPreferences?.image_to_image_provider_id || findProviderId(modelPreferences?.image_to_image_model),
+      text_to_video_provider_id: modelPreferences?.text_to_video_provider_id || findProviderId(modelPreferences?.text_to_video_model),
+      image_to_video_provider_id: modelPreferences?.image_to_video_provider_id || findProviderId(modelPreferences?.image_to_video_model),
+      ...overrides,
+    }
+  }
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (settings: typeof storageSettings & { preferences?: { auto_create_jobs: boolean } }) => {
@@ -517,11 +536,16 @@ export default function Settings() {
                   id="text-to-image"
                   className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={modelPreferences?.text_to_image_model || 'flux1-schnell'}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const modelId = e.target.value
+                    const model = textToImageModels.find(m => m.id === modelId)
                     updateModelPreferencesMutation.mutate(
-                      buildPreferences({ text_to_image_model: e.target.value })
+                      buildPreferences({
+                        text_to_image_model: modelId,
+                        text_to_image_provider_id: model?.provider_id || '',
+                      })
                     )
-                  }
+                  }}
                 >
                   {textToImageModels.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -542,11 +566,16 @@ export default function Settings() {
                   id="image-to-image"
                   className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={modelPreferences?.image_to_image_model || 'flux1-schnell'}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const modelId = e.target.value
+                    const model = imageToImageModels.find(m => m.id === modelId)
                     updateModelPreferencesMutation.mutate(
-                      buildPreferences({ image_to_image_model: e.target.value })
+                      buildPreferences({
+                        image_to_image_model: modelId,
+                        image_to_image_provider_id: model?.provider_id || '',
+                      })
                     )
-                  }
+                  }}
                 >
                   {imageToImageModels.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -567,11 +596,16 @@ export default function Settings() {
                   id="text-to-video"
                   className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={modelPreferences?.text_to_video_model || 'wan2.2'}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const modelId = e.target.value
+                    const model = textToVideoModels.find(m => m.id === modelId)
                     updateModelPreferencesMutation.mutate(
-                      buildPreferences({ text_to_video_model: e.target.value })
+                      buildPreferences({
+                        text_to_video_model: modelId,
+                        text_to_video_provider_id: model?.provider_id || '',
+                      })
                     )
-                  }
+                  }}
                 >
                   {textToVideoModels.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -592,11 +626,16 @@ export default function Settings() {
                   id="image-to-video"
                   className="flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={modelPreferences?.image_to_video_model || 'wan2.2'}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const modelId = e.target.value
+                    const model = imageToVideoModels.find(m => m.id === modelId)
                     updateModelPreferencesMutation.mutate(
-                      buildPreferences({ image_to_video_model: e.target.value })
+                      buildPreferences({
+                        image_to_video_model: modelId,
+                        image_to_video_provider_id: model?.provider_id || '',
+                      })
                     )
-                  }
+                  }}
                 >
                   {imageToVideoModels.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -624,7 +663,10 @@ export default function Settings() {
                       }`}
                       onClick={() =>
                         updateModelPreferencesMutation.mutate(
-                          buildPreferences({ text_model: model.id })
+                          buildPreferences({
+                            text_model: model.id,
+                            text_provider_id: model.provider_id || '',
+                          })
                         )
                       }
                     >

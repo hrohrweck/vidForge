@@ -117,6 +117,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
     attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
@@ -305,6 +306,10 @@ class Job(Base):
     )
     export_options: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     workflow_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    chat_conversation_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    chat_message_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

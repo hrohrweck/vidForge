@@ -84,8 +84,9 @@ class PromptToVideoPlugin(PluginBase):
     async def plan_scenes(
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
-        from .planner import plan_scenes_from_prompt
         from app.services.avatar_prompt_builder import build_avatar_context_string
+
+        from .planner import plan_scenes_from_prompt
 
         input_data = job.input_data or {}
         prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")

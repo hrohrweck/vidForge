@@ -184,9 +184,9 @@ class TestCapabilitiesField:
         cap_model = next((m for m in all_models if m["id"] == "cap-model"), None)
         assert cap_model is not None, "Model should be present"
         assert "capabilities" in cap_model, "Response must include capabilities field"
-        assert isinstance(cap_model["capabilities"], list)
-        assert "image_to_image" in cap_model["capabilities"]
-        assert "text_to_image" in cap_model["capabilities"]
+        assert isinstance(cap_model["capabilities"], dict)
+        assert cap_model["capabilities"].get("accepts_text") is True
+        assert cap_model["capabilities"].get("outputs_image") is True
 
     @pytest.mark.asyncio
     async def test_capabilities_defaults_to_empty_list(self, client: AsyncClient, db_session):
@@ -206,9 +206,8 @@ class TestCapabilitiesField:
         all_models = data["image_models"] + data["video_models"] + data["text_models"]
         no_cap = next((m for m in all_models if m["id"] == "no-cap-model"), None)
         assert no_cap is not None
-        assert no_cap["capabilities"] == [], (
-            "Null capabilities should default to empty list"
-        )
+        assert isinstance(no_cap["capabilities"], dict)
+        assert no_cap["capabilities"].get("accepts_text") is True
 
     @pytest.mark.asyncio
     async def test_capabilities_in_list_endpoint(self, client: AsyncClient, db_session):
@@ -228,7 +227,9 @@ class TestCapabilitiesField:
         target = next((m for m in models if m["id"] == "list-cap-model"), None)
         assert target is not None
         assert "capabilities" in target
-        assert "text_to_image" in target["capabilities"]
+        assert isinstance(target["capabilities"], dict)
+        assert target["capabilities"].get("accepts_text") is True
+        assert target["capabilities"].get("outputs_image") is True
 
     @pytest.mark.asyncio
     async def test_capabilities_in_detail_endpoint(self, client: AsyncClient, db_session):
@@ -238,6 +239,7 @@ class TestCapabilitiesField:
             db_session, provider,
             model_id="detail-cap-model",
             capabilities=["image_to_video"],
+            modality="video",
         )
         await db_session.commit()
 
@@ -246,7 +248,9 @@ class TestCapabilitiesField:
         data = response.json()
 
         assert "capabilities" in data
-        assert "image_to_video" in data["capabilities"]
+        assert isinstance(data["capabilities"], dict)
+        assert data["capabilities"].get("accepts_text") is True
+        assert data["capabilities"].get("outputs_video") is True
 
     @pytest.mark.asyncio
     async def test_capability_filter_endpoint_returns_only_matching(self, client: AsyncClient, db_session):

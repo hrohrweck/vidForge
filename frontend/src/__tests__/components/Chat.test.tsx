@@ -15,13 +15,13 @@ vi.mock('../../api/client', () => ({
           id: 'qwen', name: 'Qwen 3.6', description: 'Local LLM via Ollama',
           size_gb: 4, speed: 'fast', quality: 'great', license: 'Apache-2.0',
           provider: 'ollama', provider_type: 'ollama', default: true,
-          capabilities: { outputs_text: true, accepts_text: true },
+          capabilities: { outputs_text: true, accepts_text: true, accepts_image: true },
         },
         {
           id: 'llama', name: 'Llama 3.3', description: 'Local LLM',
           size_gb: 6, speed: 'medium', quality: 'great', license: 'open',
           provider: 'ollama', provider_type: 'ollama', default: false,
-          capabilities: { outputs_text: true, accepts_text: true },
+          capabilities: { outputs_text: true, accepts_text: true, accepts_image: true },
         },
         {
           id: 'glm', name: 'GLM 5.1', description: 'Cloud LLM via Poe',
@@ -30,10 +30,16 @@ vi.mock('../../api/client', () => ({
           capabilities: { outputs_text: true, accepts_text: true, accepts_image: true },
         },
         {
-          id: 'image-only-model', name: 'Image Only', description: 'Only generates images',
+          id: 'text-only-model', name: 'Text Only', description: 'Text input only, no images',
+          size_gb: 4, speed: 'fast', quality: 'good', license: 'open',
+          provider: 'ollama', provider_type: 'ollama', default: false,
+          capabilities: { outputs_text: true, accepts_text: true, accepts_image: false },
+        },
+        {
+          id: 'image-output-only', name: 'Image Output Only', description: 'Only generates images',
           size_gb: 12, speed: 'fast', quality: 'good', license: 'open',
           provider: 'poe', provider_type: 'poe', default: false,
-          capabilities: { outputs_text: false, outputs_image: true, accepts_text: true },
+          capabilities: { outputs_text: false, accepts_text: true, accepts_image: true },
         },
         {
           id: 'no-caps-model', name: 'No Capabilities', description: 'Legacy model with no caps',
@@ -73,7 +79,7 @@ function makeMsg(overrides: Partial<Message> = {}): Message {
 }
 
 describe('ModelPicker', () => {
-  it('shows only text-output models in the dropdown', async () => {
+  it('shows only models that accept text+image input and output text', async () => {
     renderWithProviders(<ModelPicker />)
 
     await waitFor(() => {
@@ -83,18 +89,19 @@ describe('ModelPicker', () => {
     expect(screen.getByText('Qwen 3.6')).toBeInTheDocument()
     expect(screen.getByText('Llama 3.3')).toBeInTheDocument()
     expect(screen.getByText('GLM 5.1')).toBeInTheDocument()
-    expect(screen.getByText('No Capabilities')).toBeInTheDocument()
-    expect(screen.queryByText('Image Only')).not.toBeInTheDocument()
+    expect(screen.queryByText('Text Only')).not.toBeInTheDocument()
+    expect(screen.queryByText('Image Output Only')).not.toBeInTheDocument()
+    expect(screen.queryByText('No Capabilities')).not.toBeInTheDocument()
   })
 
-  it('includes models that have no capabilities defined (legacy fallback)', async () => {
+  it('excludes models without accepts_image', async () => {
     renderWithProviders(<ModelPicker />)
 
     await waitFor(() => {
       expect(screen.queryByText('Loading models...')).not.toBeInTheDocument()
     })
 
-    expect(screen.getByText('No Capabilities')).toBeInTheDocument()
+    expect(screen.queryByText('Text Only')).not.toBeInTheDocument()
   })
 
   it('excludes models with outputs_text: false', async () => {
@@ -104,7 +111,17 @@ describe('ModelPicker', () => {
       expect(screen.queryByText('Loading models...')).not.toBeInTheDocument()
     })
 
-    expect(screen.queryByText('Image Only')).not.toBeInTheDocument()
+    expect(screen.queryByText('Image Output Only')).not.toBeInTheDocument()
+  })
+
+  it('excludes models with no capabilities defined', async () => {
+    renderWithProviders(<ModelPicker />)
+
+    await waitFor(() => {
+      expect(screen.queryByText('Loading models...')).not.toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('No Capabilities')).not.toBeInTheDocument()
   })
 })
 
@@ -121,14 +138,14 @@ describe('MessageBubble', () => {
     it('renders "just now" for very recent messages', () => {
       const msg = makeMsg({ createdAt: new Date().toISOString() })
       render(<MessageBubble message={msg} />)
-      expect(screen.getByText('just now')).toBeInTheDocument()
+      expect(screen.getByText(/just now/)).toBeInTheDocument()
     })
 
     it('renders relative minute format for older messages', () => {
       const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
       const msg = makeMsg({ createdAt: fiveMinAgo })
       render(<MessageBubble message={msg} />)
-      expect(screen.getByText('5m ago')).toBeInTheDocument()
+      expect(screen.getByText(/5m ago/)).toBeInTheDocument()
     })
   })
 

@@ -157,3 +157,19 @@ async def websocket_job_updates(websocket: WebSocket, job_id: str) -> None:
             subscribe_task.cancel()
     finally:
         ws_manager.disconnect(websocket, job_id)
+
+
+@app.websocket("/ws/chat/{conversation_id}")
+async def websocket_chat_updates(websocket: WebSocket, conversation_id: str) -> None:
+    await websocket.accept()
+    try:
+        subscribe_task = asyncio.create_task(ws_manager.subscribe_to_chat(conversation_id, websocket))
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            subscribe_task.cancel()
+    finally:
+        await websocket.close()

@@ -7,10 +7,6 @@ import { chatApi } from '../../api/client'
 import { MessageBubble } from './MessageBubble'
 import { ModelPicker } from './ModelPicker'
 
-const PLACEHOLDER_MESSAGES: Message[] = [
-  { id: '1', role: 'assistant', content: 'Hello! How can I help you today?', createdAt: new Date().toISOString() },
-]
-
 function AttachmentChip({ att, onRemove }: { att: Attachment; onRemove: () => void }) {
   const icon = att.kind === 'image' ? <Image className="h-3 w-3" /> :
     att.kind === 'audio' ? <Music className="h-3 w-3" /> :
@@ -36,6 +32,8 @@ export function ChatPanel() {
   const removeAttachment = useChatStore((s) => s.removeAttachment)
   const clearAttachments = useChatStore((s) => s.clearAttachments)
   const appendMessage = useChatStore((s) => s.appendMessage)
+  const updateMessage = useChatStore((s) => s.updateMessage)
+  const setMessages = useChatStore((s) => s.setMessages)
   const setStreaming = useChatStore((s) => s.setStreaming)
   const setStreamError = useChatStore((s) => s.setStreamError)
   const streamError = useChatStore((s) => s.streamError)
@@ -54,6 +52,67 @@ export function ChatPanel() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [panelOpen, closePanel])
+
+  useEffect(() => {
+    if (!selectedConversationId) return
+    setMessages(selectedConversationId, [])
+    chatApi.listMessages(selectedConversationId).then((msgs) => {
+      const mapped: Message[] = msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.created_at,
+        jobId: m.job_id,
+        attachments: m.attachments,
+        toolCallId: m.tool_call_id ?? undefined,
+      }))
+      setMessages(selectedConversationId, mapped)
+    }).catch(() => {
+      setMessages(selectedConversationId, [])
+    })
+  }, [selectedConversationId, setMessages])
+
+  useEffect(() => {
+    if (!selectedConversationId) return
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/${selectedConversationId}`
+    const ws = new WebSocket(wsUrl)
+
+    ws.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type !== 'chat_message_appended') return
+        const messageId: string | undefined = data.message_id
+        if (!messageId) return
+
+        const state = useChatStore.getState()
+        const existing = state.messages[selectedConversationId] ?? []
+        if (existing.some((m) => m.id === messageId)) return
+
+        const fetched = await chatApi.listMessages(selectedConversationId)
+        const newMsg = fetched.find((m) => m.id === messageId)
+        if (!newMsg) return
+
+        const freshExisting = useChatStore.getState().messages[selectedConversationId] ?? []
+        if (freshExisting.some((m) => m.id === newMsg.id)) return
+
+        appendMessage(selectedConversationId, {
+          id: newMsg.id,
+          role: newMsg.role,
+          content: newMsg.content,
+          createdAt: newMsg.created_at,
+          attachments: newMsg.attachments,
+          jobId: newMsg.job_id ?? undefined,
+          toolCallId: newMsg.tool_call_id ?? undefined,
+        })
+      } catch (e) {
+        console.error('chat ws parse', e)
+      }
+    }
+
+    return () => ws.close()
+  }, [selectedConversationId, appendMessage])
 
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -108,6 +167,12 @@ export function ChatPanel() {
       role: 'user',
       content: text,
       createdAt: new Date().toISOString(),
+      attachments: pendingAttachments.map((a) => ({
+        url: a.url,
+        name: a.name,
+        type: a.mimeType,
+        kind: a.kind,
+      })),
     }
     appendMessage(selectedConversationId, userMsg)
     setInput('')
@@ -143,6 +208,17 @@ export function ChatPanel() {
         if (event.event === 'token') {
           const delta = (eventData.content as string) ?? ''
           assistantMsg.content += delta
+          updateMessage(selectedConversationId, assistantMsg.id, { content: assistantMsg.content })
+        } else if (event.event === 'tool_call_start') {
+          const toolName = (eventData.name as string) ?? 'tool'
+          assistantMsg.content += `\n\nCalling ${toolName}...`
+          updateMessage(selectedConversationId, assistantMsg.id, { content: assistantMsg.content })
+        } else if (event.event === 'tool_call_result') {
+          const result = eventData.result as Record<string, unknown> | undefined
+          const jobId = result?.job_id as string | undefined
+          if (jobId) {
+            updateMessage(selectedConversationId, assistantMsg.id, { jobId })
+          }
         } else if (event.event === 'error') {
           setStreamError((eventData.reason as string) ?? (eventData.error as string) ?? 'Stream error')
         }
@@ -154,7 +230,7 @@ export function ChatPanel() {
     } finally {
       setStreaming(false)
     }
-  }, [input, pendingAttachments, selectedConversationId, appendMessage, clearAttachments, setStreaming, setStreamError])
+  }, [input, pendingAttachments, selectedConversationId, appendMessage, updateMessage, clearAttachments, setStreaming, setStreamError])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -164,6 +240,16 @@ export function ChatPanel() {
   }, [handleSend])
 
   if (!panelOpen) return null
+
+  const messages = useChatStore((s) => s.selectedConversationId
+    ? s.messages[s.selectedConversationId] ?? []
+    : []
+  )
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   return (
     <div
@@ -192,9 +278,14 @@ export function ChatPanel() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {PLACEHOLDER_MESSAGES.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
+          {messages.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No messages yet — say hi.</p>
+          ) : (
+            messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} conversationId={selectedConversationId ?? undefined} />
+            ))
+          )}
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="border-t p-4">

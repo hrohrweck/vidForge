@@ -9,10 +9,10 @@ from uuid import UUID
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from app.services.llm_service import LLMChunk, LLMError
 from app.services.providers.base import ComfyUIProvider, ProviderInfo
+
+logger = logging.getLogger(__name__)
 
 
 class PoeProvider(ComfyUIProvider):
@@ -121,9 +121,6 @@ class PoeProvider(ComfyUIProvider):
         if effective_tools:
             payload["tools"] = effective_tools
 
-        tool_calls: list[dict[str, Any]] = []
-        usage: dict[str, Any] | None = None
-
         try:
             async with client.stream(
                 "POST",
@@ -203,8 +200,13 @@ class PoeProvider(ComfyUIProvider):
                 return
 
             if error := data.get("error"):
+                logger.warning("Poe SSE error event: %s", error)
                 if isinstance(error, dict):
-                    raise LLMError(str(error.get("message") or error))
+                    msg = str(error.get("message") or error)
+                    code = error.get("code") or error.get("type")
+                    if code:
+                        msg = f"{msg} (code={code})"
+                    raise LLMError(msg)
                 raise LLMError(str(error))
 
             if data.get("usage"):

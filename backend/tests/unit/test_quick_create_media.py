@@ -68,7 +68,7 @@ class TestQuickGenerateEndpoint:
         _patch_fake_task(monkeypatch, fake_task)
 
         response = await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={
                 "model_id": "model-abc",
                 "prompt": "a test prompt",
@@ -89,7 +89,7 @@ class TestQuickGenerateEndpoint:
     async def test_endpoint_requires_auth(self, client: AsyncClient):
         """No Authorization header → 401."""
         response = await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={"model_id": "model-abc", "prompt": "test"},
         )
         assert response.status_code == 401
@@ -104,7 +104,7 @@ class TestQuickGenerateEndpoint:
     ):
         """Missing required field ``model_id`` → 422."""
         response = await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={"prompt": "test prompt"},
             headers={"Authorization": f"Bearer {regular_user_token}"},
         )
@@ -118,7 +118,7 @@ class TestQuickGenerateEndpoint:
     ):
         """Missing required field ``prompt`` → 422."""
         response = await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={"model_id": "model-abc"},
             headers={"Authorization": f"Bearer {regular_user_token}"},
         )
@@ -138,7 +138,7 @@ class TestQuickGenerateEndpoint:
         _patch_fake_task(monkeypatch, fake_task)
 
         response = await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={
                 "model_id": "flux-schnell",
                 "prompt": "golden retriever",
@@ -173,7 +173,7 @@ class TestQuickGenerateEndpoint:
         _patch_fake_task(monkeypatch, fake_task)
 
         await client.post(
-            "/api/media/media/generate",
+            "/api/media/generate",
             json={"model_id": "m", "prompt": "p"},
             headers={"Authorization": f"Bearer {regular_user_token}"},
         )

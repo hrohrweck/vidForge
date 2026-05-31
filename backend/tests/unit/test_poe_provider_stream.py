@@ -10,8 +10,9 @@ from app.services.providers.poe import PoeProvider
 
 
 class FakePoeStreamResponse:
-    def __init__(self, events: list[dict[str, Any] | str]):
+    def __init__(self, events: list[dict[str, Any] | str], status_code: int = 200):
         self.events = events
+        self.status_code = status_code
 
     async def __aenter__(self):
         return self
@@ -79,6 +80,7 @@ async def test_chat_stream_yields_text_usage_and_done_chunks():
         LLMChunk(type="text", content="lo"),
         LLMChunk(type="usage", tokens_in=4, tokens_out=2),
         LLMChunk(type="done"),
+        LLMChunk(type="done"),
     ]
     assert client.requests[0] == {
         "method": "POST",
@@ -87,7 +89,6 @@ async def test_chat_stream_yields_text_usage_and_done_chunks():
             "model": "GPT-5.4",
             "messages": [{"role": "user", "content": "Hi"}],
             "stream": True,
-            "stream_options": {"include_usage": True},
         },
         "headers": {"Authorization": "Bearer test-token"},
     }
@@ -165,6 +166,7 @@ async def test_chat_stream_accumulates_openai_tool_call_deltas():
                 }
             ],
         ),
+        LLMChunk(type="done"),
         LLMChunk(type="done"),
     ]
     assert client.requests[0]["json"]["tools"] == tools

@@ -107,6 +107,9 @@ temp/
 # Agentic coding
 .sisyphus
 
+# Test results
+test-results/
+
 # Alembic
 # Keep alembic/ but ignore any generated temp files
 # Session dumps\nsession-*.md

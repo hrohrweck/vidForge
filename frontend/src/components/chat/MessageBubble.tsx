@@ -1,9 +1,12 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Message } from '../../stores/chat'
+import JobProgress from './JobProgress'
+import { useChatStore } from '../../stores/chat'
 
 interface MessageBubbleProps {
   message: Message
+  conversationId?: string
 }
 
 function formatTime(iso: string): string {
@@ -20,7 +23,7 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -36,8 +39,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       >
         {message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
-            {message.attachments.map((att, i) =>
-              att.type?.startsWith('image') ? (
+            {message.attachments.map((att, i) => {
+              const kind = att.type ?? att.kind ?? att.mime_type
+              const isImage = (att.type ?? att.mime_type ?? '').startsWith('image') || att.kind === 'image'
+              const isVideo = (att.type ?? att.mime_type ?? '').startsWith('video') || att.kind === 'video'
+              return isImage ? (
                 <img
                   key={i}
                   src={att.url}
@@ -45,7 +51,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer"
                   onClick={() => window.open(att.url, '_blank')}
                 />
-              ) : att.type?.startsWith('video') ? (
+              ) : isVideo ? (
                 <video
                   key={i}
                   src={att.url}
@@ -60,10 +66,10 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   rel="noreferrer"
                   className="text-xs text-primary hover:underline"
                 >
-                  {att.name || 'Attachment'}
+                  {att.name || kind || 'Attachment'}
                 </a>
               )
-            )}
+            })}
           </div>
         )}
         {isUser ? (
@@ -74,11 +80,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </ReactMarkdown>
         )}
       </div>
+      {!isUser && message.jobId && !message.mediaResult && conversationId && (
+        <JobProgress
+          jobId={message.jobId}
+          onComplete={(payload) => {
+            const url = payload.output_path ?? payload.preview_path ?? ''
+            const kind = /\.(mp4|webm|mov)$/i.test(url)
+              ? 'video'
+              : /\.(jpe?g|png|webp|gif)$/i.test(url)
+                ? 'image'
+                : 'media'
+            useChatStore.getState().updateMessage(conversationId, message.id, {
+              mediaResult: { kind, url },
+            })
+          }}
+        />
+      )}
       <span
-        className={`mt-1 text-xs text-muted-foreground ${isUser ? 'text-right' : 'text-left'}`}
+        className={`mt-1 text-[11px] text-foreground/60 ${isUser ? 'text-right' : 'text-left'}`}
         title={new Date(message.createdAt).toLocaleString()}
       >
-        {formatTime(message.createdAt)}
+        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {formatTime(message.createdAt)}
       </span>
     </div>
   )

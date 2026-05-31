@@ -9,8 +9,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
-logger = logging.getLogger(__name__)
 from sqlalchemy import String, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +25,8 @@ from app.chatbot.streaming import encode_sse_event
 from app.chatbot.tools import ToolContext
 from app.database import Conversation, Message, User, get_db
 from app.storage import get_storage_backend
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -329,6 +329,7 @@ async def create_message_stream(
             user_id=str(current_user.id),
             db=db,
             request_id="",
+            conversation_id=str(conversation_id),
         )
         try:
             async for event_type, event_data in orchestrator.run_turn(

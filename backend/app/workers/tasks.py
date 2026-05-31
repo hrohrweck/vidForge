@@ -12,16 +12,19 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.websocket import manager as ws_manager
 from app.config import get_settings
-from app.database import Job, Provider, Template
+from app.database import Job, Message, Provider, Template
 from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
 from app.services.video_generator import process_job_video
 from app.services.worker_registry import WorkerRegistry
+from app.storage import get_storage_backend
 from app.workers.celery_app import celery_app
 from app.workers.context import ctx
 
@@ -103,6 +106,87 @@ async def update_job_status(
         "preview_path": preview_path,
     }
     await broadcast_update(str(job_id), payload)
+
+    if status == "completed":
+        await _post_completion_message(job_id)
+
+
+async def _post_completion_message(
+    job_id: UUID, db: AsyncSession | None = None
+) -> None:
+    """If the job was triggered from chat, post the result as an assistant message."""
+    if db is None:
+        async with ctx.session_factory() as db:
+            return await _post_completion_message(job_id, db=db)
+
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job or not job.chat_conversation_id:
+        return
+
+    dup_result = await db.execute(
+        select(Message).where(
+            Message.conversation_id == job.chat_conversation_id,
+            Message.job_id == job.id,
+        )
+    )
+    if dup_result.scalar_one_or_none():
+        return
+
+    media_path = job.output_path or job.preview_path
+    if not media_path:
+        return
+
+    ext = Path(media_path).suffix.lower()
+    kind_map = {
+        ".mp4": "video",
+        ".webm": "video",
+        ".mov": "video",
+        ".png": "image",
+        ".jpg": "image",
+        ".jpeg": "image",
+        ".webp": "image",
+        ".gif": "image",
+        ".mp3": "audio",
+        ".wav": "audio",
+        ".ogg": "audio",
+        ".m4a": "audio",
+    }
+    kind = kind_map.get(ext, "video")
+    mime_map = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
+    }
+    mime_type = mime_map.get(ext, "application/octet-stream")
+
+    storage = get_storage_backend()
+    url = await storage.get_url(media_path)
+
+    message = Message(
+        id=uuid4(),
+        conversation_id=job.chat_conversation_id,
+        role="assistant",
+        content="Here is the result:",
+        attachments=[{"kind": kind, "url": url, "mime_type": mime_type}],
+        job_id=job.id,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+
+    await ws_manager.broadcast_chat_message(
+        str(job.chat_conversation_id), str(message.id)
+    )
 
 
 async def get_template_name(db, template_id: UUID | None) -> str:
@@ -736,7 +820,7 @@ async def _cleanup_orphaned_avatars():
 
         result = await db.execute(
             select(Avatar).where(
-                Avatar.deleted_at != None,
+                Avatar.deleted_at.is_not(None),
                 Avatar.deleted_at < cutoff,
             )
         )
@@ -974,8 +1058,8 @@ async def _discover_provider_models(provider) -> list[dict]:
 
 
 async def _sync_atlascloud_models(provider) -> list[dict]:
-    from app.services.providers.atlascloud import AtlasCloudProvider
     from app.services.model_normalizer import normalize_provider_model
+    from app.services.providers.atlascloud import AtlasCloudProvider
 
     instance = AtlasCloudProvider(provider.id, provider.config)
     try:
@@ -998,9 +1082,9 @@ async def _sync_atlascloud_models(provider) -> list[dict]:
 
 
 async def _sync_poe_models(provider) -> list[dict]:
-    from app.services.providers.poe import PoeProvider
     from app.services.model_normalizer import normalize_provider_model
-    
+    from app.services.providers.poe import PoeProvider
+
     instance = PoeProvider(provider.id, provider.config)
     try:
         await instance.initialize(provider.config)
@@ -1026,13 +1110,13 @@ def _sync_comfyui_models() -> list[dict]:
 
     Each entry is a dict ready for ModelConfig creation/update.
     """
-    _AVAILABLE_IMAGE_MODELS = [
+    _available_image_models = [
         {"id": "flux1-schnell", "name": "FLUX.1-schnell",
          "comfyui_workflow": "flux_image.json", "capabilities": ["text-to-image"]},
         {"id": "sdxl", "name": "Stable Diffusion XL",
          "comfyui_workflow": "sdxl_image.json", "capabilities": ["text-to-image"]},
     ]
-    _AVAILABLE_VIDEO_MODELS = [
+    _available_video_models = [
         {"id": "wan2.2", "name": "WAN 2.2",
          "capabilities": ["text-to-video", "image-to-video", "scene-to-video"]},
         {"id": "ltx2.3", "name": "LTX 2.3",
@@ -1043,8 +1127,8 @@ def _sync_comfyui_models() -> list[dict]:
     discovered: list[dict] = []
 
     for source_list, modality in (
-        (_AVAILABLE_IMAGE_MODELS, "image"),
-        (_AVAILABLE_VIDEO_MODELS, "video"),
+        (_available_image_models, "image"),
+        (_available_video_models, "video"),
     ):
         for m in source_list:
             discovered.append({

@@ -170,8 +170,16 @@ async def stream_file(
     mime_types = {
         ".mp4": "video/mp4",
         ".webm": "video/webm",
+        ".mov": "video/quicktime",
         ".mp3": "audio/mpeg",
         ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
     }
     content_type = mime_types.get(ext, "application/octet-stream")
 

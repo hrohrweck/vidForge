@@ -81,6 +81,17 @@ class ConnectionManager:
             for conn in disconnected:
                 self.disconnect(conn, job_id)
 
+    async def broadcast_chat_message(self, conversation_id: str, message_id: str) -> None:
+        payload = json.dumps(
+            {
+                "type": "chat_message_appended",
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+            }
+        )
+        r = await self.get_redis()
+        await r.publish(f"chat:{conversation_id}", payload)
+
     async def subscribe_to_job(self, job_id: str, websocket: WebSocket) -> None:
         r = await self.get_redis()
         pubsub = r.pubsub()
@@ -94,6 +105,20 @@ class ConnectionManager:
                         break
         finally:
             await pubsub.unsubscribe(f"job:{job_id}")
+
+    async def subscribe_to_chat(self, conversation_id: str, websocket: WebSocket) -> None:
+        r = await self.get_redis()
+        pubsub = r.pubsub()
+        await pubsub.subscribe(f"chat:{conversation_id}")
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        await websocket.send_text(message["data"])
+                    except Exception:
+                        break
+        finally:
+            await pubsub.unsubscribe(f"chat:{conversation_id}")
 
 
 manager = ConnectionManager()

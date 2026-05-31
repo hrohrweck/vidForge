@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +26,18 @@ class JobCreate(BaseModel):
     auto_start: bool = True
     provider_preference: str = "auto"
     model_preference: str | None = None
+    chat_conversation_id: UUID | None = None
+    chat_message_id: UUID | None = None
+
+    @field_validator("template_id", mode="before")
+    @classmethod
+    def validate_template_id(cls, v: Any) -> Any:
+        if v is None:
+            return v
+        try:
+            return UUID(str(v))
+        except ValueError:
+            raise ValueError("Template not found")
 
 
 class BatchJobCreate(BaseModel):
@@ -162,15 +174,18 @@ async def create_job(
         provider_preference=provider_preference,
         model_preference=job_data.model_preference,
         project_id=job_data.project_id,
+        chat_conversation_id=job_data.chat_conversation_id,
+        chat_message_id=job_data.chat_message_id,
     )
 
     if job_data.template_id:
         result = await db.execute(select(Template).where(Template.id == job_data.template_id))
         template = result.scalar_one_or_none()
-        if template:
-            workflow_type = template.config.get("workflow_type")
-            if workflow_type == "scene_based":
-                job.workflow_type = "scene_based"
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        workflow_type = template.config.get("workflow_type")
+        if workflow_type == "scene_based":
+            job.workflow_type = "scene_based"
 
     # Flush the job early so job.id is populated for JobAvatar rows
     db.add(job)

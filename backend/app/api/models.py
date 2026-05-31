@@ -1,4 +1,6 @@
+import logging
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -7,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
-from app.database import ModelConfig, User, UserSettings, get_db
+from app.database import ModelConfig, Provider, User, UserSettings, get_db
+from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import get_family_variants, is_family_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["models"])
 
@@ -67,9 +72,9 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
     }
 
 
-# ── Default preferences (static fallback) ──────────────────────────
+# ── Default preferences (runtime lookup) ────────────────────────────
 
-_DEFAULT_MODEL_PREFERENCES: dict[str, str] = {
+_DEFAULT_MODEL_VALUES: dict[str, str] = {
     "image_model": "flux1-schnell",
     "video_model": "wan2.2",
     "text_model": "qwen3.6:35b",
@@ -83,39 +88,93 @@ _DEFAULT_MODEL_PREFERENCES: dict[str, str] = {
 }
 
 
-def get_default_model_preferences() -> dict[str, str]:
-    """Return static default model preferences."""
-    return dict(_DEFAULT_MODEL_PREFERENCES)
+async def _get_provider_id_by_type(db: AsyncSession, provider_type: str) -> str | None:
+    """Look up the first active provider UUID by provider_type."""
+    result = await db.execute(
+        select(Provider.id).where(
+            Provider.provider_type == provider_type,
+            Provider.is_active == True,  # noqa: E712
+        )
+    )
+    provider_id = result.scalar_one_or_none()
+    return str(provider_id) if provider_id else None
+
+
+async def get_default_model_preferences(db: AsyncSession) -> dict[str, str]:
+    """Return default model preferences with provider IDs looked up at runtime."""
+    comfyui_id = await _get_provider_id_by_type(db, "comfyui_direct")
+    ollama_id = await _get_provider_id_by_type(db, "ollama")
+
+    defaults = dict(_DEFAULT_MODEL_VALUES)
+    defaults["image_provider_id"] = comfyui_id or ""
+    defaults["video_provider_id"] = comfyui_id or ""
+    defaults["text_provider_id"] = ollama_id or ""
+    defaults["text_to_image_provider_id"] = comfyui_id or ""
+    defaults["image_to_image_provider_id"] = comfyui_id or ""
+    defaults["text_to_video_provider_id"] = comfyui_id or ""
+    defaults["image_to_video_provider_id"] = comfyui_id or ""
+    return defaults
 
 
 # ── Validation ─────────────────────────────────────────────────────
 
 
-async def _get_valid_model_ids(db: AsyncSession) -> set[str]:
-    """Return the set of all active model_ids."""
-    result = await db.execute(
-        select(ModelConfig.model_id).where(ModelConfig.is_active == True)  # noqa: E712
-    )
-    return {row[0] for row in result.all()}
-
-
 async def validate_model_preferences(
     db: AsyncSession, prefs: dict[str, str]
 ) -> dict[str, str]:
-    """Validate model preferences against currently active models in DB."""
-    valid_ids = await _get_valid_model_ids(db)
+    """Validate model preferences by resolving each (model, provider_id) pair.
+
+    Keeps resolvable values; falls back to defaults with a warning when
+    a reference cannot be resolved.
+    """
+    defaults = await get_default_model_preferences(db)
     validated: dict[str, str] = {}
+
     model_fields = (
-        "image_model", "video_model", "text_model",
-        "text_to_image_model", "image_to_image_model",
-        "text_to_video_model", "image_to_video_model",
+        ("image_model", "image_provider_id"),
+        ("video_model", "video_provider_id"),
+        ("text_model", "text_provider_id"),
+        ("text_to_image_model", "text_to_image_provider_id"),
+        ("image_to_image_model", "image_to_image_provider_id"),
+        ("text_to_video_model", "text_to_video_provider_id"),
+        ("image_to_video_model", "image_to_video_provider_id"),
     )
-    for field in model_fields:
-        value = prefs.get(field, _DEFAULT_MODEL_PREFERENCES.get(field, ""))
-        if value in valid_ids:
-            validated[field] = value
+
+    for model_field, provider_id_field in model_fields:
+        model_id = prefs.get(model_field, defaults.get(model_field, ""))
+        provider_id_str = prefs.get(provider_id_field, defaults.get(provider_id_field, ""))
+
+        provider_id: UUID | None = None
+        if provider_id_str:
+            try:
+                provider_id = UUID(provider_id_str)
+            except ValueError:
+                provider_id = None
+
+        config = await ModelConfigService.resolve_model_config(db, model_id, provider_id)
+        if config:
+            validated[model_field] = config.model_id
+            validated[provider_id_field] = str(config.provider_id)
         else:
-            validated[field] = _DEFAULT_MODEL_PREFERENCES.get(field, "")
+            default_model = defaults.get(model_field, "")
+            default_provider = defaults.get(provider_id_field, "")
+            validated[model_field] = default_model
+            validated[provider_id_field] = default_provider
+            if model_id and model_id != default_model:
+                logger.warning(
+                    "Unresolvable model preference %s=%s (provider_id=%s), "
+                    "falling back to %s=%s (provider_id=%s)",
+                    model_field,
+                    model_id,
+                    provider_id_str,
+                    model_field,
+                    default_model,
+                    default_provider,
+                )
+
+    for provider_field in ("image_provider", "video_provider", "text_provider"):
+        validated[provider_field] = prefs.get(provider_field, defaults.get(provider_field, ""))
+
     return validated
 
 
@@ -198,6 +257,13 @@ class ModelPreferences(BaseModel):
     image_to_image_model: str = "flux1-schnell"
     text_to_video_model: str = "wan2.2"
     image_to_video_model: str = "wan2.2"
+    image_provider_id: str = ""
+    video_provider_id: str = ""
+    text_provider_id: str = ""
+    text_to_image_provider_id: str = ""
+    image_to_image_provider_id: str = ""
+    text_to_video_provider_id: str = ""
+    image_to_video_provider_id: str = ""
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -221,7 +287,7 @@ async def get_model_preferences(
     settings = result.scalar_one_or_none()
 
     if not settings or not settings.preferences:
-        return get_default_model_preferences()
+        return await get_default_model_preferences(db)
 
     model_prefs = settings.preferences.get("models", {})
     return await validate_model_preferences(db, model_prefs)
@@ -243,6 +309,16 @@ async def update_model_preferences(
         db.add(settings)
 
     validated = await validate_model_preferences(db, prefs.model_dump())
+
+    if validated.get("text_to_image_model"):
+        validated["image_model"] = validated["text_to_image_model"]
+    elif validated.get("image_to_image_model"):
+        validated["image_model"] = validated["image_to_image_model"]
+
+    if validated.get("text_to_video_model"):
+        validated["video_model"] = validated["text_to_video_model"]
+    elif validated.get("image_to_video_model"):
+        validated["video_model"] = validated["image_to_video_model"]
 
     # Create a new preferences dict to ensure SQLAlchemy detects the change
     current_prefs = dict(settings.preferences) if settings.preferences else {}

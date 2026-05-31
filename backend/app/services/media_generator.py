@@ -13,7 +13,6 @@ from app.database import Job, ModelConfig, Provider, UserSettings
 from app.services.job_router import JobRouter
 from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import (
-    get_family_from_legacy_id,
     resolve_model_variant,
 )
 from app.services.providers import (
@@ -25,15 +24,6 @@ from app.services.providers import (
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MODEL_PREFERENCES: dict[str, str] = {
-    "image_model": "flux1-schnell",
-    "video_model": "wan2.2",
-    "text_model": "qwen3.6:35b",
-    "image_provider": "local",
-    "video_provider": "local",
-    "text_provider": "local",
-}
 
 
 
@@ -141,23 +131,77 @@ async def get_comfyui_direct_provider(
 
 
 async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[str, str]:
-    """Get user's model preferences from settings."""
+    """Get user's full model preferences from settings.
+
+    Returns all granular and coarse model fields plus provider_id companions.
+    Falls back to defaults for any missing fields.
+    """
+    from app.api.models import get_default_model_preferences
+
+    defaults = await get_default_model_preferences(db)
+
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     user_settings = result.scalar_one_or_none()
 
     if not user_settings or not user_settings.preferences:
-        return dict(_DEFAULT_MODEL_PREFERENCES)
+        return defaults
 
     model_prefs = user_settings.preferences.get("models", {})
     if not model_prefs:
-        return dict(_DEFAULT_MODEL_PREFERENCES)
+        return defaults
 
-    return {
-        "image_model": model_prefs.get("image_model", "flux1-schnell"),
-        "video_model": model_prefs.get("video_model", "wan2.2"),
-        "image_provider": model_prefs.get("image_provider", "local"),
-        "video_provider": model_prefs.get("video_provider", "local"),
-    }
+    # Merge stored prefs over defaults, preserving all fields
+    merged = dict(defaults)
+    for key in defaults:
+        if key in model_prefs:
+            merged[key] = model_prefs[key]
+    return merged
+
+
+def select_model_for(prefs: dict[str, str], task: str) -> tuple[str, str]:
+    """Select the appropriate model_id and provider_id for a given task.
+
+    Args:
+        prefs: Full preferences dict from get_user_model_preferences().
+        task: One of "text_to_image", "image_to_image", "text_to_video",
+              "image_to_video", "text".
+
+    Returns:
+        (model_id, provider_id) tuple. Falls back to coarse fields when
+        granular fields are empty.
+    """
+    if task == "image_to_video":
+        model = prefs.get("image_to_video_model", "")
+        provider = prefs.get("image_to_video_provider_id", "")
+        if model:
+            return model, provider
+        return prefs.get("video_model", "wan2.2"), prefs.get("video_provider_id", "")
+
+    if task == "text_to_video":
+        model = prefs.get("text_to_video_model", "")
+        provider = prefs.get("text_to_video_provider_id", "")
+        if model:
+            return model, provider
+        return prefs.get("video_model", "wan2.2"), prefs.get("video_provider_id", "")
+
+    if task == "image_to_image":
+        model = prefs.get("image_to_image_model", "")
+        provider = prefs.get("image_to_image_provider_id", "")
+        if model:
+            return model, provider
+        return prefs.get("image_model", "flux1-schnell"), prefs.get("image_provider_id", "")
+
+    if task == "text_to_image":
+        model = prefs.get("text_to_image_model", "")
+        provider = prefs.get("text_to_image_provider_id", "")
+        if model:
+            return model, provider
+        return prefs.get("image_model", "flux1-schnell"), prefs.get("image_provider_id", "")
+
+    if task == "text":
+        return prefs.get("text_model", "qwen3.6:35b"), prefs.get("text_provider_id", "")
+
+    raise ValueError(f"Unknown task: {task}")
 
 
 MIN_SCENE_DURATION = 2.0  # Minimum scene duration in seconds
@@ -247,31 +291,44 @@ async def _resolve_image_provider(
     job: Job,
     provider_id: UUID | None,
     model_preference: str | None,
+    has_reference_image: bool = False,
 ) -> tuple[str, UUID | None, str, Any]:
     """Resolve which provider and model to use for image generation.
 
     Returns (selected_model_id, resolved_provider_id, provider_type, instance).
-    For Poe models (``poe:*``) the instance is a PoeProvider; for local
-    models it is a ComfyUIDirectProvider.
     """
+    from app.services.model_config_service import ModelConfigService
+
+    # Fallback: read provider_id from job input_data if not passed explicitly
+    if provider_id is None and job.input_data:
+        pid_str = job.input_data.get("image_provider_id")
+        if pid_str:
+            try:
+                provider_id = UUID(pid_str)
+            except ValueError:
+                pass
+
+    if model_preference:
+        config = await ModelConfigService.resolve_model_config(db, model_preference, provider_id)
+        if config:
+            provider = config.provider
+            instance = await get_provider_instance(db, provider)
+            return config.model_id, provider.id, provider.provider_type, instance
+
     user_prefs = await get_user_model_preferences(db, job.user_id)
-    selected_model = model_preference or user_prefs.get("image_model", "flux1-schnell")
+    task = "image_to_image" if has_reference_image else "text_to_image"
+    model_id, provider_id_str = select_model_for(user_prefs, task)
 
-    # Cloud models → use the appropriate cloud provider
-    if selected_model.startswith("atlascloud:"):
-        cloud_id = selected_model.removeprefix("atlascloud:")
-        provider, instance = await _get_atlascloud_provider(db)
-        if provider and instance:
-            return cloud_id, provider.id, "atlascloud", instance
-    if selected_model.startswith("poe:"):
-        poe_model_id = selected_model.removeprefix("poe:")
-        provider, instance = await _get_poe_provider(db)
-        if provider and instance:
-            return poe_model_id, provider.id, "poe", instance
+    if provider_id_str:
+        provider_id = UUID(provider_id_str)
 
-    # Local / ComfyUI model
-    provider, instance = await get_comfyui_direct_provider(db, provider_id)
-    return selected_model, provider.id, "comfyui", instance
+    config = await ModelConfigService.resolve_model_config(db, model_id, provider_id)
+    if not config:
+        raise ValueError(f"Could not resolve image model: {model_id} (provider_id={provider_id})")
+
+    provider = config.provider
+    instance = await get_provider_instance(db, provider)
+    return config.model_id, provider.id, provider.provider_type, instance
 
 
 async def _resolve_video_provider(
@@ -279,27 +336,41 @@ async def _resolve_video_provider(
     job: Job,
     provider_id: UUID | None,
     model_preference: str | None,
+    has_seed_image: bool = False,
 ) -> tuple[str, UUID | None, str, Any]:
     """Resolve which provider and model to use for video generation."""
+    from app.services.model_config_service import ModelConfigService
+
+    # Fallback: read provider_id from job input_data if not passed explicitly
+    if provider_id is None and job.input_data:
+        pid_str = job.input_data.get("video_provider_id")
+        if pid_str:
+            try:
+                provider_id = UUID(pid_str)
+            except ValueError:
+                pass
+
+    if model_preference:
+        config = await ModelConfigService.resolve_model_config(db, model_preference, provider_id)
+        if config:
+            provider = config.provider
+            instance = await get_provider_instance(db, provider)
+            return config.model_id, provider.id, provider.provider_type, instance
+
     user_prefs = await get_user_model_preferences(db, job.user_id)
-    selected_model = model_preference or user_prefs.get("video_model", "wan2.2")
-    selected_model = get_family_from_legacy_id(selected_model)
+    task = "image_to_video" if has_seed_image else "text_to_video"
+    model_id, provider_id_str = select_model_for(user_prefs, task)
 
-    # Cloud models → use the appropriate cloud provider
-    if selected_model.startswith("atlascloud:"):
-        cloud_id = selected_model.removeprefix("atlascloud:")
-        provider, instance = await _get_atlascloud_provider(db)
-        if provider and instance:
-            return cloud_id, provider.id, "atlascloud", instance
-    if selected_model.startswith("poe:"):
-        poe_model_id = selected_model.removeprefix("poe:")
-        provider, instance = await _get_poe_provider(db)
-        if provider and instance:
-            return poe_model_id, provider.id, "poe", instance
+    if provider_id_str:
+        provider_id = UUID(provider_id_str)
 
-    # Local / ComfyUI model
-    provider, instance = await get_comfyui_direct_provider(db, provider_id)
-    return selected_model, provider.id, "comfyui", instance
+    config = await ModelConfigService.resolve_model_config(db, model_id, provider_id)
+    if not config:
+        raise ValueError(f"Could not resolve video model: {model_id} (provider_id={provider_id})")
+
+    provider = config.provider
+    instance = await get_provider_instance(db, provider)
+    return config.model_id, provider.id, provider.provider_type, instance
 
 
 async def _get_poe_provider(
@@ -360,6 +431,7 @@ async def generate_image(
 
     selected_model, resolved_pid, ptype, instance = await _resolve_image_provider(
         db, job, provider_id, model_preference,
+        has_reference_image=bool(reference_image_path),
     )
 
     if ptype in ("poe", "atlascloud"):
@@ -447,6 +519,7 @@ async def generate_video(
 
     selected_model, resolved_pid, ptype, instance = await _resolve_video_provider(
         db, job, provider_id, model_preference,
+        has_seed_image=bool(reference_image_path),
     )
 
     if ptype in ("poe", "atlascloud"):

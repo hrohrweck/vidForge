@@ -8,7 +8,7 @@ interface TextModel {
   provider: string
   provider_type?: string
   description?: string
-  capabilities?: string[] | Record<string, boolean>
+  capabilities?: Record<string, boolean>
 }
 
 export function ModelPicker() {
@@ -27,15 +27,9 @@ export function ModelPicker() {
         if (cancelled) return
         const textModels: TextModel[] = data.text_models || []
         setModels(textModels.filter(m => {
-          const caps = m.capabilities
-          if (!caps) return true  // no capabilities → include
-          if (Array.isArray(caps)) {
-            // Array format: check for chat capability
-            return caps.includes('chat') || caps.some(c => c.includes('chat'))
-          }
-          // Dict format: must output text AND accept at least text or image input
-          return caps.outputs_text !== false &&
-                 (caps.accepts_text !== false || caps.accepts_image !== false)
+          const c = m.capabilities
+          if (!c || Array.isArray(c)) return false
+          return c.accepts_text === true && c.accepts_image === true && c.outputs_text === true
         }))
         if (textModels.length > 0) {
           const current = useChatStore.getState().selectedModelId
@@ -46,7 +40,7 @@ export function ModelPicker() {
           }
         }
       } catch (err) {
-        console.error('Failed to load text models:', err)
+        // Silently ignore — model picker falls back to custom mode
       } finally {
         if (!cancelled) setLoading(false)
       }

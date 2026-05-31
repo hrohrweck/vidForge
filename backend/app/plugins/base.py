@@ -392,11 +392,8 @@ class PluginBase(ABC):
             scene_duration = scene.end_time - scene.start_time
             prompt = scene.visual_description or scene.lyrics_segment or ""
 
-            # Check if using a cloud provider (atlascloud/poe) that can generate full video
-            is_cloud_model = video_model and (video_model.startswith("atlascloud:") or video_model.startswith("poe:"))
-
             try:
-                if scene_duration <= max_clip_s + 0.5 or is_cloud_model:
+                if scene_duration <= max_clip_s + 0.5:
                     # ── Short scene: single clip ──────────────────────
                     duration = max(2, int(scene_duration))
                     video_path, _, _, actual_duration = await self._retry(
@@ -739,10 +736,7 @@ class PluginBase(ABC):
         """Re-generate a single scene's video.  Returns relative path."""
         scene_duration = scene.end_time - scene.start_time
         input_data = job.input_data or {}
-        video_model = input_data.get("video_model")
-        is_cloud = video_model and (video_model.startswith("atlascloud:") or video_model.startswith("poe:"))
-
-        if scene_duration > 5.5 and not is_cloud:
+        if scene_duration > 5.5:
             path, duration = await self._generate_chained_subclips(
                 db=db, job=job, scene=scene,
                 scene_duration=scene_duration,

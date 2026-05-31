@@ -97,8 +97,9 @@ class ScriptToVideoPlugin(PluginBase):
     async def plan_scenes(
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
-        from .planner import plan_scenes_from_script
         from app.services.avatar_prompt_builder import build_avatar_context_string
+
+        from .planner import plan_scenes_from_script
 
         input_data = job.input_data or {}
         segments = context.get("segments", [])

@@ -56,7 +56,6 @@ async def apply_face_swap(
     try:
         import cv2
         import insightface
-        import numpy as np
     except ImportError:
         logger.warning(
             "insightface / opencv-python not installed — skipping face-swap. "

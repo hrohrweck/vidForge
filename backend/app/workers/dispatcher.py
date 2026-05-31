@@ -192,6 +192,10 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 job.completed_at = datetime.utcnow()
                 await db.commit()
 
+                from app.workers.tasks import _post_completion_message
+
+                await _post_completion_message(job.id, db=db)
+
                 return {"status": "completed", "job_id": job_id, "stage": "completed", **render_result}
 
             else:

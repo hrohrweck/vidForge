@@ -818,6 +818,7 @@ export interface ModelConfig {
   quality: string
   license: string
   provider: string
+  provider_id?: string
   default: boolean
   capabilities?: Record<string, boolean>
   cost_config?: Record<string, unknown> | null
@@ -835,6 +836,13 @@ export interface ModelPreferences {
   image_to_image_model: string
   text_to_video_model: string
   image_to_video_model: string
+  image_provider_id: string
+  video_provider_id: string
+  text_provider_id: string
+  text_to_image_provider_id: string
+  image_to_image_provider_id: string
+  text_to_video_provider_id: string
+  image_to_video_provider_id: string
 }
 
 // Chat API types and namespace
@@ -873,7 +881,9 @@ export interface Message {
   parts: MessagePart[] | null
   tool_calls: ToolCall[] | null
   tool_call_id: string | null
+  job_id: string | null
   created_at: string
+  attachments?: Array<{url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
 }
 
 export type ChatStreamEventType =

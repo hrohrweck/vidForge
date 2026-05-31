@@ -120,6 +120,8 @@ class MessageOut(BaseModel):
     parts: list[MessagePart] | None = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    job_id: UUID | None = None
+    attachments: list[dict] | None = None
     created_at: datetime
 
     @field_validator("tool_calls", mode="before")

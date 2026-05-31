@@ -35,6 +35,40 @@ class LLMClient:
     async def close(self) -> None:
         await self.client.aclose()
 
+    @staticmethod
+    def _convert_messages_for_ollama(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Convert OpenAI vision format to Ollama's native format.
+
+        OpenAI format: content=[{"type":"text",...}, {"type":"image_url",...}]
+        Ollama format: content="text", images=["base64string"]
+        """
+        converted: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                images: list[str] = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        url = part.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            # Extract base64 from data URL
+                            b64 = url.split(",", 1)[-1] if "," in url else url
+                            images.append(b64)
+                        else:
+                            # For HTTP URLs, we'd need to download, but base64 is expected
+                            text_parts.append(f"[Image: {url}]")
+                new_msg = dict(msg)
+                new_msg["content"] = "\n".join(text_parts)
+                if images:
+                    new_msg["images"] = images
+                converted.append(new_msg)
+            else:
+                converted.append(msg)
+        return converted
+
     async def chat_stream(
         self,
         messages: list[dict[str, Any]],
@@ -49,9 +83,10 @@ class LLMClient:
         and done chunks.
         """
 
+        ollama_messages = self._convert_messages_for_ollama(messages)
         payload: dict[str, Any] = {
             "model": model or self.model,
-            "messages": messages,
+            "messages": ollama_messages,
             "stream": True,
         }
         if tools is not None:

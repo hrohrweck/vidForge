@@ -6,7 +6,10 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   createdAt: string
-  attachments?: Array<{url: string; type: string; name?: string}>
+  attachments?: Array<{url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
+  toolCallId?: string
+  jobId?: string | null
+  mediaResult?: { kind: string; url: string; mime_type?: string }
 }
 
 export interface Conversation {
@@ -41,6 +44,8 @@ interface ChatState {
   selectConversation: (id: string) => void
   setModel: (id: string) => void
   appendMessage: (convId: string, msg: Message) => void
+  setMessages: (convId: string, msgs: Message[]) => void
+  updateMessage: (convId: string, msgId: string, patch: Partial<Message>) => void
   updateStreamingMessage: (convId: string, delta: string) => void
   setStreaming: (streaming: boolean) => void
   setStreamError: (err: string | null) => void
@@ -72,15 +77,36 @@ export const useChatStore = create<ChatState>()(
 
       setModel: (id) => set({ selectedModelId: id }),
 
-      appendMessage: (convId, msg) =>
-        set((state) => ({
-          messages: {
-            ...state.messages,
-            [convId]: [...(state.messages[convId] || []), msg],
-          },
-        })),
+appendMessage: (convId, msg) =>
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [convId]: [...(state.messages[convId] || []), msg],
+      },
+    })),
 
-      updateStreamingMessage: (convId, delta) =>
+  setMessages: (convId, msgs) =>
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [convId]: msgs,
+      },
+    })),
+
+  updateMessage: (convId, msgId, patch) =>
+    set((state) => {
+      const convMessages = state.messages[convId] || []
+      return {
+        messages: {
+          ...state.messages,
+          [convId]: convMessages.map((m) =>
+            m.id === msgId ? { ...m, ...patch } : m
+          ),
+        },
+      }
+    }),
+
+  updateStreamingMessage: (convId, delta) =>
         set((state) => {
           const convMessages = state.messages[convId] || []
           if (convMessages.length === 0) return state

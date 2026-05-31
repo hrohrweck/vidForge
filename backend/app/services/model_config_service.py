@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import ModelConfig
+from app.database import ModelConfig, Provider
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,12 @@ class ModelConfigService:
     async def get_by_id(
         db: AsyncSession, model_id: str, provider_id: UUID
     ) -> ModelConfig | None:
+        from sqlalchemy.orm import selectinload
+
         result = await db.execute(
-            select(ModelConfig).where(
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
                 ModelConfig.model_id == model_id,
                 ModelConfig.provider_id == provider_id,
             )
@@ -34,14 +38,223 @@ class ModelConfigService:
     async def get_by_provider_model_id(
         db: AsyncSession, provider_model_id: str, provider_id: UUID
     ) -> ModelConfig | None:
-        """Look up a ModelConfig by the provider's own model ID string."""
+        from sqlalchemy.orm import selectinload
+
         result = await db.execute(
-            select(ModelConfig).where(
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
                 ModelConfig.provider_model_id == provider_model_id,
                 ModelConfig.provider_id == provider_id,
             )
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def resolve_model_config(
+        db: AsyncSession,
+        model_id: str,
+        provider_id: UUID | None = None,
+        *,
+        modality: str | None = None,
+    ) -> ModelConfig | None:
+        """Resolve a model reference to a unique active ModelConfig.
+
+        Supports legacy provider-prefixed references while preferring canonical
+        model_configs.model_id values as the source of truth.
+        """
+        raw = model_id
+        provider_type = await ModelConfigService._get_provider_type(db, provider_id)
+
+        config = await ModelConfigService._find_by_model_id(
+            db, model_id, provider_id, modality
+        )
+        if config:
+            return config
+
+        config = await ModelConfigService._find_by_provider_model_id(
+            db, model_id, provider_id, modality
+        )
+        if config:
+            ModelConfigService._log_legacy_resolution(raw, config)
+            return config
+
+        stripped, prefix = ModelConfigService._strip_legacy_prefix(model_id)
+        provider_context = provider_type or prefix
+        if stripped != model_id:
+            config = await ModelConfigService._find_by_model_id(
+                db, stripped, provider_id, modality, provider_context=provider_context
+            )
+            if config:
+                ModelConfigService._log_legacy_resolution(raw, config)
+                return config
+
+            config = await ModelConfigService._find_by_provider_model_id(
+                db, stripped, provider_id, modality, provider_context=provider_context
+            )
+            if config:
+                ModelConfigService._log_legacy_resolution(raw, config)
+                return config
+
+        if provider_context == "atlascloud":
+            repaired = f"atlascloud/{stripped}"
+            if repaired != stripped:
+                config = await ModelConfigService._find_by_model_id(
+                    db, repaired, provider_id, modality, provider_context=provider_context
+                )
+                if config:
+                    ModelConfigService._log_legacy_resolution(raw, config)
+                    return config
+
+        config = await ModelConfigService._find_by_unique_suffix(
+            db, stripped, provider_id, modality, provider_context=provider_context
+        )
+        if config:
+            ModelConfigService._log_legacy_resolution(raw, config)
+            return config
+
+        return None
+
+    @staticmethod
+    async def _get_provider_type(db: AsyncSession, provider_id: UUID | None) -> str | None:
+        if provider_id is None:
+            return None
+
+        result = await db.execute(select(Provider.provider_type).where(Provider.id == provider_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _find_by_model_id(
+        db: AsyncSession,
+        model_id: str,
+        provider_id: UUID | None,
+        modality: str | None,
+        *,
+        provider_context: str | None = None,
+    ) -> ModelConfig | None:
+        if provider_id is not None:
+            config = await ModelConfigService.get_by_id(db, model_id, provider_id)
+            if config and ModelConfigService._matches_modality(config, modality):
+                return config
+            return None
+
+        return await ModelConfigService._find_unique_active(
+            db,
+            ModelConfig.model_id == model_id,
+            modality=modality,
+            provider_context=provider_context,
+        )
+
+    @staticmethod
+    async def _find_by_provider_model_id(
+        db: AsyncSession,
+        provider_model_id: str,
+        provider_id: UUID | None,
+        modality: str | None,
+        *,
+        provider_context: str | None = None,
+    ) -> ModelConfig | None:
+        if provider_id is not None:
+            config = await ModelConfigService.get_by_provider_model_id(
+                db, provider_model_id, provider_id
+            )
+            if config and ModelConfigService._matches_modality(config, modality):
+                return config
+            return None
+
+        return await ModelConfigService._find_unique_active(
+            db,
+            ModelConfig.provider_model_id == provider_model_id,
+            modality=modality,
+            provider_context=provider_context,
+        )
+
+    @staticmethod
+    async def _find_by_unique_suffix(
+        db: AsyncSession,
+        stripped: str,
+        provider_id: UUID | None,
+        modality: str | None,
+        *,
+        provider_context: str | None = None,
+    ) -> ModelConfig | None:
+        from sqlalchemy.orm import selectinload
+
+        stmt = (
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
+                ModelConfig.is_active == True,  # noqa: E712
+                ModelConfig.model_id.endswith(f"/{stripped}"),
+            )
+        )
+        if provider_id is not None:
+            stmt = stmt.where(ModelConfig.provider_id == provider_id)
+        if modality:
+            stmt = stmt.where(ModelConfig.modality == modality)
+        if provider_context:
+            stmt = stmt.join(ModelConfig.provider).where(
+                Provider.provider_type == provider_context,
+                Provider.is_active == True,  # noqa: E712
+            )
+
+        result = await db.execute(stmt)
+        configs = list(result.scalars().all())
+        if len(configs) == 1:
+            return configs[0]
+        return None
+
+    @staticmethod
+    async def _find_unique_active(
+        db: AsyncSession,
+        criterion,
+        *,
+        modality: str | None,
+        provider_context: str | None = None,
+    ) -> ModelConfig | None:
+        from sqlalchemy.orm import selectinload
+
+        stmt = (
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
+                criterion,
+                ModelConfig.is_active == True,  # noqa: E712
+            )
+        )
+        if modality:
+            stmt = stmt.where(ModelConfig.modality == modality)
+        if provider_context:
+            stmt = stmt.join(ModelConfig.provider).where(
+                Provider.provider_type == provider_context,
+                Provider.is_active == True,  # noqa: E712
+            )
+
+        result = await db.execute(stmt)
+        configs = list(result.scalars().all())
+        if len(configs) == 1:
+            return configs[0]
+        return None
+
+    @staticmethod
+    def _matches_modality(config: ModelConfig, modality: str | None) -> bool:
+        return modality is None or config.modality == modality
+
+    @staticmethod
+    def _strip_legacy_prefix(model_id: str) -> tuple[str, str | None]:
+        for prefix in ("atlascloud", "poe"):
+            marker = f"{prefix}:"
+            if model_id.startswith(marker):
+                return model_id.removeprefix(marker), prefix
+        return model_id, None
+
+    @staticmethod
+    def _log_legacy_resolution(raw: str, resolved: ModelConfig) -> None:
+        logger.warning(
+            "Legacy model reference resolved: input=%s -> model_id=%s",
+            raw,
+            resolved.model_id,
+        )
 
     @staticmethod
     async def list_by_provider(
