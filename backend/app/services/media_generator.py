@@ -25,6 +25,14 @@ from app.services.providers import (
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+_VIDEO_SEED_RESOLUTIONS: dict[str, str] = {
+    "16:9": "1024x576",
+    "9:16": "576x1024",
+    "1:1":  "768x768",
+    "4:3":  "768x576",
+    "3:4":  "576x768",
+}
+
 
 def _sanitize_filename(name: str, ext: str) -> str:
     """Sanitize a name for use as a filename."""
@@ -454,6 +462,8 @@ async def generate_image(
             logger.warning(
                 "IP-Adapter not supported for cloud providers, falling back to prompt-only"
             )
+        if "x" not in aspect_ratio:
+            aspect_ratio = _VIDEO_SEED_RESOLUTIONS.get(aspect_ratio, "1024x1024")
         _cloud_id, image_data = await instance.generate_image(
             prompt=prompt,
             model=selected_model,
