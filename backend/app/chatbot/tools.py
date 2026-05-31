@@ -69,6 +69,26 @@ class ToolRegistry:
         ]
 
 
+async def _resolve_attachment_image_url(ctx: ToolContext) -> str:
+    from app.database import Message
+
+    if not (ctx.conversation_id and ctx.db is not None):
+        return ""
+    result = await ctx.db.execute(
+        select(Message.attachments)
+        .where(Message.conversation_id == UUID(ctx.conversation_id))
+        .where(Message.role == "user")
+        .order_by(Message.created_at.desc())
+        .limit(1)
+    )
+    attachments = result.scalar()
+    if attachments:
+        for att in attachments:
+            if att.get("kind") == "image":
+                return att.get("url", "")
+    return ""
+
+
 async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Create a new video generation job."""
     template = args.get("template")
@@ -88,6 +108,11 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
         payload["template_id"] = template
     except ValueError:
         payload["template_id"] = template
+
+    if "reference_image_url" not in args:
+        url = await _resolve_attachment_image_url(ctx)
+        if url:
+            args["reference_image_url"] = url
 
     for key in ("style", "image_model", "video_model", "aspect_ratio", "reference_image_id", "reference_image_url"):
         if key in args:
@@ -1017,7 +1042,7 @@ def create_builtin_registry() -> ToolRegistry:
                     "duration_seconds": {"type": "number", "description": "Target duration in seconds"},
                     "aspect_ratio": {"type": "string", "description": "Aspect ratio (e.g. 16:9)"},
                     "reference_image_id": {"type": "string", "description": "Optional reference image asset ID"},
-                    "reference_image_url": {"type": "string", "description": "Optional reference image URL (e.g. from chat attachments)"},
+                    "reference_image_url": {"type": "string", "description": "URL of the user's attached image. When the user mentions an attached image, pass its URL here."},
                 },
                 "required": ["template", "prompt"],
             },

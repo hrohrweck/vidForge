@@ -35,6 +35,8 @@ SYSTEM_PROMPT = (
     "You have access to tools for: jobs, scenes, media, projects, styles, "
     "avatars, audio, settings, templates, and dashboard. Use them to help "
     "users manage video generation workflows.\n\n"
+    "When a user refers to an attached image and you need to pass it to a tool, "
+    "include the image URL in the reference_image_url parameter.\n\n"
     "IMPORTANT: When triggering a media-generation job (image or video), "
     "the bot must announce the action (e.g., \"I'm starting a video generation. "
     "I'll post the result here when it's ready.\") and rely on the platform "
@@ -685,6 +687,7 @@ class ChatOrchestrator:
                     resolved_url = await self._resolve_image_url(url, attachment.get("mime_type"))
                     if resolved_url:
                         content_parts.append({"type": "image_url", "image_url": {"url": resolved_url}})
+                        content_parts.append({"type": "text", "text": f"[Image attachment URL: {url}]"})
                     else:
                         content_parts.append(
                             {"type": "text", "text": "[Image attachment: too large to process]"}
