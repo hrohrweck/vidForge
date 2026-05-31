@@ -26,6 +26,14 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_filename(name: str, ext: str) -> str:
+    """Sanitize a name for use as a filename."""
+    import re
+    sanitized = re.sub(r"[^\w\s-]", "", name).strip()
+    sanitized = re.sub(r"[-\s]+", "_", sanitized)
+    return (sanitized[:50] or "untitled") + ext
+
+
 
 async def get_provider_instance(
     db: AsyncSession,
@@ -424,10 +432,12 @@ async def generate_image(
     reference_image_strength: float = 0.75,
     lora_path: str | None = None,
     lora_strength: float = 0.8,
+    title: str | None = None,
 ) -> tuple[str, str, UUID | None]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
-    image_path = output_dir / "seed_image.png"
+    filename_base = _sanitize_filename(title or prompt[:50], ".png") if title or prompt else "seed_image.png"
+    image_path = output_dir / filename_base
 
     selected_model, resolved_pid, ptype, instance = await _resolve_image_provider(
         db, job, provider_id, model_preference,
@@ -512,10 +522,12 @@ async def generate_video(
     model_preference: str | None = None,
     duration: int = 5,
     aspect_ratio: str = "16:9",
+    title: str | None = None,
 ) -> tuple[str, str, UUID | None, float]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
-    video_path = output_dir / "scene_video.mp4"
+    filename_base = _sanitize_filename(title or prompt[:50], ".mp4") if title or prompt else "scene_video.mp4"
+    video_path = output_dir / filename_base
 
     selected_model, resolved_pid, ptype, instance = await _resolve_video_provider(
         db, job, provider_id, model_preference,

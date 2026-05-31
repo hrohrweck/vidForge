@@ -9,6 +9,7 @@ task invocation) — see ``app.workers.context``.
 
 import json
 import logging
+import shutil
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -1200,6 +1201,7 @@ def generate_quick_media(
     negative_prompt: str | None = None,
     seed: int | None = None,
     image_path: str | None = None,
+    title: str | None = None,
 ) -> dict:
     """Generate a single image or video without a full job pipeline.
 
@@ -1210,7 +1212,7 @@ def generate_quick_media(
     """
     return ctx.run(_generate_quick_media(
         self, user_id, model_id, prompt, aspect_ratio,
-        duration, negative_prompt, seed, image_path,
+        duration, negative_prompt, seed, image_path, title=title,
     ))
 
 
@@ -1224,6 +1226,7 @@ async def _generate_quick_media(
     negative_prompt: str | None,
     seed: int | None,
     image_path: str | None = None,
+    title: str | None = None,
 ) -> dict:
     import uuid as _uuid
     from datetime import datetime as _datetime
@@ -1299,6 +1302,7 @@ async def _generate_quick_media(
                     model_preference=model_id,
                     aspect_ratio=aspect_ratio,
                     reference_image_path=image_path,
+                    title=title,
                 )
                 content_type = "image/png"
 
@@ -1313,6 +1317,7 @@ async def _generate_quick_media(
                     duration=duration,
                     aspect_ratio=aspect_ratio,
                     reference_image_path=image_path,
+                    title=title,
                 )
                 content_type = "video/mp4"
             else:
@@ -1330,18 +1335,31 @@ async def _generate_quick_media(
                     f"Generated file not found at: {full_path}"
                 )
 
+            asset_name = title or prompt[:50] or f"{model_id}_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
             asset = MediaAsset(
                 user_id=user_uuid,
-                name=full_path.name,
-                file_path=path,
-                file_type=config.modality,
+                name=asset_name,
+                file_path="",
+                file_type="image" if config.modality == "image" else "video",
                 mime_type=content_type,
-                size_bytes=full_path.stat().st_size,
-                source_type=SourceType.GENERATED.value,
-                created_at=_datetime.utcnow(),
-                updated_at=_datetime.utcnow(),
+                size_bytes=0,
+                source_type=SourceType.GENERATED,
             )
             db.add(asset)
+            await db.flush()
+
+            from app.services.media_path import asset_path
+            permanent_path = asset_path(user_uuid, asset.id, full_path.name)
+            permanent_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(full_path, permanent_path)
+
+            if not permanent_path.exists():
+                raise RuntimeError(
+                    f"Failed to copy generated file to permanent location: {permanent_path}"
+                )
+
+            asset.file_path = str(permanent_path.resolve())
+            asset.size_bytes = full_path.stat().st_size
             await db.commit()
 
             # ------------------------------------------------------------------
@@ -1372,7 +1390,6 @@ async def _generate_quick_media(
             # ------------------------------------------------------------------
             # 7. Clean up the temp job output dir
             # ------------------------------------------------------------------
-            import shutil
             job_output_dir = Path(settings.storage_path) / "output" / str(quick_job_id)
             if job_output_dir.exists():
                 try:

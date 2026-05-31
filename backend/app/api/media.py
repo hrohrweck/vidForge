@@ -667,6 +667,9 @@ async def bulk_download_assets(
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for asset in assets:
             file_path = Path(asset.file_path)
+            if not file_path.is_absolute():
+                from app.config import get_settings
+                file_path = Path(get_settings().storage_path) / file_path
             if not file_path.exists():
                 continue
             # Prefix with first 8 chars of asset id to avoid name collisions
@@ -839,6 +842,9 @@ async def serve_asset_file(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     file_path = Path(asset.file_path)
+    if not file_path.is_absolute():
+        from app.config import get_settings
+        file_path = Path(get_settings().storage_path) / file_path
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
@@ -878,6 +884,9 @@ async def serve_asset_file_by_path(
         raise HTTPException(status_code=404, detail="Asset not found")
 
     file_path = Path(asset.file_path)
+    if not file_path.is_absolute():
+        from app.config import get_settings
+        file_path = Path(get_settings().storage_path) / file_path
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -963,6 +972,7 @@ class QuickGenerateRequest(BaseModel):
     negative_prompt: str | None = None
     seed: int | None = None
     image_path: str | None = None
+    title: str | None = None
 
 
 class QuickGenerateResponse(BaseModel):
@@ -987,5 +997,6 @@ async def quick_generate_media(
         negative_prompt=req.negative_prompt,
         seed=req.seed,
         image_path=req.image_path,
+        title=req.title,
     )
     return QuickGenerateResponse(task_id=task.id)
