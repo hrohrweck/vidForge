@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react'
-import { createPortal } from 'react-dom'
-import { Search, Upload, Folder, ChevronRight, X, Check, Image as ImageIcon } from 'lucide-react'
+import { Search, Upload, Folder, ChevronRight, Check, Image as ImageIcon } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { useAssets, useFolderTree, useUploadAssets } from '../../hooks/useMedia'
 import type { MediaAsset } from '../../api/types/media'
 
@@ -49,17 +49,12 @@ export function AssetPickerModal({ isOpen, onClose, onSelect }: AssetPickerModal
     }
   }
 
-  if (!isOpen) return null
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-background rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-lg font-semibold">Choose Reference Image</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-4xl h-[80vh] p-0 gap-0 flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0 p-4 border-b">
+          <DialogTitle>Choose Reference Image</DialogTitle>
+        </DialogHeader>
 
         <div className="flex-1 flex min-h-0">
           {/* Left sidebar — folder navigation */}
@@ -156,7 +151,7 @@ export function AssetPickerModal({ isOpen, onClose, onSelect }: AssetPickerModal
         </div>
 
         {/* Footer with OK/Cancel */}
-        <div className="flex items-center justify-between p-4 border-t">
+        <div className="shrink-0 flex items-center justify-between p-4 border-t">
           <p className="text-sm text-muted-foreground">
             {selectedAsset ? `Selected: ${selectedAsset.name}` : 'No image selected'}
           </p>
@@ -167,8 +162,7 @@ export function AssetPickerModal({ isOpen, onClose, onSelect }: AssetPickerModal
             </Button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   )
 }
