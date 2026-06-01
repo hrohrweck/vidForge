@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Search, Upload, Folder, ChevronRight, X, Check, Image as ImageIcon } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
@@ -50,8 +51,8 @@ export function AssetPickerModal({ isOpen, onClose, onSelect }: AssetPickerModal
 
   if (!isOpen) return null
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-background rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-lg font-semibold">Choose Reference Image</h2>
@@ -167,6 +168,7 @@ export function AssetPickerModal({ isOpen, onClose, onSelect }: AssetPickerModal
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
