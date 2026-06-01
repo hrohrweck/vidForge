@@ -306,9 +306,28 @@ export default function QuickCreateMedia({ triggerClassName, onSuccess }: QuickC
 
   const estimatedCost = getEstimatedCost()
 
+  const handleOpen = useCallback(() => {
+    setStep('select')
+    setSelectedModel(null)
+    setAspectRatio('1:1')
+    setDuration(5)
+    setNegativePrompt('')
+    setSeed('')
+    setPrompt('')
+    setTitle('')
+    setResolution('1536x2688')
+    setShowAssetPicker(false)
+    resetImage()
+    setIsUploading(false)
+    setSubmitting(false)
+    setSearchQuery('')
+    setProviderFilter('all')
+    setOpen(true)
+  }, [resetImage])
+
   return (
     <>
-      <Button onClick={() => setOpen(true)} className={triggerClassName}>
+      <Button onClick={handleOpen} className={triggerClassName}>
         <Plus className="h-4 w-4 mr-2" />
         Create Media
       </Button>
