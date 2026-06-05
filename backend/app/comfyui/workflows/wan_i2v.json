@@ -59,7 +59,7 @@
       "model": ["6", 0],
       "positive": ["2", 0],
       "negative": ["3", 0],
-      "latent_image": ["8", 0],
+      "latent_image": ["13", 0],
       "seed": 0,
       "steps": 30,
       "cfg": 5.0,
@@ -89,6 +89,15 @@
       "filename_prefix": "vidforge",
       "format": "mp4",
       "codec": "h264"
+    }
+  },
+  "13": {
+    "class_type": "EmptyHunyuanLatentVideo",
+    "inputs": {
+      "width": 848,
+      "height": 480,
+      "length": 81,
+      "batch_size": 1
     }
   }
 }

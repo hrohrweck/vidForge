@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import tempfile
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,11 @@ from app.services.providers import (
     ComfyUIDirectProvider,
     PoeProvider,
     RunPodProvider,
+)
+from app.services.video_processor import (
+    InvalidVideoOutputError,
+    ValidationResult,  # noqa: F401
+    VideoProcessor,
 )
 
 settings = get_settings()
@@ -45,6 +51,12 @@ def _sanitize_filename(name: str, ext: str) -> str:
 
 def _map_media_error_to_friendly_message(exc: Exception, modality: str) -> str:
     """Map media generation exceptions to user-friendly messages."""
+    if isinstance(exc, InvalidVideoOutputError):
+        return (
+            f"Generated video failed validation "
+            f"({exc.result.actual_frames} frames, expected {exc.result.expected_frames})"
+        )
+
     exc_msg = str(exc).lower()
 
     # ComfyUI overloaded
@@ -105,6 +117,10 @@ async def _capture_media_error(
                 "exception_message": str(exc),
                 "modality": modality,
             }
+            if isinstance(exc, InvalidVideoOutputError):
+                details["actual_frames"] = exc.result.actual_frames
+                details["expected_frames"] = exc.result.expected_frames
+                details["actual_duration"] = exc.result.actual_duration
             details.update(extra_context)
 
             await log_user_error(
@@ -726,10 +742,28 @@ async def generate_video(
     prompt_id = await instance.queue_prompt(workflow)
     result = await instance.wait_for_completion(prompt_id)
     output_data = await instance.get_output(result)
-    if output_data:
-        video_path.write_bytes(output_data)
-    else:
+    if not output_data:
         raise ValueError("ComfyUI returned no output data")
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(output_data)
+        tmp_path = tmp.name
+
+    try:
+        validation_result = await VideoProcessor.validate_video_output(
+            tmp_path,
+            expected_duration=float(duration),
+            fps=16.0,
+        )
+        if not validation_result.valid:
+            raise InvalidVideoOutputError(tmp_path, validation_result)
+    except InvalidVideoOutputError:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    video_path.write_bytes(output_data)
     return (
         str(video_path.relative_to(settings.storage_path)),
         f"generated_with_{variant_id}",
@@ -885,22 +919,30 @@ def _build_wan_i2v_workflow(
             "class_type": "ModelSamplingSD3",
             "inputs": {"model": ["5", 0], "shift": shift},
         },
-        # Load the seed image and VAE-encode it as the first frame latent
         "7": {
             "class_type": "LoadImage",
             "inputs": {"image": image_name},
         },
         "8": {
-            "class_type": "VAEEncode",
-            "inputs": {"pixels": ["7", 0], "vae": ["4", 0]},
+            "class_type": "WanImageToVideo",
+            "inputs": {
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "vae": ["4", 0],
+                "width": width,
+                "height": height,
+                "length": frames,
+                "batch_size": 1,
+                "start_image": ["7", 0],
+            },
         },
         "9": {
             "class_type": "KSampler",
             "inputs": {
                 "model": ["6", 0],
-                "positive": ["2", 0],
-                "negative": ["3", 0],
-                "latent_image": ["8", 0],
+                "positive": ["8", 0],
+                "negative": ["8", 1],
+                "latent_image": ["8", 2],
                 "seed": seed,
                 "steps": steps,
                 "cfg": cfg,

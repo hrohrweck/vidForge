@@ -392,42 +392,85 @@ class PluginBase(ABC):
             scene_duration = scene.end_time - scene.start_time
             prompt = scene.visual_description or scene.lyrics_segment or ""
 
-            try:
-                if scene_duration <= max_clip_s + 0.5:
-                    # ── Short scene: single clip ──────────────────────
-                    duration = max(2, int(scene_duration))
-                    video_path, _, _, actual_duration = await self._retry(
-                        generate_video,
-                        db=db, job=job, prompt=prompt,
-                        scene_number=scene.scene_number,
-                        reference_image_path=scene.reference_image_path,
-                        provider_id=job.video_provider_id,
-                        model_preference=video_model,
-                        duration=duration, aspect_ratio=aspect_ratio,
-                        label=f"video-s{scene.scene_number}",
-                    )
-                    scene.generated_video_path = video_path
-                    scene.duration = actual_duration
-                else:
-                    # ── Long scene: sub-clip chain ────────────────────
-                    scene.generated_video_path, scene.duration = (
-                        await self._generate_chained_subclips(
-                            db=db, job=job, scene=scene,
-                            scene_duration=scene_duration,
-                            max_clip_s=max_clip_s,
-                            crossfade_s=crossfade_s,
-                            aspect_ratio=aspect_ratio,
-                        )
-                    )
+            from app.database import ErrorOrigin, ErrorSeverity
+            from app.services.error_capture import log_user_error
+            from app.services.video_processor import InvalidVideoOutputError
 
-                scene.status = "video_ready"
-            except Exception as exc:
+            last_validation_error = None
+            for attempt in range(4):
+                try:
+                    if scene_duration <= max_clip_s + 0.5:
+                        # ── Short scene: single clip ──────────────────────
+                        duration = max(2, int(scene_duration))
+                        video_path, _, _, actual_duration = await self._retry(
+                            generate_video,
+                            db=db, job=job, prompt=prompt,
+                            scene_number=scene.scene_number,
+                            reference_image_path=scene.reference_image_path,
+                            provider_id=job.video_provider_id,
+                            model_preference=video_model,
+                            duration=duration, aspect_ratio=aspect_ratio,
+                            label=f"video-s{scene.scene_number}",
+                        )
+                        scene.generated_video_path = video_path
+                        scene.duration = actual_duration
+                    else:
+                        # ── Long scene: sub-clip chain ────────────────────
+                        scene.generated_video_path, scene.duration = (
+                            await self._generate_chained_subclips(
+                                db=db, job=job, scene=scene,
+                                scene_duration=scene_duration,
+                                max_clip_s=max_clip_s,
+                                crossfade_s=crossfade_s,
+                                aspect_ratio=aspect_ratio,
+                            )
+                        )
+
+                    scene.status = "video_ready"
+                    scene.error_message = None
+                    break
+                except InvalidVideoOutputError as exc:
+                    last_validation_error = exc
+                    await log_user_error(
+                        db,
+                        user_id=job.user_id,
+                        severity=ErrorSeverity.WARNING,
+                        origin=ErrorOrigin.VIDEO_GENERATION,
+                        message=str(exc),
+                        details={
+                            "actual_frames": exc.result.actual_frames,
+                            "expected_frames": exc.result.expected_frames,
+                            "retry_count": attempt,
+                        },
+                        source_id=scene.id,
+                        source_type="scene",
+                    )
+                    if attempt >= 3:
+                        break
+                    delay = 10 * (2 ** attempt)
+                    logger.warning(
+                        "[video-s%s] Validation failed (attempt %d/4): %s — "
+                        "retrying in %.0fs",
+                        scene.scene_number, attempt + 1, exc, delay,
+                    )
+                    await asyncio.sleep(delay)
+                except Exception as exc:
+                    logger.error(
+                        "[video-s%s] generate_videos failed: %s",
+                        scene.scene_number, exc, exc_info=True,
+                    )
+                    scene.status = "failed"
+                    scene.error_message = str(exc)[:500]
+                    break
+
+            if last_validation_error and scene.status != "video_ready":
                 logger.error(
-                    "[video-s%s] generate_videos failed: %s",
-                    scene.scene_number, exc, exc_info=True,
+                    "[video-s%s] Video validation failed after 3 retries: %s",
+                    scene.scene_number, last_validation_error,
                 )
                 scene.status = "failed"
-                scene.error_message = str(exc)[:500]
+                scene.error_message = str(last_validation_error)[:500]
+
             await db.commit()
 
         return context

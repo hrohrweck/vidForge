@@ -578,7 +578,10 @@ class VideoGenerator:
             segment_workflow = load_comfyui_workflow(str(workflow_path))
             segment_workflow = merge_style_into_workflow(segment_workflow, style_params)
 
-            video_length = int(segment_duration * fps) + 1
+            # EmptyHunyuanLatentVideo requires length to be (multiple of 4) + 1
+            # (the node has step: 4 on its length input). Round down to the
+            # nearest valid value so ComfyUI does not silently clamp/reject.
+            video_length = max(1, (int(segment_duration * fps) // 4) * 4 + 1)
 
             for node_id, node in segment_workflow.items():
                 if node.get("class_type") == "EmptyHunyuanLatentVideo":
@@ -672,7 +675,10 @@ class VideoGenerator:
         fps = context.get("fps", 24)
         aspect_ratio = context.get("aspect_ratio", "16:9")
         width, height = self._get_dimensions(aspect_ratio)
-        video_length = int(duration * fps) + 1
+        # EmptyHunyuanLatentVideo requires length to be (multiple of 4) + 1
+        # (the node has step: 4 on its length input). Round down to the
+        # nearest valid value so ComfyUI does not silently clamp/reject.
+        video_length = max(1, (int(duration * fps) // 4) * 4 + 1)
 
         is_ltx = model_name.startswith("ltx")
         if is_ltx:

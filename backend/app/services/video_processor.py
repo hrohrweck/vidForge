@@ -1,7 +1,29 @@
 import asyncio
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+
+@dataclass
+class ValidationResult:
+    valid: bool
+    actual_frames: int
+    actual_duration: float
+    expected_frames: int
+    error_message: str | None = None
+
+
+class InvalidVideoOutputError(Exception):
+    def __init__(self, video_path: str, result: ValidationResult):
+        self.video_path = video_path
+        self.result = result
+        msg = (
+            result.error_message
+            or f"Video at {video_path} is invalid "
+            f"(frames={result.actual_frames}, duration={result.actual_duration:.2f}s)"
+        )
+        super().__init__(msg)
 
 
 class VideoProcessor:
@@ -542,3 +564,122 @@ class VideoProcessor:
         temp_dir.rmdir()
 
         return output_path
+
+    @staticmethod
+    async def validate_video_output(
+        video_path: str,
+        expected_duration: float,
+        fps: float = 16.0,
+        min_threshold: float = 0.8,
+    ) -> ValidationResult:
+        """Validate a generated video has the expected frame count and duration.
+
+        Uses an 80% threshold by default to tolerate codec rounding (e.g. a 5s
+        clip at 16fps may encode to 78-82 frames instead of exactly 80) while
+        still catching severely truncated output (e.g. Wan 2.2 producing a
+        single-frame clip).
+        """
+        expected_frames = int(expected_duration * fps)
+        min_frames = max(1, int(expected_frames * min_threshold))
+        min_duration = expected_duration * min_threshold
+
+        if not Path(video_path).exists():
+            return ValidationResult(
+                valid=False,
+                actual_frames=0,
+                actual_duration=0.0,
+                expected_frames=expected_frames,
+                error_message=f"Video file not found: {video_path}",
+            )
+
+        try:
+            info = await VideoProcessor.get_video_info(video_path)
+        except FileNotFoundError:
+            return ValidationResult(
+                valid=False,
+                actual_frames=0,
+                actual_duration=0.0,
+                expected_frames=expected_frames,
+                error_message="ffprobe binary not found on PATH",
+            )
+        except Exception as e:
+            return ValidationResult(
+                valid=False,
+                actual_frames=0,
+                actual_duration=0.0,
+                expected_frames=expected_frames,
+                error_message=f"Failed to probe video: {e}",
+            )
+
+        streams = info.get("streams") or []
+        video_stream = next(
+            (s for s in streams if s.get("codec_type") == "video"),
+            None,
+        )
+        if video_stream is None:
+            return ValidationResult(
+                valid=False,
+                actual_frames=0,
+                actual_duration=0.0,
+                expected_frames=expected_frames,
+                error_message="No video stream found in file (file may be corrupted)",
+            )
+
+        codec_name = video_stream.get("codec_name") or ""
+        if not codec_name or codec_name in ("null", "unknown", "N/A"):
+            return ValidationResult(
+                valid=False,
+                actual_frames=0,
+                actual_duration=0.0,
+                expected_frames=expected_frames,
+                error_message=f"Invalid video codec: {codec_name!r}",
+            )
+
+        raw_duration = video_stream.get("duration") or info.get("format", {}).get("duration")
+        try:
+            actual_duration = float(raw_duration) if raw_duration else 0.0
+        except (TypeError, ValueError):
+            actual_duration = 0.0
+
+        nb_frames_raw = video_stream.get("nb_frames")
+        if nb_frames_raw not in (None, "", "N/A"):
+            try:
+                actual_frames = int(nb_frames_raw)
+            except (TypeError, ValueError):
+                actual_frames = int(actual_duration * fps)
+        else:
+            actual_frames = int(actual_duration * fps)
+
+        if actual_frames < min_frames:
+            return ValidationResult(
+                valid=False,
+                actual_frames=actual_frames,
+                actual_duration=actual_duration,
+                expected_frames=expected_frames,
+                error_message=(
+                    f"Video has only {actual_frames} frame(s), "
+                    f"expected ~{expected_frames} frames for "
+                    f"{expected_duration:.1f}s at {fps}fps (minimum {min_frames})"
+                ),
+            )
+
+        if actual_duration < min_duration:
+            return ValidationResult(
+                valid=False,
+                actual_frames=actual_frames,
+                actual_duration=actual_duration,
+                expected_frames=expected_frames,
+                error_message=(
+                    f"Video duration is {actual_duration:.2f}s, "
+                    f"expected at least {min_duration:.2f}s "
+                    f"for target {expected_duration:.1f}s"
+                ),
+            )
+
+        return ValidationResult(
+            valid=True,
+            actual_frames=actual_frames,
+            actual_duration=actual_duration,
+            expected_frames=expected_frames,
+            error_message=None,
+        )
