@@ -22,51 +22,51 @@ import { ThemeProvider } from './components/ThemeProvider'
 import { Toaster } from './components/ui/toaster'
 import { NotificationCenter } from './components/NotificationCenter'
 
-function App() {
-  const { isAuthenticated } = useAuthStore()
-
+function AppRoutes({ isAuthenticated }: { isAuthenticated: boolean }) {
   if (!isAuthenticated) {
     return (
-      <ThemeProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
-        </BrowserRouter>
-        <Toaster />
-        <NotificationCenter />
-      </ThemeProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     )
   }
 
   return (
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<Dashboard />} />
+        <Route path="jobs" element={<Jobs />} />
+        <Route path="jobs/:id" element={<JobDetail />} />
+        <Route path="editor/:jobId" element={<SceneEditor />} />
+        <Route path="templates" element={<Templates />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="admin" element={<Admin />} />
+        <Route path="admin/providers" element={<Providers />} />
+        <Route path="admin/mcp-servers" element={<MCPServersPage />} />
+        <Route path="admin/groups" element={<Groups />} />
+        <Route path="admin/models" element={<ModelManagement />} />
+        <Route path="admin/logs" element={<AdminLogs />} />
+        <Route path="media" element={<MediaLibrary />} />
+        <Route path="media/asset/:id" element={<AssetDetail />} />
+        <Route path="avatars" element={<Avatars />} />
+        <Route path="chat" element={<Chat />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
+
+function App() {
+  const { isAuthenticated } = useAuthStore()
+
+  return (
     <ThemeProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="jobs" element={<Jobs />} />
-            <Route path="jobs/:id" element={<JobDetail />} />
-            <Route path="editor/:jobId" element={<SceneEditor />} />
-            <Route path="templates" element={<Templates />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="admin" element={<Admin />} />
-            <Route path="admin/providers" element={<Providers />} />
-            <Route path="admin/mcp-servers" element={<MCPServersPage />} />
-            <Route path="admin/groups" element={<Groups />} />
-            <Route path="admin/models" element={<ModelManagement />} />
-            <Route path="admin/logs" element={<AdminLogs />} />
-            <Route path="media" element={<MediaLibrary />} />
-            <Route path="media/asset/:id" element={<AssetDetail />} />
-            <Route path="avatars" element={<Avatars />} />
-            <Route path="chat" element={<Chat />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppRoutes isAuthenticated={isAuthenticated} />
+        <Toaster />
+        <NotificationCenter />
       </BrowserRouter>
-      <Toaster />
-      <NotificationCenter />
     </ThemeProvider>
   )
 }
