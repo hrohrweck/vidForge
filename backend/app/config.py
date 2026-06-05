@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     comfyui_max_concurrent: int = 1
     ollama_url: str = "http://localhost:11434"
     llm_model: str = "qwen3.6:35b"
+    llm_timeout_seconds: float = 600.0
     audiocraft_url: str = "http://localhost:5050"
 
     templates_path: str = "./templates"

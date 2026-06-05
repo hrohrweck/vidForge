@@ -33,7 +33,7 @@ class LLMClient:
     def __init__(self, base_url: str | None = None, model: str | None = None):
         self.base_url = base_url or settings.ollama_url
         self.model = model or settings.llm_model or "qwen3.6:35b"
-        self.client = httpx.AsyncClient(timeout=300.0)
+        self.client = httpx.AsyncClient(timeout=settings.llm_timeout_seconds)
 
     async def close(self) -> None:
         await self.client.aclose()
