@@ -22,6 +22,35 @@ INTEGRATION_DATABASE_URL = os.environ.get(
 )
 
 
+def _check_postgres_available() -> bool:
+    """Check if PostgreSQL is reachable at the configured URL."""
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(INTEGRATION_DATABASE_URL.replace("+asyncpg", ""))
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(2)
+    try:
+        sock.connect((host, port))
+        return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+    finally:
+        sock.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def skip_if_no_postgres():
+    """Skip all integration tests if PostgreSQL is not available."""
+    if not _check_postgres_available():
+        pytest.skip(
+            f"PostgreSQL not available at {INTEGRATION_DATABASE_URL} — skipping integration tests",
+            allow_module_level=True,
+        )
+
+
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"
