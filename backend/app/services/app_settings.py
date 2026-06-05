@@ -17,6 +17,9 @@ else:
 CACHE_TTL_SECONDS = 60
 DEFAULT_SETTINGS: dict[str, Any] = {
     "media.max_folder_depth": 3,
+    # Retention period (in days) for notification records before cleanup.
+    # Type: integer, valid range 1-365.
+    "notifications.retention_days": 30,
 }
 
 _cache: dict[str, tuple[Any, float]] = {}

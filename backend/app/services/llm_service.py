@@ -8,8 +8,11 @@ from typing import Any, Literal
 import httpx
 
 from app.config import get_settings
+from app.database import ErrorOrigin, ErrorSeverity
 
 logger = logging.getLogger(__name__)
+
+
 settings = get_settings()
 
 
@@ -208,7 +211,9 @@ class LLMClient:
                 content = data.get("message", {}).get("content", "")
 
                 if not content:
-                    thinking = data.get("message", {}).get("think", "") or data.get("message", {}).get("thinking", "")
+                    thinking = data.get("message", {}).get("think", "") or data.get(
+                        "message", {}
+                    ).get("thinking", "")
                     if thinking:
                         content = thinking
 
@@ -217,15 +222,16 @@ class LLMClient:
 
                 # Strip thinking/reasoning blocks so callers get clean output
                 import re
-                clean = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-                clean = re.sub(r'【thinking】.*?【/thinking】', '', clean, flags=re.DOTALL).strip()
+
+                clean = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                clean = re.sub(r"【thinking】.*?【/thinking】", "", clean, flags=re.DOTALL).strip()
                 if clean:
                     content = clean
 
                 return content
             except Exception as e:
                 last_error = e
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.warning(
                     "LLM request attempt %d/%d failed (wait=%ds): %s: %s",
                     attempt + 1,
@@ -241,6 +247,27 @@ class LLMClient:
         error_type = type(last_error).__name__ if last_error else "Unknown"
         error_msg = str(last_error) if last_error else "no error details"
         full_error = f"{error_type}: {error_msg}"
+        # Capture error for notification system (best-effort, no Job context here)
+        try:
+            from app.services.error_capture import log_system_error
+            from app.workers.context import ctx
+
+            async with ctx.session_factory() as error_db:
+                await log_system_error(
+                    error_db,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.LLM,
+                    message="AI assistant is unavailable, please try again later",
+                    details={
+                        "exception_type": error_type,
+                        "exception_message": error_msg,
+                        "retry_count": retries,
+                        "model": self.model,
+                    },
+                )
+        except Exception:
+            logger.debug("Failed to capture LLM error for notification", exc_info=True)
+
         raise LLMError(f"LLM request failed after {retries} attempts: {full_error}")
 
     async def generate_with_context(

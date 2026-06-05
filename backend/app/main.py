@@ -15,6 +15,7 @@ from app.api import (
     jobs,
     media,
     models,
+    notifications,
     projects,
     providers,
     scenes,
@@ -26,6 +27,7 @@ from app.api import (
 )
 from app.api.admin_mcp import router as admin_mcp_router
 from app.api.websocket import manager as ws_manager
+from app.api.ws_auth import authenticate_websocket
 from app.config import get_settings
 from app.database import User, async_session, create_tables, seed_builtin_data, seed_rbac_data
 from app.services.model_manager import ModelManager, ModelManagerError
@@ -118,6 +120,8 @@ app.include_router(audio.router, prefix="/api/audio", tags=["audio"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(dashboard.router, prefix="/api", tags=["dashboard"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(notifications.admin_router, prefix="/api/admin", tags=["notifications"])
 
 
 @app.get("/health")
@@ -173,3 +177,31 @@ async def websocket_chat_updates(websocket: WebSocket, conversation_id: str) -> 
             subscribe_task.cancel()
     finally:
         await websocket.close()
+
+
+@app.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket, token: str | None = None) -> None:
+    """Authenticated WebSocket for real-time user notifications.
+
+    The client passes a JWT via the ``token`` query parameter (browsers cannot
+    set custom headers on the WS handshake).  On auth failure the connection
+    is rejected with close code 1008 *before* ``accept()`` is called.
+    """
+    user = await authenticate_websocket(websocket, token)
+    if user is None:
+        await websocket.close(code=1008)
+        return
+    await ws_manager.connect_user(websocket, str(user.id))
+    try:
+        subscribe_task = asyncio.create_task(
+            ws_manager.subscribe_to_user_notifications(str(user.id), websocket)
+        )
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            subscribe_task.cancel()
+    finally:
+        ws_manager.disconnect_user(websocket, str(user.id))

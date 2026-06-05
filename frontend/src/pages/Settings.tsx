@@ -8,12 +8,13 @@ import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Badge } from '../components/ui/badge'
+import SettingsLogs from './SettingsLogs'
 
 export default function Settings() {
   const { user } = useAuthStore()
   const { theme, setTheme } = useThemeStore()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'account' | 'appearance' | 'storage' | 'styles' | 'models'>('account')
+  const [activeTab, setActiveTab] = useState<'account' | 'appearance' | 'storage' | 'styles' | 'models' | 'logs'>('account')
   
   const [storageSettings, setStorageSettings] = useState({
     default_style: '',
@@ -171,7 +172,7 @@ export default function Settings() {
       </div>
 
       <div className="flex gap-2 border-b">
-        {(['account', 'appearance', 'storage', 'styles', 'models'] as const).map((tab) => (
+        {(['account', 'appearance', 'storage', 'styles', 'models', 'logs'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -181,7 +182,7 @@ export default function Settings() {
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab === 'models' ? 'AI Models' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'models' ? 'AI Models' : tab === 'logs' ? 'Error Logs' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -697,6 +698,8 @@ export default function Settings() {
           </div>
         </div>
       )}
+
+      {activeTab === 'logs' && <SettingsLogs />}
     </div>
   )
 }

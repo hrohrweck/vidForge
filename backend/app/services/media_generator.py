@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.database import Job, ModelConfig, Provider, UserSettings
+from app.database import ErrorOrigin, ErrorSeverity, Job, ModelConfig, Provider, UserSettings
 from app.services.job_router import JobRouter
 from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import (
@@ -28,19 +28,99 @@ logger = logging.getLogger(__name__)
 _VIDEO_SEED_RESOLUTIONS: dict[str, str] = {
     "16:9": "1024x576",
     "9:16": "576x1024",
-    "1:1":  "768x768",
-    "4:3":  "768x576",
-    "3:4":  "576x768",
+    "1:1": "768x768",
+    "4:3": "768x576",
+    "3:4": "576x768",
 }
 
 
 def _sanitize_filename(name: str, ext: str) -> str:
     """Sanitize a name for use as a filename."""
     import re
+
     sanitized = re.sub(r"[^\w\s-]", "", name).strip()
     sanitized = re.sub(r"[-\s]+", "_", sanitized)
     return (sanitized[:50] or "untitled") + ext
 
+
+def _map_media_error_to_friendly_message(exc: Exception, modality: str) -> str:
+    """Map media generation exceptions to user-friendly messages."""
+    exc_msg = str(exc).lower()
+
+    # ComfyUI overloaded
+    if "overloaded" in exc_msg or "capacity" in exc_msg or "queue is full" in exc_msg:
+        return "AI service is busy, please try again later"
+
+    # Rate limiting
+    if "rate limit" in exc_msg or "429" in exc_msg:
+        return "Too many requests, please try again later"
+
+    # Connection errors
+    if "connection" in exc_msg or "connectionerror" in exc_msg:
+        return "Connection failed, please check your network"
+
+    # Timeout errors
+    if "timeout" in exc_msg or "timed out" in exc_msg:
+        return "Request timed out, please try again later"
+
+    # Provider-specific
+    if "poe" in exc_msg or "atlas" in exc_msg:
+        return f"{'Image' if modality == 'image' else 'Video'} generation service error, please try again"
+
+    if "comfyui" in exc_msg:
+        return f"{'Image' if modality == 'image' else 'Video'} generation service error, please try again"
+
+    # No data returned
+    if "no data" in exc_msg or "no output" in exc_msg:
+        return f"{'Image' if modality == 'image' else 'Video'} generation returned no data, please try again"
+
+    # Generic fallback
+    return "An error occurred, please try again"
+
+
+async def _capture_media_error(
+    job: "Job",
+    exc: Exception,
+    modality: str,
+    **extra_context,
+) -> None:
+    """Capture media generation error for notification system (fire-and-forget)."""
+    try:
+        from app.services.error_capture import log_user_error
+        from app.workers.context import ctx
+
+        async with ctx.session_factory() as db:
+            # Refresh job to get user_id
+            from sqlalchemy import select
+
+            result = await db.execute(select(Job).where(Job.id == job.id))
+            fresh_job = result.scalar_one_or_none()
+            user_id = fresh_job.user_id if fresh_job else job.user_id
+
+            if not user_id:
+                return
+
+            details = {
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "modality": modality,
+            }
+            details.update(extra_context)
+
+            await log_user_error(
+                db,
+                user_id=user_id,
+                severity=ErrorSeverity.ERROR,
+                origin=ErrorOrigin.MEDIA_GENERATION
+                if modality == "image"
+                else ErrorOrigin.VIDEO_GENERATION,
+                message=_map_media_error_to_friendly_message(exc, modality),
+                details=details,
+                source_id=job.id,
+                source_type="job",
+            )
+    except Exception:
+        pass  # Silent failure - don't block media generation
 
 
 async def get_provider_instance(
@@ -49,26 +129,31 @@ async def get_provider_instance(
 ) -> PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider:
     if provider.provider_type == "atlascloud":
         from app.services.providers import AtlasCloudProvider
+
         instance = AtlasCloudProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
     elif provider.provider_type == "poe":
         from app.services.providers import PoeProvider
+
         instance = PoeProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
     elif provider.provider_type == "comfyui_direct":
         from app.services.providers import ComfyUIDirectProvider
+
         instance = ComfyUIDirectProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
     elif provider.provider_type == "runpod":
         from app.services.providers import RunPodProvider
+
         instance = RunPodProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
     elif provider.provider_type == "ollama":
         from app.services.providers.ollama import OllamaProvider
+
         instance = OllamaProvider(provider.id, provider.config)
         await instance.initialize(provider.config)
         return instance
@@ -80,7 +165,10 @@ async def get_provider_for_job(
     db: AsyncSession,
     job: Job,
     modality: str,
-) -> tuple[Provider | None, PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider | None]:
+) -> tuple[
+    Provider | None,
+    PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider | None,
+]:
     provider_id = job.image_provider_id if modality == "image" else job.video_provider_id
 
     if provider_id:
@@ -224,7 +312,8 @@ MIN_SCENE_DURATION = 2.0  # Minimum scene duration in seconds
 
 
 def enforce_min_scene_duration(
-    scenes: list[dict[str, Any]], min_duration: float = MIN_SCENE_DURATION,
+    scenes: list[dict[str, Any]],
+    min_duration: float = MIN_SCENE_DURATION,
 ) -> list[dict[str, Any]]:
     """Merge scenes shorter than min_duration into the previous scene.
 
@@ -243,8 +332,8 @@ def enforce_min_scene_duration(
             # Combine descriptions
             if scene.get("visual_description"):
                 prev = merged[-1].get("visual_description", "")
-                merged[-1]["visual_description"] = (
-                    f"{prev}; {scene['visual_description']}".strip("; ")
+                merged[-1]["visual_description"] = f"{prev}; {scene['visual_description']}".strip(
+                    "; "
                 )
             if scene.get("image_prompt") and not merged[-1].get("image_prompt"):
                 merged[-1]["image_prompt"] = scene["image_prompt"]
@@ -406,16 +495,14 @@ async def _get_poe_provider(
     return None, None
 
 
-
-
-
 async def _get_atlascloud_provider(
     db: AsyncSession,
 ) -> tuple[Provider | None, AtlasCloudProvider | None]:
     """Find the first active AtlasCloud provider in the DB."""
     result = await db.execute(
         select(Provider).where(
-            Provider.provider_type == "atlascloud", Provider.is_active == True  # noqa: E712
+            Provider.provider_type == "atlascloud",
+            Provider.is_active == True,  # noqa: E712
         )
     )
     providers = result.scalars().all()
@@ -444,20 +531,23 @@ async def generate_image(
 ) -> tuple[str, str, UUID | None]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
-    filename_base = _sanitize_filename(title or prompt[:50], ".png") if title or prompt else "seed_image.png"
+    filename_base = (
+        _sanitize_filename(title or prompt[:50], ".png") if title or prompt else "seed_image.png"
+    )
     image_path = output_dir / filename_base
 
     selected_model, resolved_pid, ptype, instance = await _resolve_image_provider(
-        db, job, provider_id, model_preference,
+        db,
+        job,
+        provider_id,
+        model_preference,
         has_reference_image=bool(reference_image_path),
     )
 
     if ptype in ("poe", "atlascloud"):
         # Cloud provider — direct API call
         if lora_path:
-            logger.warning(
-                "LoRA not supported for cloud providers, falling back to prompt-only"
-            )
+            logger.warning("LoRA not supported for cloud providers, falling back to prompt-only")
         if reference_image_path:
             logger.warning(
                 "IP-Adapter not supported for cloud providers, falling back to prompt-only"
@@ -470,7 +560,13 @@ async def generate_image(
             aspect_ratio=aspect_ratio,
         )
         if not image_data:
-            raise ValueError(f"Poe image generation returned no data (model={selected_model})")
+            exc = ValueError(f"Poe image generation returned no data (model={selected_model})")
+            import asyncio
+
+            asyncio.create_task(
+                _capture_media_error(job, exc, "image", model=selected_model, provider=ptype)
+            )
+            raise exc
         image_path.write_bytes(image_data)
         relative_path = str(image_path.relative_to(settings.storage_path))
         return relative_path, f"poe_{selected_model}", resolved_pid
@@ -536,11 +632,16 @@ async def generate_video(
 ) -> tuple[str, str, UUID | None, float]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
-    filename_base = _sanitize_filename(title or prompt[:50], ".mp4") if title or prompt else "scene_video.mp4"
+    filename_base = (
+        _sanitize_filename(title or prompt[:50], ".mp4") if title or prompt else "scene_video.mp4"
+    )
     video_path = output_dir / filename_base
 
     selected_model, resolved_pid, ptype, instance = await _resolve_video_provider(
-        db, job, provider_id, model_preference,
+        db,
+        job,
+        provider_id,
+        model_preference,
         has_seed_image=bool(reference_image_path),
     )
 
@@ -554,7 +655,13 @@ async def generate_video(
             image_path=reference_image_path,
         )
         if not video_data:
-            raise ValueError(f"Poe video generation returned no data (model={selected_model})")
+            exc = ValueError(f"Poe video generation returned no data (model={selected_model})")
+            import asyncio
+
+            asyncio.create_task(
+                _capture_media_error(job, exc, "video", model=selected_model, provider=ptype)
+            )
+            raise exc
         video_path.write_bytes(video_data)
         relative_path = str(video_path.relative_to(settings.storage_path))
         return relative_path, f"poe_{selected_model}", resolved_pid, float(duration)
@@ -591,13 +698,17 @@ async def generate_video(
                 )
             else:
                 workflow = _build_wan_video_workflow(
-                    prompt=prompt, aspect_ratio=aspect_ratio,
-                    frames=frames, provider_config=instance.config,
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    frames=frames,
+                    provider_config=instance.config,
                 )
         else:
             workflow = _build_wan_video_workflow(
-                prompt=prompt, aspect_ratio=aspect_ratio,
-                frames=frames, provider_config=instance.config,
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                frames=frames,
+                provider_config=instance.config,
             )
     elif variant_id.startswith("ltx"):
         workflow = await _build_ltx_workflow(
@@ -641,7 +752,9 @@ def _build_wan_video_workflow(
     width, height = _video_generation_resolution(aspect_ratio)
     seed = random.randint(0, 2**31 - 1)
 
-    clip_name = str(provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+    clip_name = str(
+        provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    )
     vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
     unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
 
@@ -708,7 +821,12 @@ def _build_wan_video_workflow(
         },
         "11": {
             "class_type": "SaveVideo",
-            "inputs": {"video": ["10", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
+            "inputs": {
+                "video": ["10", 0],
+                "filename_prefix": "vidforge",
+                "format": "mp4",
+                "codec": "h264",
+            },
         },
     }
 
@@ -728,7 +846,9 @@ def _build_wan_i2v_workflow(
     width, height = _video_generation_resolution(aspect_ratio)
     seed = random.randint(0, 2**31 - 1)
 
-    clip_name = str(provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors")
+    clip_name = str(
+        provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+    )
     vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
     unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
 
@@ -799,7 +919,12 @@ def _build_wan_i2v_workflow(
         },
         "12": {
             "class_type": "SaveVideo",
-            "inputs": {"video": ["11", 0], "filename_prefix": "vidforge", "format": "mp4", "codec": "h264"},
+            "inputs": {
+                "video": ["11", 0],
+                "filename_prefix": "vidforge",
+                "format": "mp4",
+                "codec": "h264",
+            },
         },
     }
 
@@ -911,7 +1036,9 @@ def _build_comfyui_image_workflow(
         provider_config.get("image_sampler") or provider_config.get("wan_image_sampler") or "uni_pc"
     )
     scheduler = str(
-        provider_config.get("image_scheduler") or provider_config.get("wan_image_scheduler") or "simple"
+        provider_config.get("image_scheduler")
+        or provider_config.get("wan_image_scheduler")
+        or "simple"
     )
     shift = float(provider_config.get("wan_image_shift") or 8.0)
 
@@ -1093,16 +1220,13 @@ def _build_ip_adapter_image_workflow(
         or "flux1-schnell.safetensors"
     )
     ip_adapter_model = str(
-        provider_config.get("ip_adapter_model")
-        or "ip-adapter-plus_sd15.safetensors"
+        provider_config.get("ip_adapter_model") or "ip-adapter-plus_sd15.safetensors"
     )
     clip_vision_model = str(
-        provider_config.get("clip_vision_model")
-        or "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+        provider_config.get("clip_vision_model") or "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
     )
     negative_prompt = str(
-        provider_config.get("image_negative_prompt")
-        or "blurry, low quality, distorted, deformed"
+        provider_config.get("image_negative_prompt") or "blurry, low quality, distorted, deformed"
     )
 
     workflow_path = Path(__file__).parent.parent / "comfyui" / "ip_adapter_image.json"
@@ -1184,19 +1308,10 @@ def _build_flux_image_workflow(
     width, height = _aspect_ratio_to_dimensions(aspect_ratio)
     seed = random.randint(0, 2**31 - 1)
 
-    unet_name = str(
-        provider_config.get("flux_unet_name")
-        or "flux1-schnell-fp8.safetensors"
-    )
-    clip_name1 = str(
-        provider_config.get("flux_clip_name1") or "clip_l.safetensors"
-    )
-    clip_name2 = str(
-        provider_config.get("flux_clip_name2") or "t5xxl_fp8_e4m3fn.safetensors"
-    )
-    vae_name = str(
-        provider_config.get("flux_vae_name") or "ae.safetensors"
-    )
+    unet_name = str(provider_config.get("flux_unet_name") or "flux1-schnell-fp8.safetensors")
+    clip_name1 = str(provider_config.get("flux_clip_name1") or "clip_l.safetensors")
+    clip_name2 = str(provider_config.get("flux_clip_name2") or "t5xxl_fp8_e4m3fn.safetensors")
+    vae_name = str(provider_config.get("flux_vae_name") or "ae.safetensors")
 
     return {
         "1": {

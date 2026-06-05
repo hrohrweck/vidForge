@@ -20,8 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.websocket import manager as ws_manager
 from app.config import get_settings
-from app.database import Job, Message, Provider, Template
+from app.database import ErrorEvent, ErrorOrigin, ErrorSeverity, Job, Message, Provider, Template
 from app.services.budget_tracker import BudgetTracker
+from app.services.error_capture import log_user_error
 from app.services.job_router import JobRouter
 from app.services.video_generator import process_job_video
 from app.services.worker_registry import WorkerRegistry
@@ -30,6 +31,7 @@ from app.workers.celery_app import celery_app
 from app.workers.context import ctx
 
 logger = logging.getLogger(__name__)
+
 
 settings = get_settings()
 
@@ -53,9 +55,7 @@ async def broadcast_update(job_id: str, message: dict) -> None:
 
 async def progress_callback(job_id: str, progress: int, message: str) -> None:
     """Progress callback suitable for passing to video/audio services."""
-    await broadcast_update(
-        job_id, {"type": "progress", "progress": progress, "message": message}
-    )
+    await broadcast_update(job_id, {"type": "progress", "progress": progress, "message": message})
 
 
 async def update_job_status(
@@ -112,9 +112,7 @@ async def update_job_status(
         await _post_completion_message(job_id)
 
 
-async def _post_completion_message(
-    job_id: UUID, db: AsyncSession | None = None
-) -> None:
+async def _post_completion_message(job_id: UUID, db: AsyncSession | None = None) -> None:
     """If the job was triggered from chat, post the result as an assistant message."""
     if db is None:
         async with ctx.session_factory() as db:
@@ -185,9 +183,7 @@ async def _post_completion_message(
     await db.commit()
     await db.refresh(message)
 
-    await ws_manager.broadcast_chat_message(
-        str(job.chat_conversation_id), str(message.id)
-    )
+    await ws_manager.broadcast_chat_message(str(job.chat_conversation_id), str(message.id))
 
 
 async def get_template_name(db, template_id: UUID | None) -> str:
@@ -243,9 +239,7 @@ class ComfyUISemaphore:
 # ======================================================================
 
 
-async def _resolve_provider_for_job(
-    db, job: Job, workflow: dict, preference: str
-) -> tuple:
+async def _resolve_provider_for_job(db, job: Job, workflow: dict, preference: str) -> tuple:
     router = JobRouter(db)
 
     if job.provider_id:
@@ -259,24 +253,23 @@ async def _resolve_provider_for_job(
         estimated_cost = Decimal(str(await provider_instance.estimate_cost(workflow)))
 
         if provider.provider_type == "runpod":
-            allowed, reason = await router.budget_tracker.check_budget(
-                provider.id, estimated_cost
-            )
+            allowed, reason = await router.budget_tracker.check_budget(provider.id, estimated_cost)
             if not allowed:
-                raise ValueError(
-                    f"Assigned provider '{provider.name}' unavailable: {reason}"
-                )
+                raise ValueError(f"Assigned provider '{provider.name}' unavailable: {reason}")
         return provider, provider_instance, estimated_cost, router, "Assigned provider"
 
     provider, provider_instance, reason = await router.select_provider(
-        preference=preference, workflow=workflow,
+        preference=preference,
+        workflow=workflow,
     )
     estimated_cost = Decimal(str(await provider_instance.estimate_cost(workflow)))
     return provider, provider_instance, estimated_cost, router, reason
 
 
 async def _run_local_job(
-    job_id: str, template_name: str | None, input_data: dict,
+    job_id: str,
+    template_name: str | None,
+    input_data: dict,
 ) -> tuple[str, str | None]:
     video_path, preview_path = await process_job_video(
         job_id=job_id,
@@ -286,15 +279,15 @@ async def _run_local_job(
     )
     relative_video = str(Path(video_path).relative_to(settings.storage_path))
     relative_preview = (
-        str(Path(preview_path).relative_to(settings.storage_path))
-        if preview_path
-        else None
+        str(Path(preview_path).relative_to(settings.storage_path)) if preview_path else None
     )
     return relative_video, relative_preview
 
 
 async def _run_runpod_job(
-    job_id: str, workflow: dict, provider_instance,
+    job_id: str,
+    workflow: dict,
+    provider_instance,
 ) -> tuple[str, str | None]:
     run_id = await provider_instance.queue_prompt(workflow)
     result = await provider_instance.wait_for_completion(
@@ -334,9 +327,7 @@ async def _run_poe_job(
     )
     available_models = list(result.scalars().all())
     if not available_models:
-        raise ValueError(
-            f"No Poe models configured for provider {provider_instance.provider_id}"
-        )
+        raise ValueError(f"No Poe models configured for provider {provider_instance.provider_id}")
 
     selected_model = None
     if model_preference:
@@ -393,6 +384,37 @@ def process_video_job(self, job_id: str, provider_preference: str = "auto") -> d
     return ctx.run(_process_video_job(job_id, provider_preference))
 
 
+def _map_exception_to_friendly_message(exc: Exception) -> str:
+    """Map common exceptions to user-friendly messages."""
+    exc_msg = str(exc).lower()
+
+    if "overloaded" in exc_msg or "capacity" in exc_msg or "queue is full" in exc_msg:
+        return "AI service is busy, please try again later"
+    if "rate limit" in exc_msg or "429" in exc_msg or "too many requests" in exc_msg:
+        return "Too many requests, please try again later"
+    if isinstance(exc, ConnectionError) or "connection" in exc_msg:
+        return "Connection failed, please check your network"
+    if isinstance(exc, TimeoutError) or "timeout" in exc_msg or "timed out" in exc_msg:
+        return "Request timed out, please try again later"
+    if "comfyui" in exc_msg or "poe" in exc_msg or "runpod" in exc_msg:
+        return "Video generation service error, please try again"
+    return "An error occurred, please try again"
+
+
+def _build_error_details(exc: Exception, **extra_context) -> dict:
+    """Build a details dict with technical info for admin viewing."""
+    import traceback
+
+    details = {
+        "exception_type": type(exc).__name__,
+        "exception_message": str(exc),
+    }
+    tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    details["stack_trace"] = "".join(tb_lines[-5:])
+    details.update(extra_context)
+    return details
+
+
 async def _process_video_job(job_id: str, provider_preference: str = "auto") -> dict:
     job_uuid = UUID(job_id)
 
@@ -440,7 +462,9 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
             await db.commit()
 
             await update_job_status(
-                job_uuid, "processing", 0,
+                job_uuid,
+                "processing",
+                0,
                 provider_id=provider_record.id,
                 estimated_cost=estimated_cost,
             )
@@ -457,29 +481,37 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                 acquired = await semaphore.acquire(job_id)
                 if not acquired:
                     await update_job_status(
-                        job_uuid, "failed", 0,
+                        job_uuid,
+                        "failed",
+                        0,
                         error_message="GPU queue is full. Job will be retried.",
                     )
                     return {"status": "failed", "error": "Queue full", "job_id": job_id}
 
                 relative_video, relative_preview = await _run_local_job(
-                    job_id, template_name, input_data,
+                    job_id,
+                    template_name,
+                    input_data,
                 )
 
             elif provider_record.provider_type == "poe":
                 relative_video = await _run_poe_job(
-                    job_id, provider_instance, model_preference, input_data, db,
+                    job_id,
+                    provider_instance,
+                    model_preference,
+                    input_data,
+                    db,
                 )
                 relative_preview = None
 
             elif provider_record.provider_type == "runpod":
                 run_result_video, run_result_preview = await _run_runpod_job(
-                    job_id, workflow, provider_instance,
+                    job_id,
+                    workflow,
+                    provider_instance,
                 )
                 if run_result_video.startswith(settings.storage_path):
-                    relative_video = str(
-                        Path(run_result_video).relative_to(settings.storage_path)
-                    )
+                    relative_video = str(Path(run_result_video).relative_to(settings.storage_path))
                 else:
                     relative_video = str(run_result_video)
                 if run_result_preview:
@@ -494,19 +526,13 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                 # Record runpod spend immediately (has its own cost tracking)
                 actual_cost = _as_decimal(estimated_cost)
                 if actual_cost:
-                    await router.budget_tracker.record_spend(
-                        provider_record.id, actual_cost
-                    )
+                    await router.budget_tracker.record_spend(provider_record.id, actual_cost)
             else:
-                raise ValueError(
-                    f"Unknown provider type: {provider_record.provider_type}"
-                )
+                raise ValueError(f"Unknown provider type: {provider_record.provider_type}")
 
             # --- Record cost for all provider types -----------------------
             actual_cost = _as_decimal(estimated_cost)
-            duration_seconds = max(
-                1, int((datetime.utcnow() - started_at).total_seconds())
-            )
+            duration_seconds = max(1, int((datetime.utcnow() - started_at).total_seconds()))
             budget_tracker = BudgetTracker(db)
             await budget_tracker.record_spend(
                 provider_record.id,
@@ -517,7 +543,9 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
             )
 
             await update_job_status(
-                job_uuid, "completed", 100,
+                job_uuid,
+                "completed",
+                100,
                 output_path=relative_video,
                 preview_path=relative_preview,
                 actual_cost=actual_cost,
@@ -527,6 +555,33 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
         except Exception as exc:
             error_message = str(exc)
             await update_job_status(job_uuid, "failed", 0, error_message=error_message)
+
+            # Capture error for notification system
+            try:
+                friendly_message = _map_exception_to_friendly_message(exc)
+                details = _build_error_details(
+                    exc,
+                    job_id=job_id,
+                    template_name=template_name,
+                    provider_type=provider_record.provider_type if provider_record else None,
+                )
+                await log_user_error(
+                    db,
+                    user_id=job.user_id,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.VIDEO_GENERATION,
+                    message=friendly_message,
+                    details=details,
+                    source_id=job.id,
+                    source_type="job",
+                )
+            except Exception as capture_exc:
+                logger.warning(
+                    "Failed to capture error for job %s: %s",
+                    job_id,
+                    capture_exc,
+                )
+
             return {"status": "failed", "error": error_message, "job_id": job_id}
 
         finally:
@@ -554,9 +609,7 @@ async def _send_heartbeat() -> dict:
         registry = WorkerRegistry(db)
 
         result = await db.execute(
-            select(Provider).where(
-                Provider.provider_type == "comfyui_direct", Provider.is_active
-            )
+            select(Provider).where(Provider.provider_type == "comfyui_direct", Provider.is_active)
         )
         provider = result.scalar_one_or_none()
 
@@ -684,6 +737,7 @@ async def _merge_videos(job_id: str, segment_paths: list[str]) -> dict:
 def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
     """Run a pipeline stage via the plugin dispatcher."""
     from app.workers.dispatcher import dispatch_stage
+
     return ctx.run(dispatch_stage(job_id, stage))
 
 
@@ -692,13 +746,16 @@ def process_scene_video_job(self, job_id: str, stage: str = "planning") -> dict:
 # ======================================================================
 
 
-
 @celery_app.task(bind=True, time_limit=1800)
 def generate_scene_media(
-    self, job_id: str, scene_id: str, media_type: str = "video",
+    self,
+    job_id: str,
+    scene_id: str,
+    media_type: str = "video",
 ) -> dict:
     """Re-render a single scene via the plugin dispatcher."""
     from app.workers.dispatcher import dispatch_scene_rerender
+
     return ctx.run(dispatch_scene_rerender(job_id, scene_id, media_type))
 
 
@@ -791,6 +848,7 @@ async def _train_avatar_lora(avatar_id: str) -> dict:
 
             # Placeholder: actual LoRA training would happen here
             import asyncio
+
             await asyncio.sleep(2)
 
             # Mark as trained
@@ -829,9 +887,7 @@ async def _cleanup_orphaned_avatars():
 
         cleaned = 0
         for avatar in candidates:
-            ref_result = await db.execute(
-                select(JobAvatar).where(JobAvatar.avatar_id == avatar.id)
-            )
+            ref_result = await db.execute(select(JobAvatar).where(JobAvatar.avatar_id == avatar.id))
             if ref_result.first() is None:
                 for img in avatar.images:
                     img_path = Path(settings.storage_path) / img.storage_path
@@ -876,9 +932,7 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
             if not avatar.primary_image:
                 return {"status": "failed", "error": "No primary image set"}
 
-            primary_path = str(
-                Path(settings.storage_path) / avatar.primary_image.storage_path
-            )
+            primary_path = str(Path(settings.storage_path) / avatar.primary_image.storage_path)
 
             # Mock job for generate_image — it only needs id and user_id
             mock_job = SimpleNamespace(
@@ -887,9 +941,8 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
                 provider_id=None,
             )
 
-            base_prompt = (
-                f"{avatar.name}, {avatar.gender}"
-                + (f", {avatar.bio}" if avatar.bio else "")
+            base_prompt = f"{avatar.name}, {avatar.gender}" + (
+                f", {avatar.bio}" if avatar.bio else ""
             )
             poses = [
                 (f"front portrait of {base_prompt}"),
@@ -897,9 +950,7 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
                 (f"full body shot of {base_prompt}, standing pose"),
             ]
 
-            max_order = max(
-                (img.sort_order for img in avatar.images), default=0
-            )
+            max_order = max((img.sort_order for img in avatar.images), default=0)
 
             for i, prompt in enumerate(poses):
                 try:
@@ -913,7 +964,9 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
                 except Exception as exc:
                     logger.error(
                         "Failed to generate pose %d for avatar %s: %s",
-                        i, avatar_id, exc,
+                        i,
+                        avatar_id,
+                        exc,
                     )
                     continue
 
@@ -967,9 +1020,7 @@ async def _sync_provider_models(provider_type: str) -> dict:
         providers = result.scalars().all()
 
         if not providers:
-            logger.info(
-                "[Sync] No active providers found for type '%s'", provider_type
-            )
+            logger.info("[Sync] No active providers found for type '%s'", provider_type)
             return {"provider_type": provider_type, "synced": 0, "deprecated": 0}
 
         total_synced = 0
@@ -982,21 +1033,15 @@ async def _sync_provider_models(provider_type: str) -> dict:
             discovered_ids = {m["model_id"] for m in discovered}
 
             for model_data in discovered:
-                existing = await service.get_by_id(
-                    db, model_data["model_id"], provider.id
-                )
+                existing = await service.get_by_id(db, model_data["model_id"], provider.id)
                 if existing:
                     update_data = {
-                        k: v
-                        for k, v in model_data.items()
-                        if k not in ("model_id", "provider_id")
+                        k: v for k, v in model_data.items() if k not in ("model_id", "provider_id")
                     }
                     update_data["is_deprecated"] = False
                     update_data["is_active"] = True
                     update_data["last_synced_at"] = datetime.utcnow()
-                    await service.update(
-                        db, model_data["model_id"], provider.id, update_data
-                    )
+                    await service.update(db, model_data["model_id"], provider.id, update_data)
                 else:
                     create_data = {
                         **model_data,
@@ -1007,14 +1052,9 @@ async def _sync_provider_models(provider_type: str) -> dict:
                 total_synced += 1
 
             # Mark models not in discovered set as deprecated
-            all_configs = await service.list_by_provider(
-                db, provider.id, active_only=False
-            )
+            all_configs = await service.list_by_provider(db, provider.id, active_only=False)
             for config in all_configs:
-                if (
-                    config.model_id not in discovered_ids
-                    and not config.is_deprecated
-                ):
+                if config.model_id not in discovered_ids and not config.is_deprecated:
                     config.is_deprecated = True
                     config.is_active = False
                     total_deprecated += 1
@@ -1112,18 +1152,27 @@ def _sync_comfyui_models() -> list[dict]:
     Each entry is a dict ready for ModelConfig creation/update.
     """
     _available_image_models = [
-        {"id": "flux1-schnell", "name": "FLUX.1-schnell",
-         "comfyui_workflow": "flux_image.json", "capabilities": ["text-to-image"]},
-        {"id": "sdxl", "name": "Stable Diffusion XL",
-         "comfyui_workflow": "sdxl_image.json", "capabilities": ["text-to-image"]},
+        {
+            "id": "flux1-schnell",
+            "name": "FLUX.1-schnell",
+            "comfyui_workflow": "flux_image.json",
+            "capabilities": ["text-to-image"],
+        },
+        {
+            "id": "sdxl",
+            "name": "Stable Diffusion XL",
+            "comfyui_workflow": "sdxl_image.json",
+            "capabilities": ["text-to-image"],
+        },
     ]
     _available_video_models = [
-        {"id": "wan2.2", "name": "WAN 2.2",
-         "capabilities": ["text-to-video", "image-to-video", "scene-to-video"]},
-        {"id": "ltx2.3", "name": "LTX 2.3",
-         "capabilities": ["text-to-video", "image-to-video"]},
-        {"id": "ltx2.3-fast", "name": "LTX 2.3 Fast",
-         "capabilities": ["text-to-video"]},
+        {
+            "id": "wan2.2",
+            "name": "WAN 2.2",
+            "capabilities": ["text-to-video", "image-to-video", "scene-to-video"],
+        },
+        {"id": "ltx2.3", "name": "LTX 2.3", "capabilities": ["text-to-video", "image-to-video"]},
+        {"id": "ltx2.3-fast", "name": "LTX 2.3 Fast", "capabilities": ["text-to-video"]},
     ]
     discovered: list[dict] = []
 
@@ -1132,22 +1181,24 @@ def _sync_comfyui_models() -> list[dict]:
         (_available_video_models, "video"),
     ):
         for m in source_list:
-            discovered.append({
-                "model_id": m["id"],
-                "provider_model_id": m["id"],
-                "display_name": m["name"],
-                "modality": modality,
-                "endpoint_type": "comfyui",
-                "comfyui_workflow": m.get("comfyui_workflow"),
-                "capabilities": m.get("capabilities"),
-                "cost_config": {
-                    "cost": 0,
-                    "currency": "USD",
-                    "note": "local_generation",
-                },
-                "is_deprecated": False,
-                "is_active": True,
-            })
+            discovered.append(
+                {
+                    "model_id": m["id"],
+                    "provider_model_id": m["id"],
+                    "display_name": m["name"],
+                    "modality": modality,
+                    "endpoint_type": "comfyui",
+                    "comfyui_workflow": m.get("comfyui_workflow"),
+                    "capabilities": m.get("capabilities"),
+                    "cost_config": {
+                        "cost": 0,
+                        "currency": "USD",
+                        "note": "local_generation",
+                    },
+                    "is_deprecated": False,
+                    "is_active": True,
+                }
+            )
 
     return discovered
 
@@ -1210,10 +1261,20 @@ def generate_quick_media(
     with exponential back-off (10 s, 20 s, 40 s, 80 s).  Successful
     outputs are auto-imported into the user's media library.
     """
-    return ctx.run(_generate_quick_media(
-        self, user_id, model_id, prompt, aspect_ratio,
-        duration, negative_prompt, seed, image_path, title=title,
-    ))
+    return ctx.run(
+        _generate_quick_media(
+            self,
+            user_id,
+            model_id,
+            prompt,
+            aspect_ratio,
+            duration,
+            negative_prompt,
+            seed,
+            image_path,
+            title=title,
+        )
+    )
 
 
 async def _generate_quick_media(
@@ -1264,8 +1325,7 @@ async def _generate_quick_media(
             provider = provider_result.scalar_one_or_none()
             if not provider:
                 raise ValueError(
-                    f"Provider {config.provider_id} for model {model_id} "
-                    "is not available"
+                    f"Provider {config.provider_id} for model {model_id} is not available"
                 )
 
             # ------------------------------------------------------------------
@@ -1321,21 +1381,18 @@ async def _generate_quick_media(
                 )
                 content_type = "video/mp4"
             else:
-                raise ValueError(
-                    f"Unsupported modality '{config.modality}' "
-                    f"for model {model_id}"
-                )
+                raise ValueError(f"Unsupported modality '{config.modality}' for model {model_id}")
 
             # ------------------------------------------------------------------
             # 5. Auto-import to media library
             # ------------------------------------------------------------------
             full_path = Path(settings.storage_path) / path
             if not full_path.exists():
-                raise RuntimeError(
-                    f"Generated file not found at: {full_path}"
-                )
+                raise RuntimeError(f"Generated file not found at: {full_path}")
 
-            asset_name = title or prompt[:50] or f"{model_id}_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            asset_name = (
+                title or prompt[:50] or f"{model_id}_{_datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            )
             asset = MediaAsset(
                 user_id=user_uuid,
                 name=asset_name,
@@ -1349,6 +1406,7 @@ async def _generate_quick_media(
             await db.flush()
 
             from app.services.media_path import asset_path
+
             permanent_path = asset_path(user_uuid, asset.id, full_path.name)
             permanent_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(full_path, permanent_path)
@@ -1370,9 +1428,7 @@ async def _generate_quick_media(
             if config and config.cost_config:
                 cc = config.cost_config
                 if config.modality == "image":
-                    cost = Decimal(
-                        str(cc.get("credits_per_image", cc.get("compute_points", 0)))
-                    )
+                    cost = Decimal(str(cc.get("credits_per_image", cc.get("compute_points", 0))))
                     asset.cost = cost
                 elif config.modality == "video":
                     cost_per_sec = Decimal(
@@ -1411,7 +1467,7 @@ async def _generate_quick_media(
             # --- recoverable vs non-recoverable classification ---
             if _is_quick_recoverable(exc):
                 if self.request.retries < self.max_retries:
-                    countdown = 10 * (2 ** self.request.retries)
+                    countdown = 10 * (2**self.request.retries)
                     logger.warning(
                         "[quick_create] Attempt %d/%d failed for model=%s "
                         "(recoverable): %s — retrying in %ds",
@@ -1456,3 +1512,44 @@ _QUICK_RECOVERABLE_MARKERS = (
 def _is_quick_recoverable(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(marker in msg for marker in _QUICK_RECOVERABLE_MARKERS)
+
+
+# ======================================================================
+# Task: cleanup_old_notifications
+# ======================================================================
+
+
+@celery_app.task
+def cleanup_old_notifications() -> dict:
+    """Delete error_events older than the configured retention period."""
+    return ctx.run(_cleanup_old_notifications())
+
+
+async def _cleanup_old_notifications() -> dict:
+    from datetime import timedelta
+
+    from sqlalchemy import delete as sa_delete
+
+    from app.services.app_settings import get_setting
+
+    async with ctx.session_factory() as db:
+        retention_days = await get_setting(db, "notifications.retention_days", 30)
+        try:
+            retention_days = int(retention_days)
+        except (TypeError, ValueError):
+            retention_days = 30
+
+        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+
+        result = await db.execute(sa_delete(ErrorEvent).where(ErrorEvent.created_at < cutoff))
+        await db.commit()
+
+        deleted = result.rowcount
+        if deleted > 0:
+            logger.info(
+                "[Cleanup] Deleted %d error_events older than %d days",
+                deleted,
+                retention_days,
+            )
+
+    return {"deleted": deleted}

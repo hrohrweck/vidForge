@@ -55,6 +55,9 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(null, refreshError)
         useAuthStore.getState().logout()
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
@@ -493,6 +496,46 @@ export const healthApi = {
   },
 }
 
+
+// ─── Admin Notification Types ────────────────────────────────
+export type ErrorSeverity = 'info' | 'warning' | 'error' | 'critical'
+export type ErrorOrigin =
+  | 'media_generation'
+  | 'video_generation'
+  | 'audio_generation'
+  | 'llm'
+  | 'storage'
+  | 'upload'
+  | 'system'
+
+export interface AdminErrorEvent {
+  id: string
+  userId: string | null
+  severity: ErrorSeverity
+  origin: ErrorOrigin
+  message: string
+  details: Record<string, unknown> | null
+  sourceId: string | null
+  sourceType: string | null
+  createdAt: string
+  readAt: string | null
+}
+
+export interface AdminErrorEventListResponse {
+  items: AdminErrorEvent[]
+  total: number
+  unreadCount: number
+}
+
+export interface AdminNotificationListParams {
+  severity?: ErrorSeverity[]
+  origin?: ErrorOrigin[]
+  userId?: string
+  unreadOnly?: boolean
+  limit?: number
+  offset?: number
+}
+
 export const adminApi = {
   getDashboard: async () => {
     const response = await api.get('/admin/dashboard')
@@ -545,6 +588,41 @@ export const adminApi = {
   getPermissions: async () => {
     const response = await api.get<Permission[]>('/admin/permissions')
     return response.data
+  },
+
+  // ─── Admin Notifications ──────────────────────────────────
+  getNotifications: async (params?: AdminNotificationListParams) => {
+    const queryParams: Record<string, string> = {}
+    if (params?.severity?.length) queryParams['severity'] = params.severity.join(',')
+    if (params?.origin?.length) queryParams['origin'] = params.origin.join(',')
+    if (params?.userId) queryParams['userId'] = params.userId
+    if (params?.unreadOnly) queryParams['unreadOnly'] = 'true'
+    if (params?.limit != null) queryParams['limit'] = String(params.limit)
+    if (params?.offset != null) queryParams['offset'] = String(params.offset)
+    const response = await api.get<AdminErrorEventListResponse>('/admin/notifications', {
+      params: queryParams,
+      paramsSerializer: (p) => {
+        const parts: string[] = []
+        for (const [key, value] of Object.entries(p)) {
+          if (Array.isArray(value)) {
+            value.forEach((v) => parts.push(`${key}=${encodeURIComponent(v)}`))
+          } else if (value != null) {
+            parts.push(`${key}=${encodeURIComponent(String(value))}`)
+          }
+        }
+        return parts.join('&')
+      },
+    })
+    return response.data
+  },
+
+  getNotification: async (eventId: string) => {
+    const response = await api.get<AdminErrorEvent>(`/admin/notifications/${eventId}`)
+    return response.data
+  },
+
+  deleteNotification: async (eventId: string) => {
+    await api.delete(`/admin/notifications/${eventId}`)
   },
 }
 
@@ -1140,5 +1218,23 @@ export const mcpAdminApi = {
   listServerTools: async (id: string) => {
     const response = await api.get<MCPTool[]>(`/mcp/servers/${id}/tools`)
     return response.data
+  },
+}
+
+// Notifications API
+import type { ErrorEventListResponse, ErrorEventFilter } from './types/notifications'
+
+export const notificationsApi = {
+  list: async (filter?: ErrorEventFilter) => {
+    const response = await api.get<ErrorEventListResponse>('/notifications', { params: filter })
+    return response.data
+  },
+
+  markAsRead: async (id: string) => {
+    await api.post(`/notifications/${id}/read`)
+  },
+
+  markAllRead: async () => {
+    await api.post('/notifications/mark-all-read')
   },
 }

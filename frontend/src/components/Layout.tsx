@@ -15,6 +15,7 @@ import {
   ChevronRight,
   User as UserIcon,
   MessageSquare,
+  ScrollText,
 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
 import { ThemeToggle } from './ThemeToggle'
@@ -66,6 +67,7 @@ const getNavEntries = (isSuperuser: boolean): NavEntry[] => [
             { to: '/admin/providers', label: 'Providers', icon: Server },
             { to: '/admin/models', label: 'Models', icon: Server },
             { to: '/admin/groups', label: 'Groups', icon: Users },
+            { to: '/admin/logs', label: 'Logs', icon: ScrollText },
           ],
         } as NavGroup,
       ]

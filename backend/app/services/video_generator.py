@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from app.config import get_settings
+from app.database import ErrorOrigin, ErrorSeverity
 from app.services import ComfyUIClient
 from app.services.audio_analyzer import AudioAnalyzer
 from app.services.audio_generation import (
@@ -30,6 +31,18 @@ settings = get_settings()
 
 class VideoGenerationError(Exception):
     pass
+
+
+def _map_video_error_to_friendly_message(exc: Exception) -> str:
+    """Map video generation exceptions to user-friendly messages."""
+    exc_msg = str(exc).lower()
+    if "overloaded" in exc_msg or "capacity" in exc_msg:
+        return "AI service is busy, please try again later"
+    if "timeout" in exc_msg or "timed out" in exc_msg:
+        return "Video generation timed out, please try again"
+    if "connection" in exc_msg:
+        return "Video service connection failed, please try again"
+    return "Video generation failed, please try again"
 
 
 class VideoGenerator:
@@ -130,7 +143,15 @@ class VideoGenerator:
             await progress_callback(95, "Finalizing")
 
         if not final_video:
-            raise VideoGenerationError("No video was generated")
+            error_msg = "No video was generated"
+            # Capture error for notification system (fire-and-forget)
+            try:
+                import asyncio
+
+                asyncio.create_task(_capture_video_error(self.job_id, error_msg))
+            except Exception:
+                pass
+            raise VideoGenerationError(error_msg)
 
         return final_video, preview_video
 
@@ -660,8 +681,7 @@ class VideoGenerator:
             height = self._adjust_dimension_for_ltx(height)
 
         clip_text_encodes = [
-            nid for nid, n in workflow.items()
-            if n.get("class_type") == "CLIPTextEncode"
+            nid for nid, n in workflow.items() if n.get("class_type") == "CLIPTextEncode"
         ]
         if len(clip_text_encodes) >= 1:
             workflow[clip_text_encodes[0]]["inputs"]["text"] = prompt
@@ -743,3 +763,51 @@ async def process_job_video(
         return await generator.generate(template_name, input_data, style_name, progress_callback)
     finally:
         await generator.close()
+
+
+async def _capture_video_error(job_id: str, error_msg: str) -> None:
+    """Capture video generation error for notification system (fire-and-forget)."""
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import select
+
+        from app.database import Job
+        from app.services.error_capture import log_system_error
+        from app.workers.context import ctx
+
+        async with ctx.session_factory() as db:
+            # Try to get user_id from job
+            result = await db.execute(select(Job).where(Job.id == UUID(job_id)))
+            job = result.scalar_one_or_none()
+            if job and job.user_id:
+                from app.services.error_capture import log_user_error
+
+                await log_user_error(
+                    db,
+                    user_id=job.user_id,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.VIDEO_GENERATION,
+                    message=_map_video_error_to_friendly_message(VideoGenerationError(error_msg)),
+                    details={
+                        "job_id": job_id,
+                        "error_message": error_msg,
+                    },
+                    source_id=UUID(job_id) if job_id else None,
+                    source_type="job",
+                )
+            else:
+                await log_system_error(
+                    db,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.VIDEO_GENERATION,
+                    message=_map_video_error_to_friendly_message(VideoGenerationError(error_msg)),
+                    details={
+                        "job_id": job_id,
+                        "error_message": error_msg,
+                    },
+                    source_id=UUID(job_id) if job_id else None,
+                    source_type="job",
+                )
+    except Exception:
+        pass  # Silent failure - don't block video generation

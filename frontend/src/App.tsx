@@ -17,8 +17,10 @@ import { MediaLibrary } from './pages/MediaLibrary'
 import { AssetDetail } from './pages/AssetDetail'
 import MCPServersPage from './pages/MCPServersPage'
 import ModelManagement from './pages/admin/ModelManagement'
+import AdminLogs from './pages/admin/AdminLogs'
 import { ThemeProvider } from './components/ThemeProvider'
 import { Toaster } from './components/ui/toaster'
+import { NotificationCenter } from './components/NotificationCenter'
 
 function App() {
   const { isAuthenticated } = useAuthStore()
@@ -33,6 +35,7 @@ function App() {
           </Routes>
         </BrowserRouter>
         <Toaster />
+        <NotificationCenter />
       </ThemeProvider>
     )
   }
@@ -53,6 +56,7 @@ function App() {
             <Route path="admin/mcp-servers" element={<MCPServersPage />} />
             <Route path="admin/groups" element={<Groups />} />
             <Route path="admin/models" element={<ModelManagement />} />
+            <Route path="admin/logs" element={<AdminLogs />} />
             <Route path="media" element={<MediaLibrary />} />
             <Route path="media/asset/:id" element={<AssetDetail />} />
             <Route path="avatars" element={<Avatars />} />
@@ -62,6 +66,7 @@ function App() {
         </Routes>
       </BrowserRouter>
       <Toaster />
+      <NotificationCenter />
     </ThemeProvider>
   )
 }

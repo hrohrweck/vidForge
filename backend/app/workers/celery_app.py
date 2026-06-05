@@ -57,6 +57,10 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=30),
         "args": ("ollama",),
     },
+    "cleanup-old-notifications": {
+        "task": "app.workers.tasks.cleanup_old_notifications",
+        "schedule": crontab(hour=3, minute=0),
+    },
 }
 
 

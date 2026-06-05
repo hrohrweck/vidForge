@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum as PyEnum
 from typing import AsyncGenerator
 from uuid import UUID, uuid4
 
@@ -9,12 +10,14 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    desc,
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -23,6 +26,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.config import get_settings
+
+
+class ErrorSeverity(str, PyEnum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
+class ErrorOrigin(str, PyEnum):
+    MEDIA_GENERATION = "media_generation"
+    VIDEO_GENERATION = "video_generation"
+    AUDIO_GENERATION = "audio_generation"
+    LLM = "llm"
+    STORAGE = "storage"
+    UPLOAD = "upload"
+    SYSTEM = "system"
 
 
 class Base(DeclarativeBase):
@@ -86,8 +106,8 @@ class Conversation(Base):
     __tablename__ = "conversation"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -227,6 +247,9 @@ class User(Base):
     avatars: Mapped[list["Avatar"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    error_events: Mapped[list["ErrorEvent"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSettings(Base):
@@ -333,6 +356,50 @@ class Job(Base):
     avatar_assignments: Mapped[list["JobAvatar"]] = relationship(
         back_populates="job", lazy="selectin"
     )
+
+
+class ErrorEvent(Base):
+    __tablename__ = "error_events"
+    __table_args__ = (
+        Index("ix_error_events_user_created", "user_id", desc("created_at")),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    severity: Mapped[str] = mapped_column(
+        Enum(
+            ErrorSeverity,
+            values_callable=lambda e: [m.value for m in e],
+            name="error_severity",
+            native_enum=False,
+            length=20,
+        ),
+        nullable=False,
+        index=True,
+    )
+    origin: Mapped[str] = mapped_column(
+        Enum(
+            ErrorOrigin,
+            values_callable=lambda e: [m.value for m in e],
+            name="error_origin",
+            native_enum=False,
+            length=50,
+        ),
+        nullable=False,
+        index=True,
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    source_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="error_events")
 
 
 class Template(Base):

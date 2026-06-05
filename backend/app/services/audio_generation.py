@@ -2,9 +2,21 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from app.database import ErrorOrigin, ErrorSeverity
+
 
 class TTSError(Exception):
     pass
+
+
+def _map_tts_error_to_friendly_message(exc: Exception) -> str:
+    """Map TTS exceptions to user-friendly messages."""
+    exc_msg = str(exc).lower()
+    if "connection" in exc_msg or "network" in exc_msg:
+        return "Audio service connection failed, please try again"
+    if "timeout" in exc_msg or "timed out" in exc_msg:
+        return "Audio service timed out, please try again"
+    return "Audio generation failed, please try again"
 
 
 class TTSService:
@@ -62,7 +74,13 @@ class TTSService:
         _, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            raise TTSError(f"Edge TTS failed: {stderr.decode()}")
+            error_msg = f"Edge TTS failed: {stderr.decode()}"
+            # Capture error for notification system (best-effort)
+            try:
+                asyncio.create_task(_capture_tts_error(error_msg, "edge", stderr.decode()))
+            except Exception:
+                pass
+            raise TTSError(error_msg)
 
         return output_path
 
@@ -96,7 +114,12 @@ class TTSService:
         _, stderr = await proc.communicate(input=text.encode())
 
         if proc.returncode != 0:
-            raise TTSError(f"Piper TTS failed: {stderr.decode()}")
+            error_msg = f"Piper TTS failed: {stderr.decode()}"
+            try:
+                asyncio.create_task(_capture_tts_error(error_msg, "piper", stderr.decode()))
+            except Exception:
+                pass
+            raise TTSError(error_msg)
 
         return output_path
 
@@ -129,7 +152,12 @@ class TTSService:
         _, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            raise TTSError(f"Coqui TTS failed: {stderr.decode()}")
+            error_msg = f"Coqui TTS failed: {stderr.decode()}"
+            try:
+                asyncio.create_task(_capture_tts_error(error_msg, "coqui", stderr.decode()))
+            except Exception:
+                pass
+            raise TTSError(error_msg)
 
         return output_path
 
@@ -264,6 +292,7 @@ class MusicGenService:
 
     def __init__(self, base_url: str | None = None):
         from app.config import get_settings
+
         settings = get_settings()
         self.base_url = (base_url or settings.audiocraft_url).rstrip("/")
 
@@ -303,6 +332,7 @@ class MusicGenService:
         if remote.exists():
             if output_path:
                 import shutil
+
                 out = Path(output_path)
                 out.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(remote), str(out))
@@ -330,6 +360,7 @@ class MusicGenService:
     async def is_available(self) -> bool:
         """Check if the AudioCraft server is reachable."""
         import httpx
+
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
                 resp = await client.get(f"{self.base_url}/health")
@@ -360,3 +391,25 @@ async def generate_background_music(
 ) -> str:
     service = MusicGenService()
     return await service.generate(prompt, output_path, duration)
+
+
+async def _capture_tts_error(error_msg: str, backend: str, stderr: str) -> None:
+    """Capture TTS error for notification system (fire-and-forget)."""
+    try:
+        from app.services.error_capture import log_system_error
+        from app.workers.context import ctx
+
+        async with ctx.session_factory() as db:
+            await log_system_error(
+                db,
+                severity=ErrorSeverity.ERROR,
+                origin=ErrorOrigin.AUDIO_GENERATION,
+                message=_map_tts_error_to_friendly_message(TTSError(error_msg)),
+                details={
+                    "backend": backend,
+                    "error_message": error_msg,
+                    "stderr": stderr[:1000],  # Truncate long stderr
+                },
+            )
+    except Exception:
+        pass  # Silent failure - don't block TTS operation
