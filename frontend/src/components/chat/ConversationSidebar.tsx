@@ -8,9 +8,11 @@ import type { Conversation } from '../../stores/chat'
 function EditableTitle({
   conv,
   onRename,
+  selected,
 }: {
   conv: Conversation
   onRename: (id: string, title: string) => void
+  selected?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(conv.title)
@@ -60,7 +62,7 @@ function EditableTitle({
   return (
     <div className="flex items-center gap-1 min-w-0">
       <p
-        className="truncate text-sm font-medium flex-1"
+        className={`truncate text-sm font-medium flex-1 ${selected ? 'text-primary' : ''}`}
         onDoubleClick={(e) => {
           e.stopPropagation()
           setDraft(conv.title)
@@ -227,7 +229,9 @@ export function ConversationSidebar() {
             <p className="p-4 text-sm text-muted-foreground">No results found.</p>
           ) : (
             <ul className="p-2">
-              {searchResults.map((result) => (
+              {searchResults.map((result) => {
+                const isSelected = selectedConversationId === result.id
+                return (
                 <li
                   key={result.id}
                   onClick={() => {
@@ -235,33 +239,44 @@ export function ConversationSidebar() {
                     setSearchQuery('')
                     setSearchResults([])
                   }}
-                  className="group flex items-start gap-2 rounded-md px-3 py-2 cursor-pointer hover:bg-muted"
+                  className={`group flex items-start gap-2 rounded-md border-l-2 px-3 py-2 cursor-pointer hover:bg-muted ${
+                    isSelected
+                      ? 'bg-primary/10 border-primary'
+                      : 'border-transparent'
+                  }`}
                 >
-                  <MessageSquare className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+                  <MessageSquare className={`h-4 w-4 shrink-0 mt-0.5 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
                   <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm font-medium">{result.title}</p>
+                    <p className={`truncate text-sm font-medium ${isSelected ? 'text-primary' : ''}`}>{result.title}</p>
                     <p className="truncate text-xs text-muted-foreground">{result.snippet}</p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(result.timestamp).toLocaleDateString()}
                     </p>
                   </div>
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )
         ) : conversations.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">No conversations yet.</p>
         ) : (
           <ul className="p-2">
-            {conversations.map((conv) => (
+            {conversations.map((conv) => {
+              const isSelected = selectedConversationId === conv.id
+              return (
               <li
                 key={conv.id}
                 onClick={() => selectConversation(conv.id)}
-                className={`group flex items-center gap-2 rounded-md px-3 py-2 cursor-pointer hover:bg-muted ${selectedConversationId === conv.id ? 'bg-muted' : ''}`}
+                className={`group flex items-center gap-2 rounded-md border-l-2 px-3 py-2 cursor-pointer hover:bg-muted ${
+                  isSelected
+                    ? 'bg-primary/10 border-primary'
+                    : 'border-transparent'
+                }`}
               >
-                <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <MessageSquare className={`h-4 w-4 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
                 <div className="flex-1 min-w-0">
-                  <EditableTitle conv={conv} onRename={handleRename} />
+                  <EditableTitle conv={conv} onRename={handleRename} selected={isSelected} />
                   <p className="text-xs text-muted-foreground">{new Date(conv.updatedAt).toLocaleDateString()}</p>
                 </div>
                 <button
@@ -273,7 +288,8 @@ export function ConversationSidebar() {
                   <Trash2 className="h-3 w-3" />
                 </button>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
       </div>

@@ -31,6 +31,23 @@ export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
       className={`mb-3 flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
     >
       <div
+        className={`mb-1 flex items-baseline gap-2 text-[11px] text-muted-foreground ${
+          isUser ? 'flex-row-reverse' : 'flex-row'
+        }`}
+      >
+        <span className="font-medium text-foreground/80">
+          {isUser ? 'You' : 'Assistant'}
+        </span>
+        <span title={new Date(message.createdAt).toLocaleString()}>
+          {new Date(message.createdAt).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+          {' · '}
+          {formatTime(message.createdAt)}
+        </span>
+      </div>
+      <div
         className={`max-w-[80%] rounded-lg px-4 py-2 ${
           isUser
             ? 'bg-primary text-primary-foreground'
@@ -96,12 +113,6 @@ export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
           }}
         />
       )}
-      <span
-        className={`mt-1 text-[11px] text-foreground/60 ${isUser ? 'text-right' : 'text-left'}`}
-        title={new Date(message.createdAt).toLocaleString()}
-      >
-        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {formatTime(message.createdAt)}
-      </span>
     </div>
   )
 }

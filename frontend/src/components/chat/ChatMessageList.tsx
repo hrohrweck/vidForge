@@ -124,18 +124,14 @@ function parseThinking(content: string): { thinking: string; answer: string } {
 
 function AssistantMessage({ content, streaming }: { content: string; streaming?: boolean }) {
   const { thinking, answer } = parseThinking(content)
-  const [showThinking, setShowThinking] = useState(true) // open while streaming
+  const [showThinking, setShowThinking] = useState(streaming ?? false) // open while streaming, collapsed for old chats
 
-  // Collapse thinking when streaming ends (unless it's a tagged format)
+  // Collapse thinking when streaming ends (all formats)
   const prevStreaming = useRef(streaming)
   useEffect(() => {
-    if (prevStreaming.current && !streaming) {
-      // Streaming just finished — collapse if this is inline (not tagged) thinking
-      const hasExplicitTags = content.includes('<think>') || content.includes('</think>') ||
-        content.includes('【thinking】')
-      if (!hasExplicitTags && thinking.length > 0) {
-        setShowThinking(false)
-      }
+    if (prevStreaming.current && !streaming && thinking.length > 0) {
+      // Streaming just finished — collapse thinking
+      setShowThinking(false)
     }
     prevStreaming.current = streaming
   }, [streaming, content, thinking])
@@ -212,7 +208,25 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
       {visibleMessages.map((msg) => {
         const isUser = msg.role === 'user'
         return (
-          <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+          <div
+            key={msg.id}
+            className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+          >
+            <div
+              className={`mb-1 flex items-baseline gap-2 text-[11px] text-muted-foreground ${
+                isUser ? 'flex-row-reverse' : 'flex-row'
+              }`}
+            >
+              <span className="font-medium text-foreground/80">
+                {isUser ? 'You' : 'Assistant'}
+              </span>
+              <span title={new Date(msg.createdAt).toLocaleString()}>
+                {new Date(msg.createdAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+            </div>
             <div
               className={`max-w-[80%] rounded-lg px-4 py-2 ${
                 isUser

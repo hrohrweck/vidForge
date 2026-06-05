@@ -154,14 +154,15 @@ describe('MessageBubble', () => {
       const msg = makeMsg({ role: 'user' })
       render(<MessageBubble message={msg} />)
       const ts = screen.getByTitle(new Date(msg.createdAt).toLocaleString())
-      expect(ts.className).toContain('text-right')
+      expect(ts.parentElement?.className).toContain('flex-row-reverse')
     })
 
     it('has left-aligned timestamp for assistant messages', () => {
       const msg = makeMsg({ role: 'assistant' })
       render(<MessageBubble message={msg} />)
       const ts = screen.getByTitle(new Date(msg.createdAt).toLocaleString())
-      expect(ts.className).toContain('text-left')
+      expect(ts.parentElement?.className).toContain('flex-row')
+      expect(ts.parentElement?.className).not.toContain('flex-row-reverse')
     })
 
     it('renders user message bubble right-aligned', () => {
