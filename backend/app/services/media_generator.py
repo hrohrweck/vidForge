@@ -714,14 +714,18 @@ async def generate_video(
 
     ar_warning: str | None = None
     # Check aspect ratio support for ALL providers (not just ComfyUI)
-    variant_id = resolve_model_variant(
-        selected_model,
-        has_seed_image=bool(reference_image_path),
-        is_scene_continuation=False,
-    )
+    # For cloud providers, use selected_model directly; for ComfyUI, resolve the variant first
+    if ptype in ("poe", "atlascloud"):
+        model_lookup_id = selected_model
+    else:
+        model_lookup_id = resolve_model_variant(
+            selected_model,
+            has_seed_image=bool(reference_image_path),
+            is_scene_continuation=False,
+        )
     result = await db.execute(
         select(ModelConfig).where(
-            ModelConfig.model_id == variant_id,
+            ModelConfig.model_id == model_lookup_id,
             ModelConfig.is_active == True,  # noqa: E712
         )
     )
@@ -737,7 +741,7 @@ async def generate_video(
                 message=ar_warning,
                 details={
                     "scene_number": scene_number,
-                    "model": variant_id,
+                    "model": model_lookup_id,
                     "requested_aspect_ratio": aspect_ratio,
                 },
                 source_id=job.id,
