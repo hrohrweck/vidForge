@@ -756,11 +756,13 @@ class PluginBase(ABC):
         prompt = scene.image_prompt or scene.visual_description or ""
         if not prompt:
             return None
+        input_data = job.input_data or {}
         image_path, _mid, _pid = await self._retry(
             generate_image,
             db=db, job=job, prompt=prompt,
             scene_number=scene.scene_number,
             provider_id=job.image_provider_id,
+            model_preference=input_data.get("image_model"),
             label=f"rerender-image-s{scene.scene_number}",
         )
         scene.reference_image_path = image_path
