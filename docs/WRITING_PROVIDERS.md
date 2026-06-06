@@ -365,6 +365,40 @@ if selected_model.startswith("your_prefix:"):
         return model_id, provider.id, "your_type", instance
 ```
 
+## Model-Specific Quirks
+
+Different models often expect different parameter names or have specific limitations. You can handle these variations without changing your provider code by using `parameter_map` and `constraints` in the model configuration.
+
+### Parameter Mapping
+
+The `parameter_map` field renames standard parameters to match what the provider's API expects. For example, if your code passes `image_url` but the API expects `image`, this mapping translates the key automatically during payload construction.
+
+### Constraints
+
+The `constraints` field defines model limitations like aspect ratios.
+- `supported_aspect_ratios`: A list of aspect ratios the model accepts, such as `["16:9"]`.
+- `requires_aspect_ratio`: A boolean indicating if the aspect ratio parameter must be sent.
+
+### Example Configuration (WAN 2.7)
+
+Here's a configuration example for WAN 2.7:
+
+```json
+{
+  "parameter_map": {"image_url": "image"},
+  "constraints": {
+    "supported_aspect_ratios": ["16:9"],
+    "requires_aspect_ratio": false
+  }
+}
+```
+
+### When to Use Each Mechanism
+
+Use `parameter_map` when a model expects non-standard parameter names. This keeps your provider code clean and generic.
+
+Apply `constraints` to enforce model-specific limits before sending requests. This prevents API errors and saves compute resources.
+
 ## Provider Config Reference
 
 The `config` JSON column on the `providers` table stores provider-specific
