@@ -564,9 +564,10 @@ async def generate_image(
         # Cloud provider — direct API call
         if lora_path:
             logger.warning("LoRA not supported for cloud providers, falling back to prompt-only")
-        if reference_image_path:
+        if reference_image_path and ptype != "poe":
             logger.warning(
-                "IP-Adapter not supported for cloud providers, falling back to prompt-only"
+                "Image editing not supported for %s provider, falling back to prompt-only",
+                ptype,
             )
         if "x" not in aspect_ratio:
             aspect_ratio = _VIDEO_SEED_RESOLUTIONS.get(aspect_ratio, "1024x1024")
@@ -574,6 +575,7 @@ async def generate_image(
             prompt=prompt,
             model=selected_model,
             aspect_ratio=aspect_ratio,
+            image_path=reference_image_path if ptype == "poe" else None,
         )
         if not image_data:
             exc = ValueError(f"Poe image generation returned no data (model={selected_model})")
