@@ -255,6 +255,9 @@ class AtlasCloudProvider(ComfyUIProvider):
             )
         payload = model_config.build_payload(prompt=prompt, aspect_ratio=aspect_ratio)
 
+        if "model" not in payload:
+            payload["model"] = model_config.provider_model_id
+
         size_family = (model_config.constraints or {}).get("size_param_family", "ratio")
         if size_family == "pixel_x":
             payload["size"] = aspect_ratio
@@ -374,13 +377,17 @@ class AtlasCloudProvider(ComfyUIProvider):
         build_kwargs: dict[str, Any] = {"prompt": prompt}
         if duration is not None:
             build_kwargs["duration"] = duration
-        if aspect_ratio:
+        constraints = model_config.constraints or {}
+        if aspect_ratio and constraints.get("requires_aspect_ratio", True):
             build_kwargs["aspect_ratio"] = aspect_ratio
         # Only pass ref_url if it's an HTTP URL (local paths are uploaded separately)
         if ref_url and (ref_url.startswith("http://") or ref_url.startswith("https://")):
             build_kwargs["image_url"] = ref_url
 
         payload = model_config.build_payload(**build_kwargs)
+
+        if "model" not in payload:
+            payload["model"] = model_config.provider_model_id
 
         size_family = (model_config.constraints or {}).get("size_param_family", "ratio")
         if size_family == "pixel_x":
@@ -413,7 +420,9 @@ class AtlasCloudProvider(ComfyUIProvider):
                         upload_data = upload_resp.json()
                         uploaded_url = upload_data.get("data", {}).get("download_url") or upload_data.get("data", {}).get("url") or upload_data.get("url")
                         if uploaded_url:
-                            payload["image_url"] = uploaded_url
+                            param_map = model_config.parameter_map or {}
+                            image_key = param_map.get("image_url", "image_url")
+                            payload[image_key] = uploaded_url
             except Exception as e:
                 logger.warning(f"Failed to upload image for I2V: {e}")
 
