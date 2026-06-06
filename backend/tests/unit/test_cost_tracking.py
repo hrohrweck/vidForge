@@ -91,7 +91,7 @@ class TestSyncPopulatesCostConfig:
         ]
 
         with patch(
-            "app.workers.tasks._discover_provider_models",
+            "app.workers.tasks._discover_models_via_registry",
             AsyncMock(return_value=discovered_data),
         ), patch("app.workers.tasks.ctx") as mock_ctx:
             mock_cm = MagicMock()
@@ -366,11 +366,12 @@ class TestQuickMediaRecordsCost:
 
         with patch("app.workers.tasks.ctx", mock_ctx), \
              patch("app.services.media_generator.generate_video", AsyncMock(
-                 return_value=("/tmp/test.mp4", "test-video-cost", provider.id, 8)
+                 return_value=("/tmp/test.mp4", "test-video-cost", provider.id, 8, None)
              )), \
              patch("app.workers.tasks.Path.exists", return_value=True), \
              patch("app.workers.tasks.Path.stat") as mock_stat:
             mock_stat.return_value.st_size = 98765
+            mock_stat.return_value.st_mode = 0o100644  # regular file
             mock_self = MagicMock()
 
             await _generate_quick_media(

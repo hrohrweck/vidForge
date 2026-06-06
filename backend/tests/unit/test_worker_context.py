@@ -121,13 +121,13 @@ class TestBroadcastUpdate:
         ctx.stop()
 
 
-class TestComfyUISemaphore:
+class TestProviderSemaphore:
     """Verify semaphore uses shared async Redis."""
 
     @pytest.mark.asyncio
     async def test_acquire_increments_redis(self):
         from app.workers.context import WorkerContext
-        from app.workers.tasks import ComfyUISemaphore
+        from app.workers.tasks import ProviderSemaphore
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=b"0")
@@ -140,7 +140,7 @@ class TestComfyUISemaphore:
             ctx.start()
 
         with patch("app.workers.tasks.ctx", ctx):
-            sem = ComfyUISemaphore(key="test:sem", max_concurrent=2)
+            sem = ProviderSemaphore(key="test:sem", max_concurrent=2)
             acquired = await sem.acquire("job-1")
 
         assert acquired is True
@@ -151,7 +151,7 @@ class TestComfyUISemaphore:
     @pytest.mark.asyncio
     async def test_release_decrements_redis(self):
         from app.workers.context import WorkerContext
-        from app.workers.tasks import ComfyUISemaphore
+        from app.workers.tasks import ProviderSemaphore
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=b"1")
@@ -161,11 +161,11 @@ class TestComfyUISemaphore:
         ctx = WorkerContext()
         with patch("app.workers.context.create_async_engine", return_value=MagicMock()), \
              patch("app.workers.context.async_sessionmaker", return_value=MagicMock()), \
-             patch("app.workers.context.aioredis.from_url", return_value=mock_redis):
+              patch("app.workers.context.aioredis.from_url", return_value=mock_redis):
             ctx.start()
 
         with patch("app.workers.tasks.ctx", ctx):
-            sem = ComfyUISemaphore(key="test:sem", max_concurrent=2)
+            sem = ProviderSemaphore(key="test:sem", max_concurrent=2)
             await sem.acquire("job-1")
             await sem.release()
 
