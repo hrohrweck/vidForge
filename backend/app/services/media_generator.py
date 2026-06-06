@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import ErrorOrigin, ErrorSeverity, Job, ModelConfig, Provider, UserSettings
+from app.services.error_capture import log_user_error
 from app.services.job_router import JobRouter
 from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import (
@@ -137,6 +138,47 @@ async def _capture_media_error(
             )
     except Exception:
         pass  # Silent failure - don't block media generation
+
+
+async def check_aspect_ratio_support(
+    model_config: ModelConfig,
+    requested_aspect: str,
+) -> tuple[bool, str | None]:
+    """
+    Check whether a model supports a requested aspect ratio.
+
+    Reads ``model_config.constraints['supported_aspect_ratios']`` (if present) and
+    returns whether ``requested_aspect`` is allowed. A missing constraints dict or
+    a missing/empty ``supported_aspect_ratios`` list means the model is treated
+    as fully permissive.
+
+    Args:
+        model_config: The ModelConfig row describing the candidate model.
+        requested_aspect: Aspect ratio string requested by the caller, e.g.
+            ``"16:9"`` or ``"9:16"``.
+
+    Returns:
+        A ``(is_supported, warning_message)`` tuple. ``warning_message`` is
+        ``None`` when the aspect ratio is supported; otherwise it is a
+        user-friendly string describing the supported ratios and noting that
+        the output will be letterboxed/pillarboxed to match the request.
+    """
+    constraints = model_config.constraints or {}
+    supported = constraints.get("supported_aspect_ratios")
+
+    if not supported:
+        return True, None
+
+    if requested_aspect in supported:
+        return True, None
+
+    supported_str = ", ".join(supported)
+    display_name = model_config.display_name
+    warning = (
+        f"Model '{display_name}' only supports {supported_str}. "
+        f"The output will be converted to {requested_aspect} with black bars."
+    )
+    return False, warning
 
 
 async def get_provider_instance(
@@ -654,7 +696,7 @@ async def generate_video(
     duration: int = 5,
     aspect_ratio: str = "16:9",
     title: str | None = None,
-) -> tuple[str, str, UUID | None, float]:
+) -> tuple[str, str, UUID | None, float, str | None]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename_base = (
@@ -669,6 +711,38 @@ async def generate_video(
         model_preference,
         has_seed_image=bool(reference_image_path),
     )
+
+    ar_warning: str | None = None
+    # Check aspect ratio support for ALL providers (not just ComfyUI)
+    variant_id = resolve_model_variant(
+        selected_model,
+        has_seed_image=bool(reference_image_path),
+        is_scene_continuation=False,
+    )
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.model_id == variant_id,
+            ModelConfig.is_active == True,  # noqa: E712
+        )
+    )
+    model_info = result.scalars().first()
+    if model_info:
+        _supported, ar_warning = await check_aspect_ratio_support(model_info, aspect_ratio)
+        if ar_warning:
+            await log_user_error(
+                db,
+                user_id=job.user_id,
+                severity=ErrorSeverity.WARNING,
+                origin=ErrorOrigin.VIDEO_GENERATION,
+                message=ar_warning,
+                details={
+                    "scene_number": scene_number,
+                    "model": variant_id,
+                    "requested_aspect_ratio": aspect_ratio,
+                },
+                source_id=job.id,
+                source_type="job",
+            )
 
     if ptype in ("poe", "atlascloud"):
         # Cloud provider — direct API call
@@ -689,7 +763,7 @@ async def generate_video(
             raise exc
         video_path.write_bytes(video_data)
         relative_path = str(video_path.relative_to(settings.storage_path))
-        return relative_path, f"poe_{selected_model}", resolved_pid, float(duration)
+        return relative_path, f"poe_{selected_model}", resolved_pid, float(duration), ar_warning
 
     # ComfyUI local provider
     frames = _duration_to_frames(duration)
@@ -778,6 +852,7 @@ async def generate_video(
         f"generated_with_{variant_id}",
         resolved_pid,
         float(duration),
+        ar_warning,
     )
 
 
