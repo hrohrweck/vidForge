@@ -1367,7 +1367,7 @@ async def _generate_quick_media(
                 content_type = "image/png"
 
             elif config.modality == "video":
-                path, model_used, prov_id, dur_out = await generate_video(
+                path, model_used, prov_id, dur_out, _warning = await generate_video(
                     db=db,
                     job=quick_job,  # type: ignore[arg-type]
                     prompt=prompt,
