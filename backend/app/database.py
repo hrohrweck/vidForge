@@ -484,31 +484,9 @@ class Provider(Base):
     jobs: Mapped[list["Job"]] = relationship(
         back_populates="provider", foreign_keys="Job.provider_id"
     )
-    poe_models: Mapped[list["PoeModel"]] = relationship(
-        back_populates="provider", cascade="all, delete-orphan"
-    )
-    atlascloud_models: Mapped[list["AtlasCloudModel"]] = relationship(
-        back_populates="provider", cascade="all, delete-orphan"
-    )
     model_configs: Mapped[list["ModelConfig"]] = relationship(
         back_populates="provider", cascade="all, delete-orphan"
     )
-
-
-class AtlasCloudModel(Base):
-    __tablename__ = "atlascloud_models"
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    provider_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    modality: Mapped[str] = mapped_column(String(20), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    provider: Mapped["Provider"] = relationship(back_populates="atlascloud_models")
 
 
 class ModelConfig(Base):
@@ -537,6 +515,7 @@ class ModelConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+    extra_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("provider_id", "model_id", name="uq_provider_model"),
@@ -574,22 +553,6 @@ class ModelConfig(Base):
         """Check if model supports a capability from JSONB."""
         caps = self.capabilities or {}
         return caps.get(capability, False)
-
-
-class PoeModel(Base):
-    __tablename__ = "poe_models"
-
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    provider_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    modality: Mapped[str] = mapped_column(String(20), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    provider: Mapped["Provider"] = relationship(back_populates="poe_models")
 
 
 class Worker(Base):

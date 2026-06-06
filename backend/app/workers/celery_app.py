@@ -37,25 +37,9 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.reset_daily_budgets",
         "schedule": crontab(hour=0, minute=0),
     },
-    "sync-atlascloud-models": {
-        "task": "app.workers.tasks.sync_provider_models",
+    "sync-all-provider-models": {
+        "task": "app.workers.tasks.sync_all_provider_models",
         "schedule": crontab(hour=2, minute=0),
-        "args": ("atlascloud",),
-    },
-    "sync-poe-models": {
-        "task": "app.workers.tasks.sync_provider_models",
-        "schedule": crontab(hour=2, minute=30),
-        "args": ("poe",),
-    },
-    "sync-comfyui-models": {
-        "task": "app.workers.tasks.sync_provider_models",
-        "schedule": crontab(hour=3, minute=0),
-        "args": ("comfyui_direct",),
-    },
-    "sync-ollama-models": {
-        "task": "app.workers.tasks.sync_provider_models",
-        "schedule": crontab(hour=3, minute=30),
-        "args": ("ollama",),
     },
     "cleanup-old-notifications": {
         "task": "app.workers.tasks.cleanup_old_notifications",

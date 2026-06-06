@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,11 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Provider
 from app.services.budget_tracker import BudgetTracker
-from app.services.providers.atlascloud import AtlasCloudProvider
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
-from app.services.providers.comfyui_direct import ComfyUIDirectProvider
-from app.services.providers.poe import PoeProvider
-from app.services.providers.runpod import RunPodProvider
+from app.services.providers import registry
+from app.services.providers.base import ComfyUIProvider, ProviderBase, ProviderInfo
 from app.services.worker_registry import WorkerRegistry
 
 
@@ -38,26 +35,10 @@ class JobRouter:
         if not provider:
             raise JobRouterError(f"Provider {provider_id} not found")
 
-        instance = await self._create_provider_instance(provider)
+        instance = await registry.create(
+            provider.provider_type, provider.id, provider.config
+        )
         self._providers[provider_id] = instance
-        return instance
-
-    async def _create_provider_instance(self, provider: Provider) -> ComfyUIProvider:
-        if provider.provider_type == "comfyui_direct":
-            instance = ComfyUIDirectProvider(provider.id, provider.config)
-        elif provider.provider_type == "runpod":
-            instance = RunPodProvider(provider.id, provider.config)
-        elif provider.provider_type == "atlascloud":
-            instance = AtlasCloudProvider(provider.id, provider.config)
-        elif provider.provider_type == "poe":
-            instance = PoeProvider(provider.id, provider.config)
-        elif provider.provider_type == "ollama":
-            from app.services.providers.ollama import OllamaProvider
-            instance = OllamaProvider(provider.id, provider.config)
-        else:
-            raise JobRouterError(f"Unknown provider type: {provider.provider_type}")
-
-        await instance.initialize(provider.config)
         return instance
 
     async def get_provider_record(self, provider_id: UUID) -> Provider | None:
@@ -83,6 +64,7 @@ class JobRouter:
         self,
         preference: str = "auto",
         workflow: dict[str, Any] | None = None,
+        modality: str | None = None,
     ) -> tuple[Provider, ComfyUIProvider, str]:
         # If preference is a UUID, use that specific provider
         try:
@@ -97,53 +79,43 @@ class JobRouter:
         except ValueError:
             pass
 
-        result = await self.db.execute(
-            select(Provider).where(Provider.is_active).order_by(Provider.priority.desc())
-        )
+        query = select(Provider).where(
+            Provider.is_active
+        ).order_by(Provider.priority.desc())
+
+        if preference != "auto":
+            query = query.where(Provider.provider_type == preference)
+
+        result = await self.db.execute(query)
         providers = list(result.scalars().all())
 
         if not providers:
             raise JobRouterError("No providers configured")
 
-        if preference == "comfyui_direct":
-            for p in providers:
-                if p.provider_type == "comfyui_direct":
-                    instance = await self.get_provider_instance(p.id)
-                    return p, instance, "ComfyUI Direct provider selected"
-            raise JobRouterError("No ComfyUI Direct provider configured")
-
-        if preference == "runpod":
-            for p in providers:
-                if p.provider_type == "runpod":
-                    instance = await self.get_provider_instance(p.id)
-                    estimated_cost = Decimal(str(await instance.estimate_cost(workflow or {})))
-                    allowed, reason = await self.budget_tracker.check_budget(p.id, estimated_cost)
-                    if allowed:
-                        return p, instance, "RunPod provider selected"
-                    raise JobRouterError(f"RunPod not available: {reason}")
-            raise JobRouterError("No RunPod provider configured")
-
-        comfyui_direct_available = False
         for p in providers:
-            if p.provider_type == "comfyui_direct" and p.is_active:
-                workers = await self.worker_registry.get_available_workers("comfyui_direct", p.id)
-                if workers:
-                    instance = await self.get_provider_instance(p.id)
-                    return p, instance, "ComfyUI Direct provider available (free)"
-                comfyui_direct_available = True
+            instance = await self.get_provider_instance(p.id)
 
-        for p in providers:
-            if p.provider_type == "runpod" and p.is_active:
-                instance = await self.get_provider_instance(p.id)
-                estimated_cost = Decimal(str(await instance.estimate_cost(workflow or {})))
-                allowed, reason = await self.budget_tracker.check_budget(p.id, estimated_cost)
-                if allowed:
-                    if comfyui_direct_available:
-                        return p, instance, "RunPod selected (comfyui_direct workers busy)"
-                    return p, instance, "RunPod selected"
+            if modality:
+                caps = cast(ProviderBase, instance).get_capabilities()
+                if modality == "image" and not caps.supports_image:
+                    continue
+                if modality == "video" and not caps.supports_video:
+                    continue
 
-        if comfyui_direct_available:
-            raise JobRouterError("ComfyUI Direct provider busy and no cloud providers available")
+            # Workers registered = provider uses worker pool; none online = no capacity.
+            # No workers registered (total == 0) = cloud/external provider, skip check.
+            worker_counts = await self.worker_registry.get_worker_count(p.id)
+            if worker_counts["total"] > 0 and worker_counts["online"] == 0:
+                continue
+
+            estimated_cost = await instance.estimate_cost(workflow or {})
+            if estimated_cost > 0:
+                cost_decimal = Decimal(str(estimated_cost))
+                allowed, reason = await self.budget_tracker.check_budget(p.id, cost_decimal)
+                if not allowed:
+                    continue
+
+            return p, instance, f"Provider {p.name} selected"
 
         raise JobRouterError("No available providers")
 
@@ -174,16 +146,15 @@ class JobRouter:
 
             duration = (datetime.utcnow() - start_time).total_seconds()
 
-            if provider.provider_type == "runpod":
-                actual_cost = await provider_instance.estimate_cost(workflow)
+            actual_cost = await provider_instance.estimate_cost(workflow)
+            if actual_cost > 0:
                 await self.budget_tracker.record_spend(
                     provider.id,
                     job.id,
                     Decimal(str(actual_cost)),
                     duration_seconds=int(duration),
-                    gpu_type=provider.config.get("gpu_type"),
+                    gpu_type=provider.config.get("gpu_type") if provider.config else None,
                 )
-
                 job.actual_cost = Decimal(str(actual_cost))
 
             job.started_at = start_time
@@ -248,10 +219,11 @@ class JobRouter:
         cost = await instance.estimate_cost(workflow)
         duration = await instance.estimate_duration(workflow)
 
+        record = await self.get_provider_record(provider_id)
         return {
             "estimated_cost": cost,
             "estimated_duration_seconds": duration,
-            "provider_type": (await self.get_provider_record(provider_id)).provider_type,
+            "provider_type": record.provider_type if record else None,
         }
 
     async def shutdown(self) -> None:

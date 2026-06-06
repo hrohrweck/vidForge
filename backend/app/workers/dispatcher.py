@@ -217,8 +217,8 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
             await db.commit()
 
             try:
+                from app.database import ErrorOrigin, ErrorSeverity
                 from app.services.error_capture import log_user_error
-                from app.database import ErrorSeverity, ErrorOrigin
                 friendly = str(exc)
                 if len(friendly) > 200:
                     friendly = friendly[:200] + "..."
@@ -285,8 +285,8 @@ async def dispatch_scene_rerender(
             await db.commit()
 
             try:
+                from app.database import ErrorOrigin, ErrorSeverity
                 from app.services.error_capture import log_user_error
-                from app.database import ErrorSeverity, ErrorOrigin
                 friendly = str(exc)
                 if len(friendly) > 200:
                     friendly = friendly[:200] + "..."

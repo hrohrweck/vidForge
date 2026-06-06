@@ -14,14 +14,15 @@ from app.database import ErrorOrigin, ErrorSeverity, Job, ModelConfig, Provider,
 from app.services.error_capture import log_user_error
 from app.services.job_router import JobRouter
 from app.services.model_config_service import ModelConfigService
-from app.services.model_resolver import (
-    resolve_model_variant,
-)
-from app.services.providers import (
-    AtlasCloudProvider,
-    ComfyUIDirectProvider,
-    PoeProvider,
-    RunPodProvider,
+from app.services.providers import registry
+from app.services.providers.base import (
+    ImageProvider,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderOverloadedError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    VideoProvider,
 )
 from app.services.video_processor import (
     InvalidVideoOutputError,
@@ -31,15 +32,6 @@ from app.services.video_processor import (
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-_VIDEO_SEED_RESOLUTIONS: dict[str, str] = {
-    "16:9": "1024x576",
-    "9:16": "576x1024",
-    "1:1": "768x768",
-    "4:3": "768x576",
-    "3:4": "576x768",
-}
-
 
 def _sanitize_filename(name: str, ext: str) -> str:
     """Sanitize a name for use as a filename."""
@@ -51,16 +43,36 @@ def _sanitize_filename(name: str, ext: str) -> str:
 
 
 def _map_media_error_to_friendly_message(exc: Exception, modality: str) -> str:
-    """Map media generation exceptions to user-friendly messages."""
+    """Map media generation exceptions to user-friendly messages.
+
+    Uses ProviderError sub-types for classification, eliminating
+    provider-specific string matching.
+    """
     if isinstance(exc, InvalidVideoOutputError):
         return (
             f"Generated video failed validation "
             f"({exc.result.actual_frames} frames, expected {exc.result.expected_frames})"
         )
 
+    if isinstance(exc, ProviderOverloadedError):
+        return "AI service is busy, please try again later"
+
+    if isinstance(exc, ProviderRateLimitError):
+        return "Too many requests, please try again later"
+
+    if isinstance(exc, ProviderConnectionError):
+        return "Connection failed, please check your network"
+
+    if isinstance(exc, ProviderTimeoutError):
+        return "Request timed out, please try again later"
+
+    if isinstance(exc, ProviderError):
+        return f"{'Image' if modality == 'image' else 'Video'} generation service error, please try again"
+
+    # Legacy string-based fallback for unclassified exceptions
     exc_msg = str(exc).lower()
 
-    # ComfyUI overloaded
+    # Overloaded
     if "overloaded" in exc_msg or "capacity" in exc_msg or "queue is full" in exc_msg:
         return "AI service is busy, please try again later"
 
@@ -75,13 +87,6 @@ def _map_media_error_to_friendly_message(exc: Exception, modality: str) -> str:
     # Timeout errors
     if "timeout" in exc_msg or "timed out" in exc_msg:
         return "Request timed out, please try again later"
-
-    # Provider-specific
-    if "poe" in exc_msg or "atlas" in exc_msg:
-        return f"{'Image' if modality == 'image' else 'Video'} generation service error, please try again"
-
-    if "comfyui" in exc_msg:
-        return f"{'Image' if modality == 'image' else 'Video'} generation service error, please try again"
 
     # No data returned
     if "no data" in exc_msg or "no output" in exc_msg:
@@ -184,112 +189,54 @@ async def check_aspect_ratio_support(
 async def get_provider_instance(
     db: AsyncSession,
     provider: Provider,
-) -> PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider:
-    if provider.provider_type == "atlascloud":
-        from app.services.providers import AtlasCloudProvider
+) -> Any:
+    """Create and initialize a provider instance via the registry.
 
-        instance = AtlasCloudProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    elif provider.provider_type == "poe":
-        from app.services.providers import PoeProvider
-
-        instance = PoeProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    elif provider.provider_type == "comfyui_direct":
-        from app.services.providers import ComfyUIDirectProvider
-
-        instance = ComfyUIDirectProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    elif provider.provider_type == "runpod":
-        from app.services.providers import RunPodProvider
-
-        instance = RunPodProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    elif provider.provider_type == "ollama":
-        from app.services.providers.ollama import OllamaProvider
-
-        instance = OllamaProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    else:
-        raise ValueError(f"Unknown provider type: {provider.provider_type}")
+    Thin wrapper around ``registry.create()``.  Kept as a public function
+    for backward compatibility with existing callers and test mocking.
+    """
+    return await registry.create(provider.provider_type, provider.id, provider.config)
 
 
 async def get_provider_for_job(
     db: AsyncSession,
     job: Job,
     modality: str,
-) -> tuple[
-    Provider | None,
-    PoeProvider | ComfyUIDirectProvider | RunPodProvider | AtlasCloudProvider | None,
-]:
+) -> tuple[Provider | None, Any]:
+    """Resolve an active provider instance for the given job and modality.
+
+    Uses registry-based lookup — no longer hard-codes provider-type lists.
+    Falls back to iterating all capable providers via JobRouter.
+    """
     provider_id = job.image_provider_id if modality == "image" else job.video_provider_id
 
     if provider_id:
         result = await db.execute(select(Provider).where(Provider.id == provider_id))
         provider = result.scalar_one_or_none()
         if provider and provider.is_active:
-            instance = await get_provider_instance(db, provider)
+            instance = await registry.create(
+                provider.provider_type, provider.id, provider.config
+            )
             return provider, instance
         return None, None
 
     router = JobRouter(db)
-    candidates = []
     async for prov in router.iterate_providers():
-        if modality == "image":
-            if prov.provider_type == "comfyui_direct":
-                candidates.append(prov)
-        else:
-            if prov.provider_type in ("comfyui_direct", "runpod", "poe"):
-                candidates.append(prov)
-
-    for candidate in candidates:
         try:
-            instance = await get_provider_instance(db, candidate)
-            return candidate, instance
+            instance = await registry.create(
+                prov.provider_type, prov.id, prov.config
+            )
+            # get_capabilities() is on ProviderBase — runtime instances
+            # have it even though registry.create() returns ComfyUIProvider.
+            caps = instance.get_capabilities()  # type: ignore[attr-defined]
+            if modality == "image" and caps.supports_image:
+                return prov, instance
+            if modality == "video" and caps.supports_video:
+                return prov, instance
         except Exception:
             continue
 
     return None, None
-
-
-async def get_comfyui_direct_provider(
-    db: AsyncSession,
-    provider_id: UUID | None = None,
-) -> tuple[Provider, ComfyUIDirectProvider]:
-    provider: Provider | None = None
-
-    if provider_id:
-        result = await db.execute(
-            select(Provider).where(
-                Provider.id == provider_id,
-                Provider.provider_type == "comfyui_direct",
-                Provider.is_active == True,  # noqa: E712
-            )
-        )
-        provider = result.scalar_one_or_none()
-
-    if not provider:
-        result = await db.execute(
-            select(Provider).where(
-                Provider.provider_type == "comfyui_direct",
-                Provider.is_active == True,  # noqa: E712
-            )
-        )
-        provider = result.scalar_one_or_none()
-
-    if not provider:
-        raise ValueError("No active ComfyUI Direct provider available.")
-
-    instance = await get_provider_instance(db, provider)
-    if not isinstance(instance, ComfyUIDirectProvider):
-        raise ValueError(f"Expected ComfyUI Direct provider, got {provider.provider_type}")
-
-    return provider, instance
 
 
 async def get_user_model_preferences(db: AsyncSession, user_id: UUID) -> dict[str, str]:
@@ -439,28 +386,17 @@ def load_comfyui_workflow(workflow_name: str) -> dict[str, Any] | None:
     return json.loads(workflow_path.read_text())
 
 
-async def _upload_image_to_comfyui(
-    instance: ComfyUIDirectProvider,
-    image_path: Path,
-) -> str:
-    """Upload an image to ComfyUI's input directory and return its name."""
-    image_data = image_path.read_bytes()
-    filename = image_path.name
-    return await instance.client.upload_file(filename, image_data)
-
-
 async def _resolve_image_provider(
     db: AsyncSession,
     job: Job,
     provider_id: UUID | None,
     model_preference: str | None,
     has_reference_image: bool = False,
-) -> tuple[str, UUID | None, str, Any]:
+) -> tuple[str, UUID | None, Any]:
     """Resolve which provider and model to use for image generation.
 
-    Returns (selected_model_id, resolved_provider_id, provider_type, instance).
+    Returns (selected_model_id, resolved_provider_id, provider_instance).
     """
-    from app.services.model_config_service import ModelConfigService
 
     # Fallback: read provider_id from job input_data if not passed explicitly
     if provider_id is None and job.input_data:
@@ -475,8 +411,10 @@ async def _resolve_image_provider(
         config = await ModelConfigService.resolve_model_config(db, model_preference, provider_id)
         if config:
             provider = config.provider
-            instance = await get_provider_instance(db, provider)
-            return config.model_id, provider.id, provider.provider_type, instance
+            instance = await registry.create(
+                provider.provider_type, provider.id, provider.config
+            )
+            return config.model_id, provider.id, instance
 
     user_prefs = await get_user_model_preferences(db, job.user_id)
     task = "image_to_image" if has_reference_image else "text_to_image"
@@ -490,8 +428,10 @@ async def _resolve_image_provider(
         raise ValueError(f"Could not resolve image model: {model_id} (provider_id={provider_id})")
 
     provider = config.provider
-    instance = await get_provider_instance(db, provider)
-    return config.model_id, provider.id, provider.provider_type, instance
+    instance = await registry.create(
+        provider.provider_type, provider.id, provider.config
+    )
+    return config.model_id, provider.id, instance
 
 
 async def _resolve_video_provider(
@@ -500,9 +440,11 @@ async def _resolve_video_provider(
     provider_id: UUID | None,
     model_preference: str | None,
     has_seed_image: bool = False,
-) -> tuple[str, UUID | None, str, Any]:
-    """Resolve which provider and model to use for video generation."""
-    from app.services.model_config_service import ModelConfigService
+) -> tuple[str, UUID | None, Any]:
+    """Resolve which provider and model to use for video generation.
+
+    Returns (selected_model_id, resolved_provider_id, provider_instance).
+    """
 
     # Fallback: read provider_id from job input_data if not passed explicitly
     if provider_id is None and job.input_data:
@@ -517,8 +459,10 @@ async def _resolve_video_provider(
         config = await ModelConfigService.resolve_model_config(db, model_preference, provider_id)
         if config:
             provider = config.provider
-            instance = await get_provider_instance(db, provider)
-            return config.model_id, provider.id, provider.provider_type, instance
+            instance = await registry.create(
+                provider.provider_type, provider.id, provider.config
+            )
+            return config.model_id, provider.id, instance
 
     user_prefs = await get_user_model_preferences(db, job.user_id)
     task = "image_to_video" if has_seed_image else "text_to_video"
@@ -532,45 +476,10 @@ async def _resolve_video_provider(
         raise ValueError(f"Could not resolve video model: {model_id} (provider_id={provider_id})")
 
     provider = config.provider
-    instance = await get_provider_instance(db, provider)
-    return config.model_id, provider.id, provider.provider_type, instance
-
-
-async def _get_poe_provider(
-    db: AsyncSession,
-) -> tuple[Provider | None, PoeProvider | None]:
-    """Find the first active Poe provider in the DB."""
-    result = await db.execute(
-        select(Provider).where(Provider.provider_type == "poe", Provider.is_active == True)  # noqa: E712
+    instance = await registry.create(
+        provider.provider_type, provider.id, provider.config
     )
-    providers = result.scalars().all()
-    for provider in providers:
-        try:
-            instance = await get_provider_instance(db, provider)
-            return provider, instance
-        except Exception:
-            continue
-    return None, None
-
-
-async def _get_atlascloud_provider(
-    db: AsyncSession,
-) -> tuple[Provider | None, AtlasCloudProvider | None]:
-    """Find the first active AtlasCloud provider in the DB."""
-    result = await db.execute(
-        select(Provider).where(
-            Provider.provider_type == "atlascloud",
-            Provider.is_active == True,  # noqa: E712
-        )
-    )
-    providers = result.scalars().all()
-    for provider in providers:
-        try:
-            instance = await get_provider_instance(db, provider)
-            return provider, instance
-        except Exception:
-            continue
-    return None, None
+    return config.model_id, provider.id, instance
 
 
 async def generate_image(
@@ -594,7 +503,7 @@ async def generate_image(
     )
     image_path = output_dir / filename_base
 
-    selected_model, resolved_pid, ptype, instance = await _resolve_image_provider(
+    selected_model, resolved_pid, instance = await _resolve_image_provider(
         db,
         job,
         provider_id,
@@ -602,85 +511,36 @@ async def generate_image(
         has_reference_image=bool(reference_image_path),
     )
 
-    if ptype in ("poe", "atlascloud"):
-        # Cloud provider — direct API call
-        if lora_path:
-            logger.warning("LoRA not supported for cloud providers, falling back to prompt-only")
-        if reference_image_path and ptype != "poe":
-            logger.warning(
-                "Image editing not supported for %s provider, falling back to prompt-only",
-                ptype,
-            )
-        if "x" not in aspect_ratio:
-            aspect_ratio = _VIDEO_SEED_RESOLUTIONS.get(aspect_ratio, "1024x1024")
-        if ptype == "poe":
-            _cloud_id, image_data = await instance.generate_image(
-                prompt=prompt,
-                model=selected_model,
-                aspect_ratio=aspect_ratio,
-                image_path=reference_image_path if ptype == "poe" else None,
-            )
-        else:
-            _cloud_id, image_data = await instance.generate_image(
-                prompt=prompt,
-                model=selected_model,
-                aspect_ratio=aspect_ratio,
-            )
-        if not image_data:
-            exc = ValueError(f"Poe image generation returned no data (model={selected_model})")
-            import asyncio
+    if not isinstance(instance, ImageProvider):
+        raise ValueError(
+            f"Provider {getattr(instance, 'provider_id', 'unknown')} "
+            f"does not support image generation"
+        )
 
-            asyncio.create_task(
-                _capture_media_error(job, exc, "image", model=selected_model, provider=ptype)
-            )
-            raise exc
-        image_path.write_bytes(image_data)
-        relative_path = str(image_path.relative_to(settings.storage_path))
-        return relative_path, f"poe_{selected_model}", resolved_pid
-
-    # ComfyUI local provider
-    if lora_path:
-        workflow = _build_lora_image_workflow(
+    try:
+        _asset_id, image_data = await instance.generate_image(
             prompt=prompt,
+            model=selected_model,
+            aspect_ratio=aspect_ratio,
+            image_path=reference_image_path,
+            reference_image_strength=reference_image_strength,
             lora_path=lora_path,
             lora_strength=lora_strength,
-            aspect_ratio=aspect_ratio,
-            provider_config=instance.config,
         )
-    elif reference_image_path:
-        workflow = _build_ip_adapter_image_workflow(
-            prompt=prompt,
-            reference_image_path=reference_image_path,
-            strength=reference_image_strength,
-            aspect_ratio=aspect_ratio,
-            provider_config=instance.config,
+    except Exception as exc:
+        classified = instance.classify_error(exc)
+        import asyncio
+        asyncio.create_task(
+            _capture_media_error(
+                job, classified, "image", model=selected_model, provider=str(resolved_pid)
+            )
         )
-    elif selected_model == "flux1-schnell":
-        workflow = _build_flux_image_workflow(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            provider_config=instance.config,
-        )
-    else:
-        workflow = _build_comfyui_image_workflow(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            model_preference=selected_model,
-            provider_config=instance.config,
-        )
+        raise
 
-    prompt_id = await instance.queue_prompt(workflow)
-    result = await instance.wait_for_completion(prompt_id)
-
-    image_data = await instance.get_output(result)
     if not image_data:
-        raise ValueError("ComfyUI image generation returned no output data")
+        raise ValueError(f"Image generation returned no data (model={selected_model})")
 
     image_path.write_bytes(image_data)
-
-    if not image_path.exists():
-        raise ValueError("Failed to save generated image")
-
     relative_path = str(image_path.relative_to(settings.storage_path))
     return relative_path, f"generated_with_{selected_model}", resolved_pid
 
@@ -704,7 +564,7 @@ async def generate_video(
     )
     video_path = output_dir / filename_base
 
-    selected_model, resolved_pid, ptype, instance = await _resolve_video_provider(
+    selected_model, resolved_pid, instance = await _resolve_video_provider(
         db,
         job,
         provider_id,
@@ -712,20 +572,17 @@ async def generate_video(
         has_seed_image=bool(reference_image_path),
     )
 
-    ar_warning: str | None = None
-    # Check aspect ratio support for ALL providers (not just ComfyUI)
-    # For cloud providers, use selected_model directly; for ComfyUI, resolve the variant first
-    if ptype in ("poe", "atlascloud"):
-        model_lookup_id = selected_model
-    else:
-        model_lookup_id = resolve_model_variant(
-            selected_model,
-            has_seed_image=bool(reference_image_path),
-            is_scene_continuation=False,
+    if not isinstance(instance, VideoProvider):
+        raise ValueError(
+            f"Provider {getattr(instance, 'provider_id', 'unknown')} "
+            f"does not support video generation"
         )
+
+    # Check aspect ratio support
+    ar_warning: str | None = None
     result = await db.execute(
         select(ModelConfig).where(
-            ModelConfig.model_id == model_lookup_id,
+            ModelConfig.model_id == selected_model,
             ModelConfig.is_active == True,  # noqa: E712
         )
     )
@@ -741,97 +598,35 @@ async def generate_video(
                 message=ar_warning,
                 details={
                     "scene_number": scene_number,
-                    "model": model_lookup_id,
+                    "model": selected_model,
                     "requested_aspect_ratio": aspect_ratio,
                 },
                 source_id=job.id,
                 source_type="job",
             )
 
-    if ptype in ("poe", "atlascloud"):
-        # Cloud provider — direct API call
-        _cloud_id, video_data = await instance.generate_video(
+    try:
+        _asset_id, output_data = await instance.generate_video(
             prompt=prompt,
             model=selected_model,
             duration=duration,
             aspect_ratio=aspect_ratio,
             image_path=reference_image_path,
         )
-        if not video_data:
-            exc = ValueError(f"Poe video generation returned no data (model={selected_model})")
-            import asyncio
-
-            asyncio.create_task(
-                _capture_media_error(job, exc, "video", model=selected_model, provider=ptype)
+    except Exception as exc:
+        classified = instance.classify_error(exc)
+        import asyncio
+        asyncio.create_task(
+            _capture_media_error(
+                job, classified, "video", model=selected_model, provider=str(resolved_pid)
             )
-            raise exc
-        video_path.write_bytes(video_data)
-        relative_path = str(video_path.relative_to(settings.storage_path))
-        return relative_path, f"poe_{selected_model}", resolved_pid, float(duration), ar_warning
-
-    # ComfyUI local provider
-    frames = _duration_to_frames(duration)
-
-    variant_id = resolve_model_variant(
-        selected_model,
-        has_seed_image=bool(reference_image_path),
-        is_scene_continuation=False,
-    )
-    result = await db.execute(
-        select(ModelConfig).where(
-            ModelConfig.model_id == variant_id,
-            ModelConfig.is_active == True,  # noqa: E712
         )
-    )
-    model_info = result.scalars().first()
-    if not model_info:
-        raise ValueError(f"Unknown model variant: {variant_id}")
+        raise
 
-    if variant_id.startswith("wan"):
-        if reference_image_path:
-            image_path = Path(settings.storage_path) / reference_image_path
-            if image_path.exists():
-                image_name = await _upload_image_to_comfyui(instance, image_path)
-                workflow = _build_wan_i2v_workflow(
-                    prompt=prompt,
-                    aspect_ratio=aspect_ratio,
-                    frames=frames,
-                    image_name=image_name,
-                    provider_config=instance.config,
-                )
-            else:
-                workflow = _build_wan_video_workflow(
-                    prompt=prompt,
-                    aspect_ratio=aspect_ratio,
-                    frames=frames,
-                    provider_config=instance.config,
-                )
-        else:
-            workflow = _build_wan_video_workflow(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-                frames=frames,
-                provider_config=instance.config,
-            )
-    elif variant_id.startswith("ltx"):
-        workflow = await _build_ltx_workflow(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            frames=frames,
-            variant_id=variant_id,
-            reference_image_path=reference_image_path,
-            instance=instance,
-            db=db,
-        )
-    else:
-        raise ValueError(f"Unsupported model variant: {variant_id}")
-
-    prompt_id = await instance.queue_prompt(workflow)
-    result = await instance.wait_for_completion(prompt_id)
-    output_data = await instance.get_output(result)
     if not output_data:
-        raise ValueError("ComfyUI returned no output data")
+        raise ValueError(f"Video generation returned no data (model={selected_model})")
 
+    # Validate video output
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp.write(output_data)
         tmp_path = tmp.name
@@ -853,287 +648,11 @@ async def generate_video(
     video_path.write_bytes(output_data)
     return (
         str(video_path.relative_to(settings.storage_path)),
-        f"generated_with_{variant_id}",
+        f"generated_with_{selected_model}",
         resolved_pid,
         float(duration),
         ar_warning,
     )
-
-
-def _build_wan_video_workflow(
-    prompt: str,
-    aspect_ratio: str,
-    frames: int,
-    provider_config: dict[str, Any],
-) -> dict[str, Any]:
-    """Build a Wan2.2 video generation workflow.
-
-    Uses the image-to-video (ti2v) model by default, which produces
-    higher quality than text-to-video.
-    """
-    width, height = _video_generation_resolution(aspect_ratio)
-    seed = random.randint(0, 2**31 - 1)
-
-    clip_name = str(
-        provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-    )
-    vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
-    unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
-
-    # Quality settings — these are the sweet spot for Wan2.2
-    steps = int(provider_config.get("wan_video_steps") or 30)
-    cfg = float(provider_config.get("wan_video_cfg") or 5.0)
-    shift = float(provider_config.get("wan_video_shift") or 8.0)
-    fps = int(provider_config.get("wan_video_fps") or 16)
-    sampler = str(provider_config.get("wan_video_sampler") or "uni_pc")
-    scheduler = str(provider_config.get("wan_video_scheduler") or "simple")
-    negative_prompt = str(provider_config.get("wan_video_negative_prompt") or "")
-
-    return {
-        "1": {
-            "class_type": "CLIPLoader",
-            "inputs": {"clip_name": clip_name, "type": "wan"},
-        },
-        "2": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["1", 0]},
-        },
-        "3": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative_prompt, "clip": ["1", 0]},
-        },
-        "4": {
-            "class_type": "VAELoader",
-            "inputs": {"vae_name": vae_name},
-        },
-        "5": {
-            "class_type": "UNETLoader",
-            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
-        },
-        "6": {
-            "class_type": "ModelSamplingSD3",
-            "inputs": {"model": ["5", 0], "shift": shift},
-        },
-        "7": {
-            "class_type": "EmptyHunyuanLatentVideo",
-            "inputs": {"width": width, "height": height, "length": frames, "batch_size": 1},
-        },
-        "8": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["6", 0],
-                "positive": ["2", 0],
-                "negative": ["3", 0],
-                "latent_image": ["7", 0],
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": sampler,
-                "scheduler": scheduler,
-                "denoise": 1.0,
-            },
-        },
-        "9": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["8", 0], "vae": ["4", 0]},
-        },
-        "10": {
-            "class_type": "CreateVideo",
-            "inputs": {"images": ["9", 0], "fps": fps},
-        },
-        "11": {
-            "class_type": "SaveVideo",
-            "inputs": {
-                "video": ["10", 0],
-                "filename_prefix": "vidforge",
-                "format": "mp4",
-                "codec": "h264",
-            },
-        },
-    }
-
-
-def _build_wan_i2v_workflow(
-    prompt: str,
-    aspect_ratio: str,
-    frames: int,
-    image_name: str,
-    provider_config: dict[str, Any],
-) -> dict[str, Any]:
-    """Build a Wan2.2 I2V (image-to-video) workflow.
-
-    Uses the reference image as the first frame latent, producing
-    a video that continues from the seed image.
-    """
-    width, height = _video_generation_resolution(aspect_ratio)
-    seed = random.randint(0, 2**31 - 1)
-
-    clip_name = str(
-        provider_config.get("wan_clip_name") or "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-    )
-    vae_name = str(provider_config.get("wan_vae_name") or "wan2.2_vae.safetensors")
-    unet_name = str(provider_config.get("wan_unet_name") or "wan2.2_ti2v_5B_fp16.safetensors")
-
-    steps = int(provider_config.get("wan_video_steps") or 30)
-    cfg = float(provider_config.get("wan_video_cfg") or 5.0)
-    shift = float(provider_config.get("wan_video_shift") or 8.0)
-    fps = int(provider_config.get("wan_video_fps") or 16)
-    sampler = str(provider_config.get("wan_video_sampler") or "uni_pc")
-    scheduler = str(provider_config.get("wan_video_scheduler") or "simple")
-    negative_prompt = str(provider_config.get("wan_video_negative_prompt") or "")
-
-    return {
-        "1": {
-            "class_type": "CLIPLoader",
-            "inputs": {"clip_name": clip_name, "type": "wan"},
-        },
-        "2": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": ["1", 0]},
-        },
-        "3": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative_prompt, "clip": ["1", 0]},
-        },
-        "4": {
-            "class_type": "VAELoader",
-            "inputs": {"vae_name": vae_name},
-        },
-        "5": {
-            "class_type": "UNETLoader",
-            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
-        },
-        "6": {
-            "class_type": "ModelSamplingSD3",
-            "inputs": {"model": ["5", 0], "shift": shift},
-        },
-        "7": {
-            "class_type": "LoadImage",
-            "inputs": {"image": image_name},
-        },
-        "8": {
-            "class_type": "WanImageToVideo",
-            "inputs": {
-                "positive": ["2", 0],
-                "negative": ["3", 0],
-                "vae": ["4", 0],
-                "width": width,
-                "height": height,
-                "length": frames,
-                "batch_size": 1,
-                "start_image": ["7", 0],
-            },
-        },
-        "9": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["6", 0],
-                "positive": ["8", 0],
-                "negative": ["8", 1],
-                "latent_image": ["8", 2],
-                "seed": seed,
-                "steps": steps,
-                "cfg": cfg,
-                "sampler_name": sampler,
-                "scheduler": scheduler,
-                "denoise": 1.0,
-            },
-        },
-        "10": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["9", 0], "vae": ["4", 0]},
-        },
-        "11": {
-            "class_type": "CreateVideo",
-            "inputs": {"images": ["10", 0], "fps": fps},
-        },
-        "12": {
-            "class_type": "SaveVideo",
-            "inputs": {
-                "video": ["11", 0],
-                "filename_prefix": "vidforge",
-                "format": "mp4",
-                "codec": "h264",
-            },
-        },
-    }
-
-
-async def _build_ltx_workflow(
-    prompt: str,
-    aspect_ratio: str,
-    frames: int,
-    variant_id: str,
-    reference_image_path: str | None,
-    instance: ComfyUIDirectProvider,
-    db: AsyncSession,
-) -> dict[str, Any]:
-    """Load and parameterise an LTX workflow JSON for the requested variant."""
-    config = await ModelConfigService.get_by_id(db, variant_id, instance.provider_id)
-    if not config or not config.comfyui_workflow:
-        raise ValueError(f"No workflow config for variant: {variant_id}")
-    workflow_file = config.comfyui_workflow
-
-    workflow_path = Path(__file__).resolve().parent.parent / "comfyui" / "workflows" / workflow_file
-    if not workflow_path.exists():
-        raise ValueError(f"LTX workflow file not found: {workflow_path}")
-
-    with workflow_path.open("r", encoding="utf-8") as f:
-        workflow: dict[str, Any] = json.load(f)
-
-    width, height = _video_generation_resolution(aspect_ratio)
-    seed = random.randint(0, 2**31 - 1)
-
-    text_encode_nodes: list[str] = []
-    latent_node: str | None = None
-    sampler_node: str | None = None
-    video_node: str | None = None
-    image_node: str | None = None
-
-    for node_id, node in workflow.items():
-        class_type = node.get("class_type", "")
-        if class_type == "CLIPTextEncode":
-            text_encode_nodes.append(node_id)
-        elif class_type in ("EmptyLTXVLatentVideo", "LTXVImgToVideo"):
-            latent_node = node_id
-        elif class_type == "KSampler":
-            sampler_node = node_id
-        elif class_type == "CreateVideo":
-            video_node = node_id
-        elif class_type == "LoadImage":
-            image_node = node_id
-
-    if len(text_encode_nodes) < 2:
-        raise ValueError("LTX workflow must contain at least two CLIPTextEncode nodes")
-    if not latent_node:
-        raise ValueError("LTX workflow missing latent node")
-    if not sampler_node:
-        raise ValueError("LTX workflow missing KSampler node")
-    if not video_node:
-        raise ValueError("LTX workflow missing CreateVideo node")
-
-    workflow[text_encode_nodes[0]]["inputs"]["text"] = prompt
-    workflow[text_encode_nodes[1]]["inputs"]["text"] = ""
-
-    workflow[latent_node]["inputs"]["width"] = width
-    workflow[latent_node]["inputs"]["height"] = height
-    workflow[latent_node]["inputs"]["length"] = frames
-
-    workflow[sampler_node]["inputs"]["seed"] = seed
-    workflow[sampler_node]["inputs"]["steps"] = 30
-    workflow[sampler_node]["inputs"]["cfg"] = 3.0
-
-    workflow[video_node]["inputs"]["fps"] = 16
-
-    if image_node and reference_image_path:
-        image_path = Path(settings.storage_path) / reference_image_path
-        if image_path.exists():
-            image_name = await _upload_image_to_comfyui(instance, image_path)
-            workflow[image_node]["inputs"]["image"] = image_name
-
-    return workflow
-
-
 def _build_comfyui_image_workflow(
     prompt: str,
     aspect_ratio: str,
@@ -1277,13 +796,6 @@ def _select_wan_image_unet(
     return "wan2.2_ti2v_5B_fp16.safetensors"
 
 
-def _next_workflow_node_id(workflow: dict[str, Any]) -> str:
-    numeric_ids = [int(node_id) for node_id in workflow if node_id.isdigit()]
-    if not numeric_ids:
-        return "1"
-    return str(max(numeric_ids) + 1)
-
-
 def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
     ratios = {
         "16:9": (1280, 720),
@@ -1294,134 +806,6 @@ def _aspect_ratio_to_dimensions(aspect_ratio: str) -> tuple[int, int]:
         "21:9": (1680, 720),
     }
     return ratios.get(aspect_ratio, (1280, 720))
-
-
-def _duration_to_frames(duration: int, fps: int = 16) -> int:
-    """Convert duration in seconds to frame count.
-
-    Wan2.2 works well with 16fps.  Frame count is always odd (>= 9)
-    as required by EmptyHunyuanLatentVideo.
-    """
-    frames = int(duration * fps)
-    if frames < 9:
-        frames = 9
-    if frames % 2 == 0:
-        frames += 1
-    return frames
-
-
-def _video_generation_resolution(aspect_ratio: str) -> tuple[int, int]:
-    """Resolution for video generation.
-
-    Uses 848x480 (or equivalent) which is the sweet spot for Wan2.2
-    on consumer GPUs — large enough for good quality, small enough
-    to fit in VRAM at 30 steps with 80+ frames.
-    """
-    ratios = {
-        "16:9": (848, 480),
-        "9:16": (480, 848),
-        "1:1": (640, 640),
-        "4:3": (640, 480),
-        "3:2": (640, 432),
-        "21:9": (848, 384),
-    }
-    return ratios.get(aspect_ratio, (848, 480))
-
-
-def _build_ip_adapter_image_workflow(
-    prompt: str,
-    reference_image_path: str,
-    strength: float,
-    aspect_ratio: str,
-    provider_config: dict[str, Any],
-) -> dict[str, Any]:
-    """Load IP-Adapter workflow template and substitute runtime values.
-
-    Template variables like {prompt}, {seed}, {width} are replaced
-    with concrete values at call time.  String values are JSON-escaped
-    to keep the template body valid JSON after substitution.
-    """
-    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
-    seed = random.randint(0, 2**31 - 1)
-
-    checkpoint = str(
-        provider_config.get("ip_adapter_checkpoint")
-        or provider_config.get("checkpoint")
-        or "flux1-schnell.safetensors"
-    )
-    ip_adapter_model = str(
-        provider_config.get("ip_adapter_model") or "ip-adapter-plus_sd15.safetensors"
-    )
-    clip_vision_model = str(
-        provider_config.get("clip_vision_model") or "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
-    )
-    negative_prompt = str(
-        provider_config.get("image_negative_prompt") or "blurry, low quality, distorted, deformed"
-    )
-
-    workflow_path = Path(__file__).parent.parent / "comfyui" / "ip_adapter_image.json"
-    json_str = workflow_path.read_text()
-
-    string_vars: dict[str, str] = {
-        "{prompt}": prompt,
-        "{negative_prompt}": negative_prompt,
-        "{reference_image_path}": reference_image_path,
-        "{checkpoint}": checkpoint,
-        "{ip_adapter_model}": ip_adapter_model,
-        "{clip_vision_model}": clip_vision_model,
-    }
-    for var, val in string_vars.items():
-        json_str = json_str.replace(var, json.dumps(val)[1:-1])
-
-    numeric_vars: dict[str, str] = {
-        "{ip_adapter_strength}": str(strength),
-        "{seed}": str(seed),
-        "{width}": str(width),
-        "{height}": str(height),
-    }
-    for var, val in numeric_vars.items():
-        json_str = json_str.replace(var, val)
-
-    return json.loads(json_str)
-
-
-def _build_lora_image_workflow(
-    prompt: str,
-    lora_path: str,
-    lora_strength: float,
-    aspect_ratio: str,
-    provider_config: dict[str, Any],
-) -> dict[str, Any]:
-    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
-    seed = random.randint(0, 2**31 - 1)
-
-    checkpoint = str(
-        provider_config.get("checkpoint")
-        or provider_config.get("lora_base_checkpoint")
-        or "flux1-schnell.safetensors"
-    )
-
-    workflow_path = Path(__file__).parent.parent / "comfyui" / "lora_image.json"
-    json_str = workflow_path.read_text()
-
-    string_vars: dict[str, str] = {
-        "{prompt}": prompt,
-        "{lora_path}": lora_path,
-        "{checkpoint}": checkpoint,
-    }
-    for var, val in string_vars.items():
-        json_str = json_str.replace(var, json.dumps(val)[1:-1])
-
-    numeric_vars: dict[str, str] = {
-        "{lora_strength}": str(lora_strength),
-        "{seed}": str(seed),
-        "{width}": str(width),
-        "{height}": str(height),
-    }
-    for var, val in numeric_vars.items():
-        json_str = json_str.replace(var, val)
-
-    return json.loads(json_str)
 
 
 def _build_flux_image_workflow(

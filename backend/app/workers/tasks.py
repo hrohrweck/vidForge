@@ -35,8 +35,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-COMFYUI_SEMAPHORE_KEY = "comfyui:processing"
-COMFYUI_MAX_CONCURRENT = getattr(settings, "comfyui_max_concurrent", 1)
 TASK_TIME_LIMIT = getattr(settings, "task_time_limit", 172800)
 
 
@@ -202,15 +200,15 @@ def _as_decimal(value: float | int | Decimal | None) -> Decimal | None:
 
 
 # ======================================================================
-# ComfyUI concurrency semaphore (async Redis)
+# Provider concurrency semaphore (async Redis)
 # ======================================================================
 
 
-class ComfyUISemaphore:
-    """Redis-based semaphore for limiting concurrent local ComfyUI jobs.
+class ProviderSemaphore:
+    """Redis-based semaphore for limiting concurrent jobs per provider.
 
     Uses the shared ``ctx.redis`` (async) client — no per-instance
-    connection is created.
+    connection is created.  Generic across all provider types.
     """
 
     def __init__(self, key: str, max_concurrent: int):
@@ -252,10 +250,6 @@ async def _resolve_provider_for_job(db, job: Job, workflow: dict, preference: st
         provider_instance = await router.get_provider_instance(provider.id)
         estimated_cost = Decimal(str(await provider_instance.estimate_cost(workflow)))
 
-        if provider.provider_type == "runpod":
-            allowed, reason = await router.budget_tracker.check_budget(provider.id, estimated_cost)
-            if not allowed:
-                raise ValueError(f"Assigned provider '{provider.name}' unavailable: {reason}")
         return provider, provider_instance, estimated_cost, router, "Assigned provider"
 
     provider, provider_instance, reason = await router.select_provider(
@@ -284,94 +278,6 @@ async def _run_local_job(
     return relative_video, relative_preview
 
 
-async def _run_runpod_job(
-    job_id: str,
-    workflow: dict,
-    provider_instance,
-) -> tuple[str, str | None]:
-    run_id = await provider_instance.queue_prompt(workflow)
-    result = await provider_instance.wait_for_completion(
-        run_id,
-        progress_callback=lambda p, m: ctx.run(
-            broadcast_update(job_id, {"type": "progress", "progress": p, "message": m})
-        ),
-    )
-    output_data = await provider_instance.get_output(result)
-    if not output_data:
-        raise RuntimeError("RunPod returned no output data")
-
-    output_dir = Path(settings.storage_path) / "output" / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "video.mp4"
-    output_path.write_bytes(output_data)
-    return str(output_path), None
-
-
-async def _run_poe_job(
-    job_id: str,
-    provider_instance,
-    model_preference: str | None,
-    input_data: dict,
-    db,
-) -> str:
-    from app.database import PoeModel
-
-    prompt = input_data.get("prompt", "")
-    negative_prompt = input_data.get("negative_prompt", "")
-
-    result = await db.execute(
-        select(PoeModel).where(
-            PoeModel.provider_id == provider_instance.provider_id,
-            PoeModel.is_active,
-        )
-    )
-    available_models = list(result.scalars().all())
-    if not available_models:
-        raise ValueError(f"No Poe models configured for provider {provider_instance.provider_id}")
-
-    selected_model = None
-    if model_preference:
-        for m in available_models:
-            if m.id == UUID(model_preference) or m.model_id == model_preference:
-                selected_model = m
-                break
-    if not selected_model:
-        selected_model = available_models[0]
-
-    poe_model_id = selected_model.model_id
-    is_image = selected_model.modality == "image"
-    duration = input_data.get("duration", 10)
-    aspect_ratio = input_data.get("aspect_ratio", "16:9")
-    resolution = input_data.get("resolution", "1080p")
-
-    output_path = Path(settings.storage_path) / "output" / job_id
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    if is_image:
-        output_file = output_path / "image.png"
-        _, image_data = await provider_instance.generate_image(
-            prompt=prompt,
-            model=poe_model_id,
-            aspect_ratio=aspect_ratio,
-            quality=input_data.get("quality", "high"),
-            negative_prompt=negative_prompt,
-        )
-        if image_data:
-            output_file.write_bytes(image_data)
-        return str(output_path.relative_to(settings.storage_path)) + "/image.png"
-    else:
-        output_file = output_path / "video.mp4"
-        _, video_data = await provider_instance.generate_video(
-            prompt=prompt,
-            model=poe_model_id,
-            duration=duration,
-            aspect_ratio=aspect_ratio,
-            resolution=resolution,
-            negative_prompt=negative_prompt,
-        )
-        if video_data:
-            output_file.write_bytes(video_data)
-        return str(output_path.relative_to(settings.storage_path)) + "/video.mp4"
 
 
 # ======================================================================
@@ -396,7 +302,7 @@ def _map_exception_to_friendly_message(exc: Exception) -> str:
         return "Connection failed, please check your network"
     if isinstance(exc, TimeoutError) or "timeout" in exc_msg or "timed out" in exc_msg:
         return "Request timed out, please try again later"
-    if "comfyui" in exc_msg or "poe" in exc_msg or "runpod" in exc_msg:
+    if "provider" in exc_msg or "generation service" in exc_msg:
         return "Video generation service error, please try again"
     return "An error occurred, please try again"
 
@@ -432,8 +338,6 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
 
         if not job.provider_preference:
             job.provider_preference = preference
-        model_preference = job.model_preference
-
         result = await db.execute(select(Template).where(Template.id == job.template_id))
         template = result.scalar_one_or_none()
         workflow = template.config if template else {}
@@ -471,12 +375,12 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
 
             started_at = datetime.utcnow()
 
-            if provider_record.provider_type == "comfyui_direct":
-                semaphore = ComfyUISemaphore(
-                    key=f"{COMFYUI_SEMAPHORE_KEY}:{provider_record.id}",
-                    max_concurrent=provider_record.config.get(
-                        "max_concurrent_jobs", COMFYUI_MAX_CONCURRENT
-                    ),
+            # Acquire capacity semaphore for providers that need it
+            max_concurrent = provider_record.config.get("max_concurrent_jobs", 0)
+            if max_concurrent > 0:
+                semaphore = ProviderSemaphore(
+                    key=f"provider:processing:{provider_record.id}",
+                    max_concurrent=max_concurrent,
                 )
                 acquired = await semaphore.acquire(job_id)
                 if not acquired:
@@ -484,51 +388,64 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                         job_uuid,
                         "failed",
                         0,
-                        error_message="GPU queue is full. Job will be retried.",
+                        error_message="Provider queue is full. Job will be retried.",
                     )
                     return {"status": "failed", "error": "Queue full", "job_id": job_id}
 
+            # Provider-aware routing:
+            # ComfyUI workflow providers -> VideoGenerator (workflow-based)
+            # Direct API providers -> dispatcher pipeline (provider-agnostic
+            #   via media_generator.generate_video, which routes through
+            #   the VideoProvider interface)
+            _COMFYUI_WORKFLOW_TYPES = frozenset({"comfyui_direct", "runpod"})
+            is_comfyui = provider_record.provider_type in _COMFYUI_WORKFLOW_TYPES
+
+            if is_comfyui:
                 relative_video, relative_preview = await _run_local_job(
                     job_id,
                     template_name,
                     input_data,
                 )
-
-            elif provider_record.provider_type == "poe":
-                relative_video = await _run_poe_job(
-                    job_id,
-                    provider_instance,
-                    model_preference,
-                    input_data,
-                    db,
-                )
-                relative_preview = None
-
-            elif provider_record.provider_type == "runpod":
-                run_result_video, run_result_preview = await _run_runpod_job(
-                    job_id,
-                    workflow,
-                    provider_instance,
-                )
-                if run_result_video.startswith(settings.storage_path):
-                    relative_video = str(Path(run_result_video).relative_to(settings.storage_path))
-                else:
-                    relative_video = str(run_result_video)
-                if run_result_preview:
-                    relative_preview = (
-                        str(Path(run_result_preview).relative_to(settings.storage_path))
-                        if run_result_preview.startswith(settings.storage_path)
-                        else str(run_result_preview)
-                    )
-                else:
-                    relative_preview = None
-
-                # Record runpod spend immediately (has its own cost tracking)
-                actual_cost = _as_decimal(estimated_cost)
-                if actual_cost:
-                    await router.budget_tracker.record_spend(provider_record.id, actual_cost)
             else:
-                raise ValueError(f"Unknown provider type: {provider_record.provider_type}")
+                # Direct API provider (AtlasCloud, Poe, etc.):
+                # Convert to scene-based pipeline and run through the
+                # dispatcher, which calls media_generator.generate_video()
+                # with proper VideoProvider interface routing.
+                from sqlalchemy import delete as sa_delete
+
+                from app.database import VideoScene
+                from app.workers.dispatcher import dispatch_stage
+
+                # Clear any stale scenes and mark as scene-based
+                job.workflow_type = "scene_based"
+                await db.execute(
+                    sa_delete(VideoScene).where(VideoScene.job_id == job_uuid)
+                )
+                await db.commit()
+
+                # Run pipeline stages sequentially: planning → images → videos → render
+                for stage in (
+                    "planning",
+                    "generating_images",
+                    "generating_videos",
+                    "rendering",
+                ):
+                    result = await dispatch_stage(job_id, stage)
+                    if result.get("status") == "failed":
+                        return {
+                            "status": "failed",
+                            "error": result.get(
+                                "error_message", f"Pipeline stage '{stage}' failed"
+                            ),
+                            "job_id": job_id,
+                            "stage": stage,
+                        }
+
+                # Reload job to pick up output_path / preview_path set by
+                # the rendering stage (which ran in a separate db session).
+                await db.refresh(job)
+                relative_video = job.output_path
+                relative_preview = job.preview_path
 
             # --- Record cost for all provider types -----------------------
             actual_cost = _as_decimal(estimated_cost)
@@ -1027,7 +944,7 @@ async def _sync_provider_models(provider_type: str) -> dict:
         total_deprecated = 0
 
         for provider in providers:
-            discovered = await _discover_provider_models(provider)
+            discovered = await _discover_models_via_registry(provider)
 
             service = ModelConfigService()
             discovered_ids = {m["model_id"] for m in discovered}
@@ -1074,166 +991,60 @@ async def _sync_provider_models(provider_type: str) -> dict:
     }
 
 
-# ------------------------------------------------------------------
-# Per-provider discovery helpers
-# ------------------------------------------------------------------
+async def _discover_models_via_registry(provider) -> list[dict]:
+    """Use the provider registry to discover models for any provider type.
 
-
-async def _discover_provider_models(provider) -> list[dict]:
-    """Route to the correct discovery strategy based on provider type."""
-    if provider.provider_type == "atlascloud":
-        return await _sync_atlascloud_models(provider)
-    elif provider.provider_type == "poe":
-        return await _sync_poe_models(provider)
-    elif provider.provider_type == "comfyui_direct":
-        return _sync_comfyui_models()
-    elif provider.provider_type == "ollama":
-        return await _sync_ollama_models(provider)
-    else:
-        logger.warning(
-            "[Sync] No model discovery for provider type '%s' (provider %s)",
-            provider.provider_type,
-            provider.id,
-        )
-        return []
-
-
-async def _sync_atlascloud_models(provider) -> list[dict]:
-    from app.services.model_normalizer import normalize_provider_model
-    from app.services.providers.atlascloud import AtlasCloudProvider
-
-    instance = AtlasCloudProvider(provider.id, provider.config)
-    try:
-        await instance.initialize(provider.config)
-        if not instance.client:
-            return []
-        resp = await instance.client.get(
-            "https://api.atlascloud.ai/api/v1/models",
-            headers={"Authorization": f"Bearer {instance.api_key}"},
-        )
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        models = data.get("data", [])
-        return [normalize_provider_model("atlascloud", m) for m in models]
-    except Exception:
-        return []
-    finally:
-        await instance.shutdown()
-
-
-async def _sync_poe_models(provider) -> list[dict]:
-    from app.services.model_normalizer import normalize_provider_model
-    from app.services.providers.poe import PoeProvider
-
-    instance = PoeProvider(provider.id, provider.config)
-    try:
-        await instance.initialize(provider.config)
-        if not instance.client:
-            return []
-        resp = await instance.client.get(
-            "https://api.poe.com/v1/models",
-            headers={"Authorization": f"Bearer {instance.api_key}"},
-        )
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        models = data.get("data", [])
-        return [normalize_provider_model("poe", m) for m in models]
-    except Exception:
-        return []
-    finally:
-        await instance.shutdown()
-
-
-def _sync_comfyui_models() -> list[dict]:
-    """Return the static ComfyUI model list from inline definitions.
-
-    Each entry is a dict ready for ModelConfig creation/update.
+    Creates a provider instance via the registry, checks if the provider
+    supports model sync, and delegates to its sync_models() method.
     """
-    _available_image_models = [
-        {
-            "id": "flux1-schnell",
-            "name": "FLUX.1-schnell",
-            "comfyui_workflow": "flux_image.json",
-            "capabilities": ["text-to-image"],
-        },
-        {
-            "id": "sdxl",
-            "name": "Stable Diffusion XL",
-            "comfyui_workflow": "sdxl_image.json",
-            "capabilities": ["text-to-image"],
-        },
-    ]
-    _available_video_models = [
-        {
-            "id": "wan2.2",
-            "name": "WAN 2.2",
-            "capabilities": ["text-to-video", "image-to-video", "scene-to-video"],
-        },
-        {"id": "ltx2.3", "name": "LTX 2.3", "capabilities": ["text-to-video", "image-to-video"]},
-        {"id": "ltx2.3-fast", "name": "LTX 2.3 Fast", "capabilities": ["text-to-video"]},
-    ]
-    discovered: list[dict] = []
+    from typing import Any, cast
 
-    for source_list, modality in (
-        (_available_image_models, "image"),
-        (_available_video_models, "video"),
-    ):
-        for m in source_list:
-            discovered.append(
-                {
-                    "model_id": m["id"],
-                    "provider_model_id": m["id"],
-                    "display_name": m["name"],
-                    "modality": modality,
-                    "endpoint_type": "comfyui",
-                    "comfyui_workflow": m.get("comfyui_workflow"),
-                    "capabilities": m.get("capabilities"),
-                    "cost_config": {
-                        "cost": 0,
-                        "currency": "USD",
-                        "note": "local_generation",
-                    },
-                    "is_deprecated": False,
-                    "is_active": True,
-                }
+    from app.services.providers import registry
+
+    instance: Any = None
+    try:
+        instance = await registry.create(
+            provider.provider_type, provider.id, provider.config
+        )
+        capabilities = cast(Any, instance).get_capabilities()
+
+        if not capabilities.supports_model_sync:
+            logger.debug(
+                "[Sync] Provider %s (%s) does not support model sync",
+                provider.name,
+                provider.provider_type,
             )
+            return []
 
-    return discovered
+        discovered = await cast(Any, instance).sync_models()
+        if not discovered:
+            logger.info(
+                "[Sync] No models discovered for provider %s",
+                provider.name,
+            )
+            return []
 
-
-async def _sync_ollama_models(provider) -> list[dict]:
-    """Fetch available models from the local Ollama instance.
-
-    Queries Ollama for installed models and returns ModelConfig-ready dicts.
-    """
-    from app.services.model_manager import ModelManager
-
-    mgr = ModelManager()
-    try:
-        models = await mgr.list_available_models()
+        return discovered
+    except NotImplementedError:
+        logger.debug(
+            "[Sync] Provider %s (%s) does not implement sync_models",
+            provider.name,
+            provider.provider_type,
+        )
+        return []
+    except Exception:
+        logger.warning(
+            "[Sync] Failed to discover models for provider %s",
+            provider.name,
+            exc_info=True,
+        )
+        return []
     finally:
-        await mgr.close()
-
-    return [
-        {
-            "model_id": name,
-            "provider_model_id": name,
-            "display_name": name.removesuffix(":latest"),
-            "modality": "text",
-            "endpoint_type": "chat_completions",
-            "capabilities": {"supports_chat": True},
-            "cost_config": {
-                "cost": 0,
-                "currency": "USD",
-                "note": "local_generation",
-            },
-            "is_deprecated": False,
-            "is_active": True,
-        }
-        for name in models
-    ]
+        if instance is not None and hasattr(instance, "shutdown"):
+            try:
+                await cast(Any, instance).shutdown()
+            except Exception:
+                pass
 
 
 # ======================================================================
@@ -1553,3 +1364,41 @@ async def _cleanup_old_notifications() -> dict:
             )
 
     return {"deleted": deleted}
+
+
+# ======================================================================
+# Task 14: sync_all_provider_models (dynamic beat schedule)
+# ======================================================================
+
+
+@celery_app.task(bind=True, time_limit=600)
+def sync_all_provider_models(self) -> dict:
+    """Query all active providers from DB and dispatch sync_provider_models for each type.
+
+    Replaces the previous approach of hardcoding per-provider beat schedule
+    entries. This single periodic task dynamically discovers which provider
+    types have active providers and dispatches individual sync tasks.
+    """
+    return ctx.run(_sync_all_provider_models())
+
+
+async def _sync_all_provider_models() -> dict:
+    from app.database import Provider
+
+    async with ctx.session_factory() as db:
+        result = await db.execute(
+            select(Provider.provider_type)
+            .distinct()
+            .where(Provider.is_active == True)  # noqa: E712
+        )
+        types = [row[0] for row in result.all()]
+
+    if not types:
+        logger.info("[SyncAll] No active providers found")
+        return {"dispatched": 0, "types": []}
+
+    for provider_type in types:
+        sync_provider_models.delay(provider_type)
+
+    logger.info("[SyncAll] Dispatched sync for %d provider types: %s", len(types), types)
+    return {"dispatched": len(types), "types": types}

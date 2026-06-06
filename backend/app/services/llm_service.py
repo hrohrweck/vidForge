@@ -4,7 +4,6 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID
 
 import httpx
 
@@ -31,16 +30,18 @@ class LLMChunk:
 
 
 async def resolve_llm(model_id: str, db=None) -> "LLMClient | Any":
-    """Resolve a model_id to the appropriate LLM client.
+    """Resolve a model_id to an LLM provider instance via the provider registry.
 
-    Looks up the model in model_configs to determine the provider.
-    Falls back to prefix matching for backward compatibility,
-    then to the default LLMClient (Ollama).
+    Looks up the model in model_configs to determine the provider,
+    creates an initialized instance via the registry, and verifies
+    it implements the LLMProvider interface.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
-    from app.database import ModelConfig, Provider
+    from app.database import ModelConfig
+    from app.services.providers import registry
+    from app.services.providers.base import LLMProvider
 
     try:
         if db is None:
@@ -60,101 +61,32 @@ async def resolve_llm(model_id: str, db=None) -> "LLMClient | Any":
         config = result.scalar_one_or_none()
         if config and config.provider:
             provider = config.provider
-            if provider.provider_type == "poe":
-                from app.services.providers import PoeProvider
-
-                instance = PoeProvider(provider.id, provider.config)
-                await instance.initialize(provider.config)
-                return instance
-            elif provider.provider_type == "atlascloud":
-                from app.services.providers import AtlasCloudProvider
-
-                instance = AtlasCloudProvider(provider.id, provider.config)
-                await instance.initialize(provider.config)
-                return instance
+            instance = await registry.create(
+                provider.provider_type, provider.id, provider.config
+            )
+            if not isinstance(instance, LLMProvider):
+                raise LLMError(
+                    f"Provider '{provider.provider_type}' does not support LLM operations"
+                )
+            return instance
+    except LLMError:
+        raise
     except Exception:
         logger.debug("Failed to resolve LLM via model_configs", exc_info=True)
 
-    if model_id.startswith("atlascloud:"):
-        try:
-            from app.services.providers import AtlasCloudProvider
-
-            if db is None:
-                from app.workers.context import ctx
-
-                async with ctx.session_factory() as db_session:
-                    result = await db_session.execute(
-                        select(Provider).where(
-                            Provider.provider_type == "atlascloud",
-                            Provider.is_active == True,  # noqa: E712
-                        )
-                    )
-                    for provider in result.scalars().all():
-                        try:
-                            instance = AtlasCloudProvider(provider.id, provider.config)
-                            await instance.initialize(provider.config)
-                            return instance
-                        except Exception:
-                            continue
-            else:
-                result = await db.execute(
-                    select(Provider).where(
-                        Provider.provider_type == "atlascloud",
-                        Provider.is_active == True,  # noqa: E712
-                    )
-                )
-                for provider in result.scalars().all():
-                    try:
-                        instance = AtlasCloudProvider(provider.id, provider.config)
-                        await instance.initialize(provider.config)
-                        return instance
-                    except Exception:
-                        continue
-        except Exception:
-            logger.debug("Failed to resolve atlascloud fallback", exc_info=True)
-
-    if model_id.startswith("poe:"):
-        try:
-            from app.services.providers import PoeProvider
-
-            if db is None:
-                from app.workers.context import ctx
-
-                async with ctx.session_factory() as db_session:
-                    result = await db_session.execute(
-                        select(Provider).where(
-                            Provider.provider_type == "poe",
-                            Provider.is_active == True,  # noqa: E712
-                        )
-                    )
-                    for provider in result.scalars().all():
-                        try:
-                            instance = PoeProvider(provider.id, provider.config)
-                            await instance.initialize(provider.config)
-                            return instance
-                        except Exception:
-                            continue
-            else:
-                result = await db.execute(
-                    select(Provider).where(
-                        Provider.provider_type == "poe",
-                        Provider.is_active == True,  # noqa: E712
-                    )
-                )
-                for provider in result.scalars().all():
-                    try:
-                        instance = PoeProvider(provider.id, provider.config)
-                        await instance.initialize(provider.config)
-                        return instance
-                    except Exception:
-                        continue
-        except Exception:
-            logger.debug("Failed to resolve poe fallback", exc_info=True)
-
+    # Fall back to default Ollama client for backward compatibility
     return LLMClient()
 
 
 class LLMClient:
+    """Legacy backward-compatible Ollama client wrapper.
+
+    For new code, use ``OllamaProvider`` via the provider registry.
+    This class is retained for existing callers that depend on its
+    convenience methods (``generate()``, ``generate_with_context()``,
+    ``chat_stream()`` with tool-call merging).
+    """
+
     def __init__(self, base_url: str | None = None, model: str | None = None):
         self.base_url = base_url or settings.ollama_url
         self.model = model or settings.llm_model or "qwen3.6:35b"
@@ -322,7 +254,6 @@ class LLMClient:
                 messages, provider, max_tokens, temperature, retries
             )
 
-        last_error: Exception | None = None
         for attempt in range(retries):
             try:
                 response = await self.client.post(
@@ -360,7 +291,6 @@ class LLMClient:
 
                 return content
             except Exception as e:
-                last_error = e
                 wait = 2**attempt
                 logger.warning(
                     "LLM request attempt %d/%d failed (wait=%ds): %s: %s",

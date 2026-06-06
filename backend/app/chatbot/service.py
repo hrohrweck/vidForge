@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot.mcp_client import MCPClientManager
 from app.chatbot.streaming import SSEEventType
 from app.chatbot.tools import ToolContext, ToolRegistry, create_builtin_registry, dispatch
-from app.database import ChatTokenUsage, Conversation, MCPServer, Message, ModelConfig, Provider
+from app.database import ChatTokenUsage, Conversation, MCPServer, Message, ModelConfig
 from app.services.llm_service import LLMClient
 from app.storage import get_storage_backend
 
@@ -305,14 +305,16 @@ class ChatOrchestrator:
         self.context_limit = context_limit or self.default_context_limit
         self.conversations = ConversationService(db)
 
-    async def _resolve_llm(self, model_id: str) -> ChatLLM:
+    async def _resolve_llm(self, model_id: str) -> Any:
         """Return the appropriate LLM client for the given model_id.
 
-        Looks up the model in model_configs to determine the provider.
-        Falls back to prefix matching for backward compatibility,
-        then to the default LLMClient (Ollama).
+        Looks up the model in model_configs to determine the provider,
+        then instantiates via the provider registry.
+        Falls back to the default LLMClient (Ollama).
         """
-        # First: look up model in model_configs to find provider
+        from app.services.providers import registry
+        from app.services.providers.base import LLMProvider
+
         try:
             from sqlalchemy.orm import selectinload
 
@@ -329,58 +331,14 @@ class ChatOrchestrator:
             config = result.scalar_one_or_none()
             if config and config.provider:
                 provider = config.provider
-                if provider.provider_type == "poe":
-                    from app.services.providers import PoeProvider
-                    instance = PoeProvider(provider.id, provider.config)
-                    await instance.initialize(provider.config)
-                    return instance
-                elif provider.provider_type == "atlascloud":
-                    from app.services.providers import AtlasCloudProvider
-                    instance = AtlasCloudProvider(provider.id, provider.config)
-                    await instance.initialize(provider.config)
+                instance = await registry.create(
+                    provider.provider_type, provider.id, provider.config,
+                )
+                if isinstance(instance, LLMProvider):
                     return instance
         except Exception:
             pass
 
-        # Fallback: prefix matching (backward compat)
-        if model_id.startswith("atlascloud:"):
-            try:
-                from app.services.providers import AtlasCloudProvider
-
-                result = await self.db.execute(
-                    select(Provider).where(
-                        Provider.provider_type == "atlascloud",
-                        Provider.is_active == True,  # noqa: E712
-                    )
-                )
-                for provider in result.scalars().all():
-                    try:
-                        instance = AtlasCloudProvider(provider.id, provider.config)
-                        await instance.initialize(provider.config)
-                        return instance
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-        if model_id.startswith("poe:"):
-            try:
-                from app.services.providers import PoeProvider
-
-                result = await self.db.execute(
-                    select(Provider).where(
-                        Provider.provider_type == "poe",
-                        Provider.is_active == True,  # noqa: E712
-                    )
-                )
-                for provider in result.scalars().all():
-                    try:
-                        instance = PoeProvider(provider.id, provider.config)
-                        await instance.initialize(provider.config)
-                        return instance
-                    except Exception:
-                        continue
-            except Exception:
-                pass
         return LLMClient()
 
     async def run_turn(
@@ -603,7 +561,7 @@ class ChatOrchestrator:
                         .where(ModelConfig.model_id == model_id, ModelConfig.is_active.is_(True))
                     )
                     config = result.scalar_one_or_none()
-                    is_poe = config is not None and config.provider is not None and config.provider.provider_type == "poe"
+                    is_poe = config is not None and config.provider is not None and "poe" in config.provider.provider_type
                 except Exception:
                     pass
             if is_poe:

@@ -23,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin import require_admin
 from app.api.auth import get_current_user
 from app.api.schemas.notifications import (
-    ErrorEventFilterParams,
     ErrorEventListResponse,
     ErrorEventResponse,
     MarkReadResponse,
@@ -81,7 +80,7 @@ async def list_notifications(
         unread_base_query = unread_base_query.where(ErrorEvent.severity.in_(severity))
     if origin:
         unread_base_query = unread_base_query.where(ErrorEvent.origin.in_(origin))
-    
+
     unread_query = select(func.count()).select_from(unread_base_query.subquery())
     unread_result = await db.execute(unread_query)
     unread_count = unread_result.scalar() or 0
