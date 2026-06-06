@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, Volume2, VolumeX } from 'lucide-react'
 import type { MediaAsset } from '../../api/types/media'
-import { getAssetUrl, getPreviewUrl } from '../../api/media'
+import { getAssetUrl } from '../../api/media'
 
 interface LightboxProps {
   assets: MediaAsset[]
@@ -55,7 +55,7 @@ export function Lightbox({
   if (!isOpen || !currentAsset) return null
 
   const isVideo = currentAsset.file_type === 'video'
-  const mediaUrl = isVideo ? getPreviewUrl(currentAsset.id) : getAssetUrl(currentAsset)
+  const mediaUrl = getAssetUrl(currentAsset)
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center">
