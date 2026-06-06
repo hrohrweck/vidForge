@@ -244,7 +244,7 @@ export default function SceneEditor() {
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div className="container mx-auto p-6">
+    <div className="h-full overflow-y-auto px-[10px] py-4">
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <Button variant="ghost" onClick={() => window.history.back()}>
@@ -305,7 +305,7 @@ export default function SceneEditor() {
                 {index < WORKFLOW_STAGES.length - 1 && (
                   <div
                     className={`w-8 h-0.5 mx-1 ${
-                      index < currentIndex ? 'bg-green-500' : 'bg-muted'
+                      isActive ? 'bg-primary' : 'bg-muted'
                     }`}
                   />
                 )}
@@ -315,9 +315,9 @@ export default function SceneEditor() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[4fr_1fr] gap-6">
         {/* Main content area */}
-        <div className={cn("lg:col-span-3 space-y-6", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
+        <div className={cn("space-y-6", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
           {isPlanningStage() ? (
             /* Planning phase: delegate to plugin-specific panel */
             renderPlanningPanel(resolvedPluginId)
@@ -570,7 +570,7 @@ export default function SceneEditor() {
         </div>
 
         {/* Sidebar: plugin-specific panel */}
-        <div className={cn("space-y-4", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
+        <div className={cn("space-y-4 overflow-y-auto max-h-full", (isRegenerating || isOperationInProgress) && "pointer-events-none opacity-50")}>
           {resolvedPluginId === 'music_video' && (
             <MusicVideoPanel job={job} jobId={jobId!} scenes={scenes} />
           )}

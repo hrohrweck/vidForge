@@ -78,7 +78,7 @@ export default function Layout() {
   const { user, logout } = useAuthStore()
   const location = useLocation()
   const isChatPage = location.pathname === '/chat'
-  const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/')
+  const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/') || location.pathname.startsWith('/editor/')
   const navEntries = getNavEntries(user?.is_superuser || false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
