@@ -67,6 +67,16 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
         "distilled": constraints.get("distilled", False),
         "resolutions": constraints.get("resolutions"),
         "size_param_family": constraints.get("size_param_family"),
+        "constraints": {
+            "supported_aspect_ratios": constraints.get("supported_aspect_ratios"),
+            "requires_aspect_ratio": constraints.get("requires_aspect_ratio"),
+            "size_param_family": constraints.get("size_param_family"),
+            "resolutions": constraints.get("resolutions"),
+            "max_duration": constraints.get("max_duration"),
+            "max_resolution": constraints.get("max_resolution"),
+            "default_steps": constraints.get("default_steps"),
+            "distilled": constraints.get("distilled", False),
+        },
         "description": (m.extra_params or {}).get("description"),
         "cost_config": cost_config,
         "is_family": is_family_id(m.model_id),
@@ -351,6 +361,7 @@ async def list_models(
             "max_resolution": m["max_resolution"],
             "default_steps": m["default_steps"],
             "distilled": m["distilled"],
+            "constraints": m.get("constraints"),
             "description": m["description"],
         }
         for m in models
@@ -371,6 +382,7 @@ async def get_models_by_capability_endpoint(
             "provider": m["provider"],
             "modality": m["modality"],
             "capabilities": m["capabilities"],
+            "constraints": m.get("constraints"),
         }
         for m in models
     ]
@@ -397,6 +409,7 @@ async def get_model_details(
         "max_resolution": model["max_resolution"],
         "default_steps": model["default_steps"],
         "distilled": model["distilled"],
+        "constraints": model.get("constraints"),
         "description": model["description"],
         "is_family": model.get("is_family", False),
         "variants": model.get("variants", {}),
