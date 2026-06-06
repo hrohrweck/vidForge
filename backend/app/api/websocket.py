@@ -241,6 +241,45 @@ class ConnectionManager:
         finally:
             await pubsub.unsubscribe("notifications:admin")
 
+    async def get_next_media_seq(self, user_id: str) -> int:
+        r = await self.get_redis()
+        return await r.incr(f"media:seq:{user_id}")
+
+    async def broadcast_media_event(self, user_id: str, payload: dict) -> None:
+        message = json.dumps(payload)
+        try:
+            r = await self.get_redis()
+            await r.publish(f"media:user:{user_id}", message)
+        except Exception:
+            logger.warning(
+                "Failed to publish media event to Redis for user %s",
+                user_id,
+                exc_info=True,
+            )
+
+        if user_id in self.user_connections:
+            disconnected = set()
+            for connection in self.user_connections[user_id]:
+                try:
+                    await connection.send_text(message)
+                except Exception:
+                    disconnected.add(connection)
+            for conn in disconnected:
+                self.disconnect_user(conn, user_id)
+
+    async def subscribe_to_media_events(self, user_id: str, websocket: WebSocket) -> None:
+        r = await self.get_redis()
+        pubsub = r.pubsub()
+        await pubsub.subscribe(f"media:user:{user_id}")
+        try:
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        await websocket.send_text(message["data"])
+                    except Exception:
+                        break
+        finally:
+            await pubsub.unsubscribe(f"media:user:{user_id}")
 
 
 manager = ConnectionManager()

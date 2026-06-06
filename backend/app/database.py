@@ -250,6 +250,9 @@ class User(Base):
     error_events: Mapped[list["ErrorEvent"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    media_events: Mapped[list["MediaEvent"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSettings(Base):
@@ -400,6 +403,27 @@ class ErrorEvent(Base):
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="error_events")
+
+
+class MediaEvent(Base):
+    __tablename__ = "media_events"
+    __table_args__ = (
+        Index("ix_media_events_user_seq", "user_id", "seq"),
+        Index("ix_media_events_user_created", "user_id", desc("created_at")),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    asset_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="media_events")
 
 
 class Template(Base):

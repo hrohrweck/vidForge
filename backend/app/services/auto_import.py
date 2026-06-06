@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.media import MediaAsset, MediaFolder
+from app.services.media_events import record_and_publish_media_event
 from app.services.media_metadata import probe_audio, probe_image, probe_video
 from app.services.preview_generator import extract_first_frame
 
@@ -137,6 +138,16 @@ async def auto_import_job_outputs(
                 )
                 if asset:
                     created_assets.append(asset)
+
+    if created_assets:
+        await db.commit()
+        for asset in created_assets:
+            await record_and_publish_media_event(
+                db=db,
+                user_id=user_id,
+                event_type="created",
+                asset_id=asset.id,
+            )
 
     logger.info(f"Auto-imported {len(created_assets)} assets for job {job_id}")
     return created_assets

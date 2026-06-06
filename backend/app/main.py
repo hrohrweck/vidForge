@@ -205,3 +205,25 @@ async def websocket_notifications(websocket: WebSocket, token: str | None = None
             subscribe_task.cancel()
     finally:
         ws_manager.disconnect_user(websocket, str(user.id))
+
+
+@app.websocket("/ws/media")
+async def websocket_media_events(websocket: WebSocket, token: str | None = None) -> None:
+    user = await authenticate_websocket(websocket, token)
+    if user is None:
+        await websocket.close(code=1008)
+        return
+    await ws_manager.connect_user(websocket, str(user.id))
+    try:
+        subscribe_task = asyncio.create_task(
+            ws_manager.subscribe_to_media_events(str(user.id), websocket)
+        )
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            subscribe_task.cancel()
+    finally:
+        ws_manager.disconnect_user(websocket, str(user.id))

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Template, VideoScene
 from app.plugins.registry import get_plugin, get_plugin_for_template
+from app.services.media_events import record_and_publish_media_event
 from app.workers.context import ctx
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 render_result = await plugin.render(db, job, scenes, context)
 
                 # Create MediaAssets for the final output
+                final_asset = None
                 try:
                     from app.services.auto_import import (
                         _create_asset_from_file,
@@ -172,7 +174,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                                 user_id=job.user_id, name="Final Exports",
                                 parent_id=None, db=db,
                             )
-                            await _create_asset_from_file(
+                            final_asset = await _create_asset_from_file(
                                 user_id=job.user_id, folder_id=folder.id,
                                 name=job.title,
                                 file_path=final_path, file_type="video",
@@ -191,6 +193,14 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 from datetime import datetime
                 job.completed_at = datetime.utcnow()
                 await db.commit()
+
+                if final_asset:
+                    await record_and_publish_media_event(
+                        db=db,
+                        user_id=job.user_id,
+                        event_type="created",
+                        asset_id=final_asset.id,
+                    )
 
                 from app.workers.tasks import _post_completion_message
 
