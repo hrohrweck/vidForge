@@ -58,6 +58,67 @@ class VideoProcessor:
         info = await VideoProcessor.get_video_info(video_path)
         return float(info.get("format", {}).get("duration", 0))
 
+
+    @staticmethod
+    async def pad_to_aspect_ratio(
+        input_path: str,
+        output_path: str,
+        target_aspect: str,
+    ) -> str:
+        """Pad video with black bars to match target aspect ratio."""
+        try:
+            w_str, h_str = target_aspect.split(':')
+            target_ratio = float(w_str) / float(h_str)
+        except ValueError:
+            raise ValueError(f"Invalid target aspect ratio: {target_aspect}")
+
+        info = await VideoProcessor.get_video_info(input_path)
+        streams = info.get("streams", [])
+        video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+        if not video_stream:
+            raise ValueError(f"No video stream found in {input_path}")
+
+        actual_w = float(video_stream.get("width", 0))
+        actual_h = float(video_stream.get("height", 0))
+        if actual_w == 0 or actual_h == 0:
+            raise ValueError(f"Invalid video dimensions in {input_path}")
+
+        actual_ratio = actual_w / actual_h
+
+        if abs(actual_ratio - target_ratio) <= 0.02:
+            shutil.copy(input_path, output_path)
+            return output_path
+
+        if actual_ratio > target_ratio:
+            new_w = int(actual_w)
+            new_h = int(actual_w / target_ratio)
+        else:
+            new_h = int(actual_h)
+            new_w = int(actual_h * target_ratio)
+
+        new_w = new_w if new_w % 2 == 0 else new_w + 1
+        new_h = new_h if new_h % 2 == 0 else new_h + 1
+
+        cmd = [
+            "ffmpeg",
+            "-i", input_path,
+            "-vf", f"scale={int(actual_w)}:{int(actual_h)},pad={new_w}:{new_h}:(ow-iw)/2:(oh-ih)/2:black",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "copy",
+            "-y", str(Path(output_path).resolve()),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg pad_to_aspect_ratio failed: {stderr.decode() if stderr else 'Unknown error'}")
+        return output_path
+
     @staticmethod
     async def generate_preview(
         input_path: str,
