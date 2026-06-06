@@ -244,9 +244,9 @@ export interface CreateJobRequest {
   project_id?: string
   input_data?: Record<string, unknown> & {
     avatars?: Array<{
-      avatarId: string
+      avatar_id: string
       role?: string
-      consistencyStrategyOverride?: string
+      consistency_strategy_override?: string
     }>
   }
   auto_start?: boolean

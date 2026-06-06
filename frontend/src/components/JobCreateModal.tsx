@@ -193,7 +193,11 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         text_model: selectedTextModel,
         image_model: selectedImageModel,
         video_model: selectedVideoModel,
-        avatars: selectedAvatars,
+        avatars: selectedAvatars.map((a) => ({
+          avatar_id: a.avatarId,
+          role: a.role,
+          consistency_strategy_override: a.consistencyStrategyOverride,
+        })),
       },
     })
   }
