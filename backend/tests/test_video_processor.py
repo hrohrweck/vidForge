@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -135,3 +136,61 @@ class TestValidateVideoOutput:
         # 3.9s * 16fps = 62.4 frames, which is 78% of 80 — below threshold
         assert result.actual_frames < 64
         assert "expected ~80" in result.error_message
+
+@pytest.mark.asyncio
+async def test_pad_to_aspect_ratio_no_padding_needed(tmp_path):
+    # Create a dummy 16:9 video
+    input_path = tmp_path / "input.mp4"
+    output_path = tmp_path / "output.mp4"
+
+    # Create a 16:9 video (1280x720)
+    cmd = [
+        "ffmpeg", "-f", "lavfi", "-i", "color=c=black:s=1280x720:d=1",
+        "-c:v", "libx264", "-y", str(input_path)
+    ]
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    await proc.communicate()
+
+    # Pad to 16:9
+    result = await VideoProcessor.pad_to_aspect_ratio(str(input_path), str(output_path), "16:9")
+
+    # Should just copy the file
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    # Check dimensions
+    info = await VideoProcessor.get_video_info(str(output_path))
+    video_stream = next(s for s in info["streams"] if s["codec_type"] == "video")
+    assert video_stream["width"] == 1280
+    assert video_stream["height"] == 720
+
+@pytest.mark.asyncio
+async def test_pad_to_aspect_ratio_needs_padding(tmp_path):
+    # Create a dummy 9:16 video
+    input_path = tmp_path / "input.mp4"
+    output_path = tmp_path / "output.mp4"
+
+    # Create a 9:16 video (720x1280)
+    cmd = [
+        "ffmpeg", "-f", "lavfi", "-i", "color=c=black:s=720x1280:d=1",
+        "-c:v", "libx264", "-y", str(input_path)
+    ]
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    await proc.communicate()
+
+    # Pad to 16:9
+    result = await VideoProcessor.pad_to_aspect_ratio(str(input_path), str(output_path), "16:9")
+
+    assert result == str(output_path)
+    assert output_path.exists()
+
+    # Check dimensions
+    info = await VideoProcessor.get_video_info(str(output_path))
+    video_stream = next(s for s in info["streams"] if s["codec_type"] == "video")
+
+    # Original is 720x1280 (ratio 0.5625)
+    # Target is 16:9 (ratio 1.777)
+    # Since actual < target, we pad width: new_w = 1280 * 16/9 = 2275.5 -> 2276
+    # new_h = 1280
+    assert video_stream["width"] == 2276
+    assert video_stream["height"] == 1280
