@@ -9,46 +9,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, require_admin
-from app.database import AtlasCloudModel, PoeModel, Provider, User, get_db
+from app.database import ModelConfig, Provider, User, get_db
 from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
+from app.services.model_config_service import ModelConfigService
+from app.services.providers import registry
 from app.services.worker_registry import WorkerRegistry
 
 router = APIRouter(tags=["providers"])
 
 
-class ProviderConfigBase(BaseModel):
-    pass
-
-
-class ComfyUIDirectProviderConfig(ProviderConfigBase):
-    comfyui_url: str
-    max_concurrent_jobs: int = 1
-
-
-class RunPodProviderConfig(ProviderConfigBase):
-    api_key: str
-    endpoint_id: str
-    cost_per_gpu_hour: float = 0.69
-    idle_timeout_seconds: int = 30
-    flashboot_enabled: bool = True
-    max_workers: int = 3
-
-
-class AtlasCloudProviderConfig(ProviderConfigBase):
-    api_key: str | None = None
-
-
-class PoeProviderConfig(ProviderConfigBase):
-    api_key: str
-    max_concurrent_jobs: int = 1
-    default_video_model: str = "Veo-3.1"
-    default_image_model: str = "GPT-Image-1"
+# ── Provider Schemas ──────────────────────────────────────────────
 
 
 class ProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    provider_type: str = Field(..., pattern="^(comfyui_direct|runpod|poe|atlascloud)$")
+    provider_type: str = Field(..., min_length=1)
     config: dict[str, Any]
     daily_budget_limit: float | None = None
     priority: int = 0
@@ -101,6 +77,69 @@ class WorkerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ── Model Schemas ─────────────────────────────────────────────────
+
+
+class ModelConfigCreate(BaseModel):
+    """Schema for creating a model configuration entry."""
+    model_id: str = Field(..., min_length=1, max_length=255)
+    provider_model_id: str = Field(..., min_length=1, max_length=200)
+    display_name: str = Field(..., min_length=1, max_length=200)
+    modality: str = Field(..., pattern=r"^(video|image|text)$")
+    endpoint_type: str = Field(default="comfyui")
+    prompt_format: str = Field(default="string")
+    parameter_map: dict | None = None
+    extra_params: dict | None = None
+    capabilities: dict | None = None
+    constraints: dict | None = None
+    cost_config: dict | None = None
+    comfyui_workflow: str | None = None
+    is_active: bool = True
+
+
+class ModelConfigUpdate(BaseModel):
+    """Schema for updating a model configuration entry."""
+    model_id: str | None = Field(None, min_length=1, max_length=255)
+    provider_model_id: str | None = Field(None, min_length=1, max_length=200)
+    display_name: str | None = None
+    modality: str | None = Field(None, pattern=r"^(video|image|text)$")
+    endpoint_type: str | None = None
+    prompt_format: str | None = None
+    parameter_map: dict | None = None
+    extra_params: dict | None = None
+    capabilities: dict | None = None
+    constraints: dict | None = None
+    cost_config: dict | None = None
+    comfyui_workflow: str | None = None
+    is_active: bool | None = None
+
+
+class ModelConfigResponse(BaseModel):
+    id: UUID
+    provider_id: UUID
+    model_id: str
+    provider_model_id: str
+    display_name: str
+    modality: str
+    endpoint_type: str
+    prompt_format: str
+    is_active: bool
+    is_deprecated: bool
+    last_synced_at: datetime | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SyncModelsResponse(BaseModel):
+    provider_id: UUID
+    synced_count: int
+    models: list[ModelConfigResponse]
+
+
+# ── Provider Status ───────────────────────────────────────────────
+
+
 @router.get("/status", response_model=list[ProviderStatusResponse])
 async def list_providers_status(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
@@ -134,6 +173,9 @@ async def list_providers_status(
     return response
 
 
+# ── Provider CRUD ─────────────────────────────────────────────────
+
+
 @router.get("", response_model=list[ProviderResponse])
 async def list_providers(
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
@@ -150,20 +192,17 @@ async def create_provider(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Provider with this name already exists")
 
-    config = data.config
-    if data.provider_type == "comfyui_direct":
-        ComfyUIDirectProviderConfig(**config)
-    elif data.provider_type == "runpod":
-        RunPodProviderConfig(**config)
-    elif data.provider_type == "atlascloud":
-        AtlasCloudProviderConfig(**config)
-    elif data.provider_type == "poe":
-        PoeProviderConfig(**config)
+    # Validate provider_type against the registry
+    if not registry.has(data.provider_type):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown provider type: {data.provider_type}",
+        )
 
     provider = Provider(
         name=data.name,
         provider_type=data.provider_type,
-        config=config,
+        config=data.config,
         daily_budget_limit=Decimal(str(data.daily_budget_limit))
         if data.daily_budget_limit
         else None,
@@ -233,6 +272,9 @@ async def delete_provider(
     return {"status": "deleted"}
 
 
+# ── Provider Status & Workers ──────────────────────────────────────
+
+
 @router.get("/{provider_id}/status", response_model=ProviderStatusResponse)
 async def get_provider_status(
     provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
@@ -243,9 +285,9 @@ async def get_provider_status(
         raise HTTPException(status_code=404, detail="Provider not found")
 
     router = JobRouter(db)
-    registry = WorkerRegistry(db)
+    registry_ = WorkerRegistry(db)
     status = await router.get_provider_status(provider_id)
-    worker_count = await registry.get_worker_count(provider_id)
+    worker_count = await registry_.get_worker_count(provider_id)
 
     return ProviderStatusResponse(
         id=provider.id,
@@ -266,9 +308,12 @@ async def get_provider_status(
 async def list_provider_workers(
     provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
-    registry = WorkerRegistry(db)
-    workers = await registry.get_all_workers(provider_id)
+    registry_ = WorkerRegistry(db)
+    workers = await registry_.get_all_workers(provider_id)
     return workers
+
+
+# ── Budget ────────────────────────────────────────────────────────
 
 
 @router.patch("/{provider_id}/budget")
@@ -299,282 +344,147 @@ async def reset_provider_spend(
     return {"status": "reset"}
 
 
-@router.get("/{provider_id}/models")
-async def get_provider_models(
+# ── Generic Model CRUD ────────────────────────────────────────────
+
+
+@router.get("/{provider_id}/models", response_model=list[ModelConfigResponse])
+async def list_provider_models(
+    provider_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List all model configurations for a provider."""
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return await ModelConfigService.list_by_provider(db, provider_id, active_only=False)
+
+
+@router.post("/{provider_id}/models", response_model=ModelConfigResponse)
+async def create_provider_model(
+    provider_id: UUID,
+    data: ModelConfigCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Create or update a model configuration for a provider."""
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    create_data = data.model_dump()
+    create_data["provider_id"] = provider_id
+    config = await ModelConfigService.get_or_create(
+        db, provider_id, data.model_id, create_data
+    )
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+@router.patch("/{provider_id}/models/{model_id}", response_model=ModelConfigResponse)
+async def update_provider_model(
+    provider_id: UUID,
+    model_id: UUID,
+    data: ModelConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Update a model configuration entry."""
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.id == model_id,
+            ModelConfig.provider_id == provider_id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+@router.delete("/{provider_id}/models/{model_id}")
+async def delete_provider_model(
+    provider_id: UUID,
+    model_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Soft-delete a model configuration entry."""
+    result = await db.execute(select(Provider).where(Provider.id == provider_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.id == model_id,
+            ModelConfig.provider_id == provider_id,
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    config.is_active = False
+    await db.commit()
+    return {"status": "deleted"}
+
+
+# ── Model Sync ────────────────────────────────────────────────────
+
+
+@router.post("/{provider_id}/sync-models", response_model=SyncModelsResponse)
+async def sync_provider_models(
     provider_id: UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
+    """Synchronize live provider models into local ModelConfig entries."""
     result = await db.execute(select(Provider).where(Provider.id == provider_id))
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    if provider.provider_type != "poe":
-        raise HTTPException(status_code=400, detail="Model discovery only available for Poe providers")
-
-    from app.services.providers.poe import PoeProvider
-
-    poe = PoeProvider(provider.id, provider.config)
-    await poe.initialize(provider.config)
-
-    video_models = poe.get_video_models()
-    image_models = poe.get_image_models()
-    text_models = poe.get_text_models()
-
-    await poe.shutdown()
-
-    return {
-        "video_models": [
-            {
-                "id": m["id"],
-                "description": m.get("description", ""),
-                "modality": m.get("architecture", {}).get("modality", ""),
-            }
-            for m in video_models
-        ],
-        "image_models": [
-            {
-                "id": m["id"],
-                "description": m.get("description", ""),
-                "modality": m.get("architecture", {}).get("modality", ""),
-            }
-            for m in image_models
-        ],
-        "text_models": [
-            {
-                "id": m["id"],
-                "description": m.get("description", ""),
-                "modality": m.get("architecture", {}).get("modality", ""),
-            }
-            for m in text_models
-        ],
-    }
-
-
-class PoeModelCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
-    model_id: str = Field(..., min_length=1, max_length=255)
-    modality: str = Field(..., pattern="^(video|image|text)$")
-
-
-class PoeModelUpdate(BaseModel):
-    name: str | None = None
-    model_id: str | None = None
-    modality: str | None = Field(None, pattern="^(video|image|text)$")
-    is_active: bool | None = None
-
-
-class PoeModelResponse(BaseModel):
-    id: UUID
-    provider_id: UUID
-    name: str
-    model_id: str
-    modality: str
-    is_active: bool
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-@router.get("/{provider_id}/poe-models", response_model=list[PoeModelResponse])
-async def list_poe_models(
-    provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(select(PoeModel).where(PoeModel.provider_id == provider_id))
-    return result.scalars().all()
-
-
-@router.post("/{provider_id}/poe-models", response_model=PoeModelResponse)
-async def create_poe_model(
-    provider_id: UUID,
-    data: PoeModelCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(select(Provider).where(Provider.id == provider_id))
-    provider = result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
-    if provider.provider_type != "poe":
-        raise HTTPException(status_code=400, detail="Poe models only available for Poe providers")
-
-    poe_model = PoeModel(
-        provider_id=provider_id,
-        name=data.name,
-        model_id=data.model_id,
-        modality=data.modality,
+    instance = await registry.create(
+        provider.provider_type, provider.id, provider.config
     )
-    db.add(poe_model)
-    await db.commit()
-    await db.refresh(poe_model)
-    return poe_model
-
-
-@router.patch("/{provider_id}/poe-models/{model_id}", response_model=PoeModelResponse)
-async def update_poe_model(
-    provider_id: UUID,
-    model_id: UUID,
-    data: PoeModelUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(
-        select(PoeModel).where(PoeModel.id == model_id, PoeModel.provider_id == provider_id)
-    )
-    poe_model = result.scalar_one_or_none()
-    if not poe_model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    if data.name is not None:
-        poe_model.name = data.name
-    if data.model_id is not None:
-        poe_model.model_id = data.model_id
-    if data.modality is not None:
-        poe_model.modality = data.modality
-    if data.is_active is not None:
-        poe_model.is_active = data.is_active
-
-    await db.commit()
-    await db.refresh(poe_model)
-    return poe_model
-
-
-@router.delete("/{provider_id}/poe-models/{model_id}")
-async def delete_poe_model(
-    provider_id: UUID,
-    model_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(
-        select(PoeModel).where(PoeModel.id == model_id, PoeModel.provider_id == provider_id)
-    )
-    poe_model = result.scalar_one_or_none()
-    if not poe_model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    await db.delete(poe_model)
-    await db.commit()
-    return {"status": "deleted"}
-
-
-# ── AtlasCloud Models ────────────────────────────────────────────
-
-class AtlasCloudModelCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
-    model_id: str = Field(..., min_length=1, max_length=255)
-    modality: str = Field(..., pattern="^(video|image|text)$")
-
-
-class AtlasCloudModelUpdate(BaseModel):
-    name: str | None = None
-    model_id: str | None = None
-    modality: str | None = Field(None, pattern="^(video|image|text)$")
-    is_active: bool | None = None
-
-
-class AtlasCloudModelResponse(BaseModel):
-    id: UUID
-    provider_id: UUID
-    name: str
-    model_id: str
-    modality: str
-    is_active: bool
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-@router.get("/{provider_id}/atlascloud-models", response_model=list[AtlasCloudModelResponse])
-async def list_atlascloud_models(
-    provider_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(
-        select(AtlasCloudModel).where(AtlasCloudModel.provider_id == provider_id)
-    )
-    return result.scalars().all()
-
-
-@router.post("/{provider_id}/atlascloud-models", response_model=AtlasCloudModelResponse)
-async def create_atlascloud_model(
-    provider_id: UUID,
-    data: AtlasCloudModelCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(select(Provider).where(Provider.id == provider_id))
-    provider = result.scalar_one_or_none()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider not found")
-    if provider.provider_type != "atlascloud":
+    try:
+        models = await instance.sync_models()  # type: ignore[attr-defined]
+    except NotImplementedError:
         raise HTTPException(
-            status_code=400, detail="AtlasCloud models only available for AtlasCloud providers"
+            status_code=400,
+            detail=f"Provider type '{provider.provider_type}' does not support model sync",
         )
+    finally:
+        await instance.shutdown()
 
-    model = AtlasCloudModel(
+    # Persist synced models via ModelConfigService
+    synced: list[ModelConfig] = []
+    for model_data in models:
+        model_id = model_data.get("model_id", model_data.get("id", ""))
+        if not model_id:
+            continue
+        config = await ModelConfigService.get_or_create(
+            db, provider_id, model_id, model_data
+        )
+        synced.append(config)
+
+    await db.commit()
+    return SyncModelsResponse(
         provider_id=provider_id,
-        name=data.name,
-        model_id=data.model_id,
-        modality=data.modality,
+        synced_count=len(synced),
+        models=[ModelConfigResponse.model_validate(c) for c in synced],
     )
-    db.add(model)
-    await db.commit()
-    await db.refresh(model)
-    return model
-
-
-@router.patch("/{provider_id}/atlascloud-models/{model_id}", response_model=AtlasCloudModelResponse)
-async def update_atlascloud_model(
-    provider_id: UUID,
-    model_id: UUID,
-    data: AtlasCloudModelUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(
-        select(AtlasCloudModel).where(
-            AtlasCloudModel.id == model_id, AtlasCloudModel.provider_id == provider_id
-        )
-    )
-    model = result.scalar_one_or_none()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    if data.name is not None:
-        model.name = data.name
-    if data.model_id is not None:
-        model.model_id = data.model_id
-    if data.modality is not None:
-        model.modality = data.modality
-    if data.is_active is not None:
-        model.is_active = data.is_active
-
-    await db.commit()
-    await db.refresh(model)
-    return model
-
-
-@router.delete("/{provider_id}/atlascloud-models/{model_id}")
-async def delete_atlascloud_model(
-    provider_id: UUID,
-    model_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    result = await db.execute(
-        select(AtlasCloudModel).where(
-            AtlasCloudModel.id == model_id, AtlasCloudModel.provider_id == provider_id
-        )
-    )
-    model = result.scalar_one_or_none()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    await db.delete(model)
-    await db.commit()
-    return {"status": "deleted"}

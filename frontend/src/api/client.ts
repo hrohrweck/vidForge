@@ -178,7 +178,7 @@ export interface ProviderStatus {
   current_daily_spend: number
 }
 
-export interface PoeModel {
+export interface ProviderModel {
   id: string
   provider_id: string
   name: string
@@ -188,13 +188,13 @@ export interface PoeModel {
   created_at: string
 }
 
-export interface PoeModelCreate {
+export interface ProviderModelCreate {
   name: string
   model_id: string
   modality: 'video' | 'image' | 'text'
 }
 
-export interface PoeModelUpdate {
+export interface ProviderModelUpdate {
   name?: string
   model_id?: string
   modality?: 'video' | 'image' | 'text'
@@ -425,37 +425,21 @@ export const providersApi = {
     )
     return response.data
   },
-  listPoeModels: async (providerId: string) => {
-    const response = await api.get<PoeModel[]>(`/providers/${providerId}/poe-models`)
+  // Generic provider model management (unified /models endpoint)
+  listProviderModels: async (providerId: string) => {
+    const response = await api.get<ProviderModel[]>(`/providers/${providerId}/models`)
     return response.data
   },
-  createPoeModel: async (providerId: string, data: PoeModelCreate) => {
-    const response = await api.post<PoeModel>(`/providers/${providerId}/poe-models`, data)
+  createProviderModel: async (providerId: string, data: ProviderModelCreate) => {
+    const response = await api.post<ProviderModel>(`/providers/${providerId}/models`, data)
     return response.data
   },
-  updatePoeModel: async (providerId: string, modelId: string, data: PoeModelUpdate) => {
-    const response = await api.patch<PoeModel>(`/providers/${providerId}/poe-models/${modelId}`, data)
+  updateProviderModel: async (providerId: string, modelId: string, data: ProviderModelUpdate) => {
+    const response = await api.patch<ProviderModel>(`/providers/${providerId}/models/${modelId}`, data)
     return response.data
   },
-  deletePoeModel: async (providerId: string, modelId: string) => {
-    await api.delete(`/providers/${providerId}/poe-models/${modelId}`)
-  },
-
-  // AtlasCloud Models
-  listAtlasCloudModels: async (providerId: string) => {
-    const response = await api.get<PoeModel[]>(`/providers/${providerId}/atlascloud-models`)
-    return response.data
-  },
-  createAtlasCloudModel: async (providerId: string, data: PoeModelCreate) => {
-    const response = await api.post<PoeModel>(`/providers/${providerId}/atlascloud-models`, data)
-    return response.data
-  },
-  updateAtlasCloudModel: async (providerId: string, modelId: string, data: PoeModelUpdate) => {
-    const response = await api.patch<PoeModel>(`/providers/${providerId}/atlascloud-models/${modelId}`, data)
-    return response.data
-  },
-  deleteAtlasCloudModel: async (providerId: string, modelId: string) => {
-    await api.delete(`/providers/${providerId}/atlascloud-models/${modelId}`)
+  deleteProviderModel: async (providerId: string, modelId: string) => {
+    await api.delete(`/providers/${providerId}/models/${modelId}`)
   },
 }
 
