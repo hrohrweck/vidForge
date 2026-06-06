@@ -14,7 +14,7 @@ LLM, rendering) and the plugins provide template-specific behavior.
 │  Core System                                        │
 │  • Model config (image, video, text models)         │
 │  • Scene CRUD (API + DB)                            │
-│  • Media generation (ComfyUI, Poe providers)        │
+│  • Media generation (capability-based provider interfaces)        │
 │  • Video rendering (FFmpeg merge, audio mix)        │
 │  • Job lifecycle (dispatcher → plugin stages)       │
 │  • Storage backends (local, S3, SSH)                │

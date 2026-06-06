@@ -84,8 +84,12 @@ class ModelConfig(Base):
     constraints: dict | None      # max_duration, max_resolution, resolutions, size_param_family, etc.
     cost_config: dict | None      # Cost metadata
     comfyui_workflow: str | None  # Workflow file name (for ComfyUI providers)
+    extra_config: dict | None     # Provider-specific metadata (was in separate per-provider tables)
     is_active: bool
     is_deprecated: bool
+    last_synced_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 ```
 
 Unique constraint: `(provider_id, model_id)`.
@@ -249,42 +253,57 @@ _FAMILY_VARIANT_MAP = {
 
 ### Normalization
 
-`model_normalizer.py` converts raw provider API responses into standard `model_configs` dicts.
+Each provider is responsible for normalizing its own models. The provider class implements a `sync_models()` method that returns a list of normalized model dicts. This replaces the old centralized approach where a separate `model_normalizer.py` handled per-provider normalization.
 
-Each supported provider has a `_normalize_{type}()` function that extracts:
-- `model_id` — canonical ID
-- `provider_model_id` — provider's native ID
-- `display_name` — human-readable name
-- `modality` — image/video/text
-- `endpoint_type` — API endpoint category
-- `capabilities` — input/output flags
-- `cost_config` — pricing metadata
+```python
+class YourProvider(ProviderBase, ImageProvider):
+    async def sync_models(self) -> list[dict]:
+        # Fetch models from provider API
+        raw_models = await self._fetch_model_list()
+        # Normalize each model into a standard dict
+        return [
+            {
+                "model_id": canonical_id,
+                "provider_model_id": provider_native_id,
+                "display_name": friendly_name,
+                "modality": inferred_modality,
+                "endpoint_type": endpoint_category,
+                "capabilities": {...},
+                "cost_config": {...},
+            }
+            for raw in raw_models
+        ]
+```
 
 **Example: AtlasCloud normalization**
 
-AtlasCloud model IDs follow the pattern `{provider}/{family}/{task-type}` (e.g., `"kling/text-to-video"`). The normalizer parses the task-type suffix to infer capabilities:
+AtlasCloud model IDs follow the pattern `{provider}/{family}/{task-type}` (e.g., `"kling/text-to-video"`). The provider's `sync_models()` method parses the task-type suffix to infer capabilities:
 - `/i2v` or `image-to-video` → `accepts_image: true, outputs_video: true`
 - `/t2v` or `text-to-video` → `accepts_text: true, outputs_video: true`
 - `/v2v` or `video-to-video` → `accepts_video: true, outputs_video: true`
 
-### Sync Tasks
+### Sync Flow
 
-Celery tasks in `backend/app/workers/tasks.py` periodically discover and sync models from each provider:
+Model synchronization can be triggered on demand or run periodically:
 
-1. `_discover_provider_models()` iterates active providers
-2. Provider-specific `_sync_{type}_models()` fetches the provider's model list
-3. Each model is normalized via `normalize_provider_model()`
-4. Normalized models are upserted into `model_configs` table
+1. **On-demand**: `POST /api/providers/{provider_id}/sync-models` (admin)
+2. **Manual trigger**: Admin UI → Model Management → Sync button
+
+The sync flow works as follows:
+
+1. The endpoint creates a provider instance via `registry.create(provider_type, id, config)`
+2. Calls `instance.sync_models()` on the provider instance
+3. Each returned model dict is upserted via `ModelConfigService.get_or_create()`
+4. The `extra_config` column stores provider-specific metadata that was previously kept in separate per-provider tables
 
 Providers currently supporting auto-sync:
 - **AtlasCloud** — full catalog via API
 - **Poe** — bot list via API
 
 Add sync support for a new provider by:
-1. Creating `_sync_yourprovider_models()` in `tasks.py`
-2. Adding `_normalize_yourprovider()` in `model_normalizer.py`
-3. Registering the provider type in `_discover_provider_models()`
-4. Adding a Celery beat schedule in `celery_app.py`
+1. Implementing `sync_models()` on your provider class (return a list of normalized dicts)
+2. Registering the provider type in the provider registry
+3. (Optional) Adding a Celery beat schedule in `celery_app.py`
 
 ---
 
@@ -304,19 +323,21 @@ Add sync support for a new provider by:
 |--------|----------|-------------|
 | `GET` | `/providers` | List all providers |
 | `POST` | `/providers` | Create a new provider |
-| `PUT` | `/providers/{id}` | Update a provider |
+| `PATCH` | `/providers/{id}` | Update a provider |
 | `DELETE` | `/providers/{id}` | Delete a provider |
 | `GET` | `/providers/{id}/status` | Check provider health and queue status |
 
-### Admin Model Configs
+### Provider Model Configs (Admin)
+
+Generic model CRUD endpoints work the same for all provider types. The `model_configs` table holds all models in a single table — there are no separate per-provider model tables.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/admin/model-configs` | List all model configs (paginated) |
-| `POST` | `/admin/model-configs` | Create a new model config |
-| `PUT` | `/admin/model-configs/{id}` | Update a model config |
-| `DELETE` | `/admin/model-configs/{id}` | Delete a model config |
-| `POST` | `/admin/model-configs/{id}/sync` | Trigger manual sync for a provider |
+| `GET` | `/providers/{provider_id}/models` | List all model configs for a provider |
+| `POST` | `/providers/{provider_id}/models` | Create a model config |
+| `PATCH` | `/providers/{provider_id}/models/{model_id}` | Update a model config |
+| `DELETE` | `/providers/{provider_id}/models/{model_id}` | Soft-delete (deactivate) a model config |
+| `POST` | `/providers/{provider_id}/sync-models` | Sync live provider models into local configs |
 
 ---
 

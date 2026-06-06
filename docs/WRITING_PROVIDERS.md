@@ -12,118 +12,228 @@ Stability AI, Google Gemini, custom ComfyUI setup) to VidForge.
 │  • config is a dict of provider-specific settings         │
 ├──────────────────────────────────────────────────────────┤
 │  Provider Instance (Python class)                         │
-│  • Extends ComfyUIProvider (in providers/base.py)         │
-│  • Implements initialize(), queue_prompt(), etc.          │
-│  • Or implements generate_image() / generate_video()     │
-│     directly (like PoeProvider)                           │
+│  • Extends ProviderBase                                   │
+│  • Mixes in capability interfaces:                        │
+│    ImageProvider | VideoProvider | LLMProvider            │
+│  • Implements initialize(), get_status(), shutdown(),     │
+│    get_capabilities()                                     │
 ├──────────────────────────────────────────────────────────┤
-│  Provider Type Registry                                   │
-│  • get_provider_instance() maps type → class              │
-│  • comfyui_direct → ComfyUIDirectProvider                │
-│  • poe → PoeProvider                                      │
-│  • runpod → RunPodProvider                                │
-│  • your_type → YourProvider                               │
+│  ProviderRegistry                                         │
+│  • register(provider_type, provider_class)                │
+│  • create(provider_type, provider_id, config) → instance  │
+│  • get(provider_type) → class                             │
+│  • list_types() → [str]                                   │
+│  • Registration in providers/__init__.py                  │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## Existing Provider Types
 
-| Type | Class | Description |
+| Type | Class | Capabilities |
 |---|---|---|
-| `comfyui_direct` | `ComfyUIDirectProvider` | Local ComfyUI instance via HTTP API |
-| `poe` | `PoeProvider` | Poe API (Veo, GPT-Image, Wan, Sora, etc.) |
-| `runpod` | `RunPodProvider` | RunPod serverless ComfyUI |
-| `atlascloud` | `AtlasCloudProvider` | AtlasCloud API (300+ models: Flux, Kling, WAN, Veo, etc.) |
+| `comfyui_direct` | `ComfyUIDirectProvider` | Image + Video |
+| `runpod` | `RunPodProvider` | Image + Video |
+| `poe` | `PoeProvider` | Image + Video + LLM |
+| `atlascloud` | `AtlasCloudProvider` | Image + Video + LLM |
+| `ollama` | `OllamaProvider` | LLM only |
+
+## Core Interfaces
+
+### ProviderBase
+
+All providers extend `ProviderBase` from `providers/base.py`:
+
+```python
+class ProviderBase(ABC):
+    _ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]]
+
+    async def initialize(self, config: dict[str, Any]) -> None:
+        """Initialize provider with configuration."""
+
+    async def shutdown(self) -> None:
+        """Cleanup provider resources."""
+
+    async def get_status(self) -> ProviderInfo:
+        """Get current provider status."""
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        """Return capability flags for this provider."""
+
+    def classify_error(self, exc: Exception) -> ProviderError:
+        """Map arbitrary exceptions to provider-specific error types."""
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        """Synchronize provider models into local configuration."""
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        """List models available from this provider."""
+```
+
+### Capability Interfaces
+
+A provider can implement one or more capability interfaces. Each interface
+is an ABC that extends `ProviderBase`.
+
+**ImageProvider**:
+
+```python
+class ImageProvider(ProviderBase, ABC):
+    async def generate_image(
+        self,
+        prompt: str,
+        model: str,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        """Generate an image. Returns (asset_id, image_bytes)."""
+```
+
+**VideoProvider**:
+
+```python
+class VideoProvider(ProviderBase, ABC):
+    async def generate_video(
+        self,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        """Generate a video. Returns (asset_id, video_bytes)."""
+```
+
+**LLMProvider**:
+
+```python
+class LLMProvider(ProviderBase, ABC):
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        """Primary chat interface that yields LLMChunk responses."""
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        """Stream chat responses as LLMChunk items."""
+
+    def supports_tools(self, model: str) -> bool:
+        """Return True if the given model supports tool calling."""
+```
+
+### ProviderCapabilities
+
+A frozen dataclass returned by `get_capabilities()`:
+
+```python
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    supports_image: bool = False
+    supports_video: bool = False
+    supports_llm: bool = False
+    supports_model_sync: bool = False
+```
+
+Example:
+
+```python
+def get_capabilities(self) -> ProviderCapabilities:
+    return ProviderCapabilities(
+        supports_image=True,
+        supports_video=True,
+        supports_llm=False,
+        supports_model_sync=True,
+    )
+```
+
+The core system uses these flags to route requests without knowing the
+concrete provider type.
+
+## Error Classification
+
+Providers map external exceptions to a typed hierarchy via
+`classify_error()`:
+
+```python
+class ProviderError(Exception):           # Base error
+class ProviderOverloadedError(ProviderError):   # Overloaded / at capacity
+class ProviderRateLimitError(ProviderError):    # Rate limited (429)
+class ProviderConnectionError(ProviderError):   # Connectivity failure
+class ProviderTimeoutError(ProviderError):      # Operation timed out
+```
+
+The base class provides a default implementation that matches common error
+substrings against `_ERROR_PATTERNS`. Subclasses can extend the pattern list
+with provider-specific strings:
+
+```python
+class MyProvider(ImageProvider, VideoProvider):
+    _ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]] = [
+        (("overloaded", "capacity", "queue is full"), ProviderOverloadedError),
+        (("rate limit", "429"), ProviderRateLimitError),
+        (("cold start", "warming up"), ProviderTimeoutError),
+        (("connection", "connectionerror"), ProviderConnectionError),
+    ]
+```
+
+Override `classify_error()` entirely for custom logic. See
+`OllamaProvider.classify_error()` for an example of a provider that checks
+Ollama-specific conditions before falling back to the base class pattern
+matcher.
+
+## ProviderRegistry
+
+The registry maps provider type strings to classes and handles
+instantiation. It replaces the old `get_provider_instance()` factory
+function.
+
+```python
+from app.services.providers import registry
+
+# Register a class
+registry.register("your_type", YourProvider)
+
+# Create an instance (calls initialize())
+instance = await registry.create("your_type", provider_id, config)
+
+# Look up a class
+cls = registry.get("your_type")
+
+# Check if registered
+if registry.has("your_type"): ...
+
+# List all registered types
+for t in registry.list_types(): ...
+```
 
 ## Step-by-Step: Adding a New Provider
 
-### Provider Registration Checklist
-
-When adding a new provider, complete ALL of these steps:
-
-1. **Create provider class** — `backend/app/services/providers/your_provider.py`
-   - Extend `ComfyUIProvider` from `providers/base.py`
-   - Implement `initialize(config)`
-   - Implement `generate_image(prompt, model, ...)` and/or `generate_video(prompt, model, ...)`
-
-2. **Register in factory** — `backend/app/services/media_generator.py`
-   - Add your provider type to `get_provider_instance()` — map type string to class
-   - Import your class in the function
-
-3. **Add database record** — via Admin UI or migration
-   - Provider type must match the string registered in step 2
-   - Config JSON: `{"api_key": "...", "base_url": "..."}`
-
-4. **Configure model configs** — populate `model_configs` table for your provider's models
-   - Via Admin UI to Model Management to "Add Model" or "Sync"
-   - Each model needs: `model_id`, `provider_model_id`, `display_name`, `modality`, `endpoint_type`, `prompt_format`, `parameter_map`, `capabilities`, `constraints`
-
-5. **Use ModelConfigService in provider code** — all model-specific behavior comes from config, not hardcoded checks
-   - See section "Using ModelConfigService" below
-
-6. **Add frontend model selection** — optional, for user-facing model dropdowns
-   - Models with `is_active=true` automatically appear in model selection dropdowns
-
-7. **Add sync task** — `backend/app/workers/tasks.py`
-   - Create `_sync_yourprovider_models(provider)` function returning `list[dict]`
-   - Each dict: `model_id`, `provider_model_id`, `display_name`, `modality`, `endpoint_type`
-   - Add `elif` branch in `_discover_provider_models()` to route your provider type
-   - Add to Celery beat schedule in `celery_app.py`
-   - Use `model_normalizer.py` to translate provider API metadata — never hardcode modality
-   - Reference: see `_sync_atlascloud_models()` and `_sync_poe_models()` in `tasks.py`
-
-### Model Normalization
-
-All sync functions MUST use `backend/app/services/model_normalizer.py` to convert raw
-provider API responses into our standard `model_configs` format.
-
-```python
-from app.services.model_normalizer import normalize_provider_model
-
-async def _sync_yourprovider_models(provider) -> list[dict]:
-    instance = YourProvider(provider.id, provider.config)
-    await instance.initialize(provider.config)
-    try:
-        resp = await instance.client.get("https://api.example.com/v1/models",
-            headers={"Authorization": f"Bearer {instance.api_key}"})
-        return [normalize_provider_model("your_type", m) for m in resp.json().get("data", [])]
-    finally:
-        await instance.shutdown()
-```
-
-Add a `_normalize_yourprovider()` function in `model_normalizer.py` and register it in
-`normalize_provider_model()`. Map the provider's native fields:
-- `modality` — from provider's own classification (type field, output_modalities)
-- `endpoint_type` — `"chat_completions"`, `"generateImage"`, or `"generateVideo"`
-- `capabilities` — optional: `accepts_image`, `supports_tools`, etc.
-- `constraints` — optional: `context_length`, `max_output_tokens`
-- `cost_config` — optional: `currency`, `credits_per_image`
-
-### Sync Registration Checklist
-1. `_discover_provider_models()` in `tasks.py` — add `elif` branch
-2. `normalize_provider_model()` in `model_normalizer.py` — add normalization function
-3. Celery beat schedule in `celery_app.py` — add cron entry
-
-8. **Write tests** — TDD as usual
-   - Unit tests for provider class
-   - Integration tests for model config + payload construction
-
 ### 1. Create the Provider Class
 
-Create `backend/app/services/providers/your_provider.py`:
+Create `backend/app/services/providers/your_provider.py`. Extend
+`ProviderBase` and mix in the capability interfaces your provider supports.
 
 ```python
-import asyncio
-from typing import Any, Awaitable, Callable
+from typing import Any
 from uuid import UUID
 
-from app.database import ModelConfig
-from app.services.model_config_service import ModelConfigService
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
+from app.services.providers.base import (
+    ImageProvider,
+    VideoProvider,
+    ProviderBase,
+    ProviderCapabilities,
+    ProviderInfo,
+)
 
 
-class YourProvider(ComfyUIProvider):
-    """AI provider implementation for [Your Service]."""
+class YourProvider(ImageProvider, VideoProvider):
+    """Provider implementation for [Your Service]."""
 
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
@@ -132,43 +242,47 @@ class YourProvider(ComfyUIProvider):
         self.base_url = config.get("base_url", "https://api.example.com/v1")
 
     async def initialize(self, config: dict) -> None:
-        """Called once when the provider is instantiated."""
         if not self.api_key:
-            raise ValueError("api_key is required for your_provider")
+            raise ValueError("api_key is required")
 
-    async def _get_model_config(self, model: str) -> ModelConfig | None:
-        """Resolve a ModelConfig for the given model ID on this provider."""
-        from app.database import async_session
+    async def shutdown(self) -> None:
+        pass
 
-        async with async_session() as db:
-            return await ModelConfigService.get_by_id(
-                db, model_id=model, provider_id=self.provider_id
-            )
+    async def get_status(self) -> ProviderInfo:
+        return ProviderInfo(
+            name="your_provider",
+            provider_type="your_type",
+            is_available=True,
+            estimated_wait_seconds=30,
+            cost_per_job=0.0,
+            message="Ready",
+        )
 
-    # --- Direct generation methods (like Poe) ---
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True,
+            supports_video=True,
+            supports_llm=False,
+            supports_model_sync=True,
+        )
 
     async def generate_image(
         self,
         prompt: str,
-        model: str = "default-model",
+        model: str,
         aspect_ratio: str = "3:2",
-        quality: str = "high",
-        negative_prompt: str = "",
-        image_path: str | None = None,
-    ) -> tuple[str, bytes | None]:
-        """Generate an image. Returns (request_id, image_bytes)."""
-        # Look up model config — never hardcode model names
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        # Look up model config -- never hardcode model names
         config = await self._get_model_config(model)
         if not config:
-            raise ValueError(f"Unknown model for this provider: {model}")
+            raise ValueError(f"Unknown model: {model}")
 
         # build_payload handles parameter_map, prompt_format, extra_params
         payload = config.build_payload(
             prompt=prompt,
             aspect_ratio=aspect_ratio,
         )
-        if quality:
-            payload["quality"] = quality
 
         import httpx
 
@@ -186,88 +300,23 @@ class YourProvider(ComfyUIProvider):
             if image_url:
                 img_resp = await client.get(image_url)
                 return data.get("id", ""), img_resp.content
-            return data.get("id", ""), None
+            return data.get("id", ""), b""
 
     async def generate_video(
         self,
         prompt: str,
-        model: str = "default-model",
+        model: str,
         duration: int = 5,
         aspect_ratio: str = "16:9",
-        resolution: str = "1080p",
-        negative_prompt: str = "",
-        image_path: str | None = None,
-    ) -> tuple[str, bytes | None]:
-        """Generate a video. Returns (request_id, video_bytes)."""
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
         # Implement polling pattern for async video generation APIs
         ...
 
-    # --- ComfyUI-style interface (required by base class) ---
-
-    async def queue_prompt(self, workflow: dict[str, Any]) -> str:
-        # Only needed if your provider accepts ComfyUI workflows
-        raise NotImplementedError("Use generate_image/generate_video directly")
-
-    async def wait_for_completion(self, job_id: str, **kwargs) -> dict:
-        return {"status": "completed", "job_id": job_id}
-
-    async def get_output(self, result: dict) -> bytes | None:
-        return result.get("output_data")
-
-    async def cancel_job(self, job_id: str) -> bool:
-        return False
-
-    async def get_status(self) -> ProviderInfo:
-        return ProviderInfo(
-            name="your_provider",
-            provider_type="your_type",
-            is_available=True,
-            estimated_wait_seconds=30,
-            cost_per_job=0.0,
-            message="Ready",
-        )
-
-    async def estimate_cost(self, workflow: dict) -> float:
-        return 0.0
-
-    async def estimate_duration(self, workflow: dict) -> float:
-        return 30.0
-
-    async def shutdown(self) -> None:
-        pass
-```
-
-### Using ModelConfigService
-
-All model-specific behavior (parameter names, prompt format, API endpoint selection,
-duration limits, resolution constraints) lives in the `model_configs` database table.
-Your provider code should NEVER hardcode model name checks. Instead:
-
-```python
-from app.services.model_config_service import ModelConfigService
-
-class YourProvider(ComfyUIProvider):
-    async def generate_image(self, prompt, model, aspect_ratio="3:2", ...):
-        # Get model configuration from database
-        config = await self._get_model_config(model)
-        if not config:
-            raise ValueError(f"Unknown model: {model}")
-
-        # Build the API payload — parameter_map handles name translation,
-        # prompt_format handles string vs array, extra_params adds defaults
-        payload = config.build_payload(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-        )
-        # payload is now: {"model": "provider/model-id", "prompt": "...", "aspect": "16:9", ...}
-
-        # Submit to your provider's API
-        response = await self.client.post(f"{self.base_url}/generate", json=payload)
-        ...
-
     async def _get_model_config(self, model: str):
-        """Look up model configuration from database."""
+        """Resolve a ModelConfig for the given model ID on this provider."""
         from app.database import async_session
+        from app.services.model_config_service import ModelConfigService
 
         async with async_session() as db:
             return await ModelConfigService.get_by_id(
@@ -275,21 +324,44 @@ class YourProvider(ComfyUIProvider):
             )
 ```
 
+### Using ModelConfigService
+
+All model-specific behavior (parameter names, prompt format, API endpoint
+selection, duration limits, resolution constraints) lives in the
+`model_configs` database table. Your provider code should NEVER hardcode
+model name checks. Instead:
+
+```python
+config = await self._get_model_config(model)
+if not config:
+    raise ValueError(f"Unknown model: {model}")
+
+# Build the API payload -- parameter_map handles name translation,
+# prompt_format handles string vs array, extra_params adds defaults
+payload = config.build_payload(
+    prompt=prompt,
+    aspect_ratio=aspect_ratio,
+)
+```
+
 The `build_payload()` method handles:
 
 - **parameter_map**: Translates your param names to provider's param names.
-  e.g., `{"aspect_ratio": "aspect", "duration": "seconds"}` means your code sends
-  `aspect_ratio="16:9"` and `build_payload()` converts it to `aspect: "16:9"` in the API call.
-- **prompt_format**: `"string"` sends `{"prompt": "text"}`; `"array"` sends `{"prompt": ["text"]}`
+  e.g., `{"aspect_ratio": "aspect", "duration": "seconds"}` means your code
+  sends `aspect_ratio="16:9"` and `build_payload()` converts it to
+  `aspect: "16:9"` in the API call.
+- **prompt_format**: `"string"` sends `{"prompt": "text"}`; `"array"` sends
+  `{"prompt": ["text"]}`
 - **extra_params**: Provider-specific defaults always included.
   e.g., `{"resolution": "1080p"}` for models that require it.
-- **constraints**: Not applied automatically, but available via `config.constraints`
-  for your code to validate inputs (e.g., `max_duration_sec`, `supported_ratios`).
+- **constraints**: Not applied automatically, but available via
+  `config.constraints` for your code to validate inputs (e.g.,
+  `max_duration_sec`, `supported_ratios`).
 
 ### Model Config Fields Reference
 
 | Field | Type | Purpose |
-|-------|------|---------|
+|---|---|---|
 | `model_id` | string | Your internal model ID (e.g., "wan2.2") |
 | `provider_model_id` | string | Provider's native model ID (e.g., "google/veo3.1-fast/text-to-video") |
 | `prompt_format` | "string" or "array" | How the provider expects the prompt |
@@ -300,28 +372,29 @@ The `build_payload()` method handles:
 | `constraints` | JSON | Limits: max_duration_sec, supported_ratios, sub_clip_chain |
 | `cost_config` | JSON | Pricing: credits_per_image, credits_per_second |
 
-### 2. Register the Provider Type
+### 2. Register in the Registry
 
-Edit `app/services/media_generator.py` — add your type to
-`get_provider_instance()`:
+Edit `backend/app/services/providers/__init__.py`:
 
 ```python
-async def get_provider_instance(db, provider):
-    if provider.provider_type == "your_type":
-        from app.services.providers.your_provider import YourProvider
-        instance = YourProvider(provider.id, provider.config)
-        await instance.initialize(provider.config)
-        return instance
-    # ... existing types
+from app.services.providers.registry import ProviderRegistry
+from app.services.providers.your_provider import YourProvider
+
+registry = ProviderRegistry()
+# ... existing registrations
+registry.register("your_type", YourProvider)
 ```
+
+The registry is the single entry point for all provider discovery. No
+changes are needed in `media_generator.py` or any core service code.
 
 ### 3. Add Provider to the Database
 
-Via the UI (Admin → Providers → Add) or directly:
+Via the UI (Admin, Providers, Add) or directly:
 
 ```python
-# backend/app/cli.py or a migration
 from app.database import Provider
+
 provider = Provider(
     name="My AI Service",
     provider_type="your_type",
@@ -336,68 +409,115 @@ provider = Provider(
 db.add(provider)
 ```
 
-### 4. Add Poe-style Model Support (Optional)
+### 4. Configure Model Configs
 
-If your provider supports multiple models, add them to the `poe_models` table
-(or create a new table). The `poe_models` table is provider-agnostic despite
-the name — any provider type can use it.
+Populate the `model_configs` table for your provider's models:
 
-For the frontend model picker to show your models, they need to appear in the
-`/api/models/available` endpoint. If your models are in `poe_models` they'll
-be auto-included. Otherwise add them to `model_config.py`.
+- Via Admin UI, Model Management, "Add Model" or "Sync"
+- Via the provider's `sync_models()` method if it supports dynamic discovery
 
-### 5. Route Media Generation to Your Provider
+Each model needs: `model_id`, `provider_model_id`, `display_name`,
+`modality`, `endpoint_type`, `prompt_format`, `parameter_map`,
+`capabilities`, `constraints`.
 
-The routing is handled by user preferences. When a user selects your
-provider's model in Settings → AI Models, the `_resolve_image_provider()`
-and `_resolve_video_provider()` functions in `media_generator.py` detect
-the provider prefix and route to your provider class.
+### 5. Add Sync Task (Optional)
 
-For Poe-type providers (direct API calls), models are prefixed with
-`poe:` (e.g., `poe:your-model`). For your provider, choose a prefix:
+If your provider supports model sync, add a sync function in
+`backend/app/workers/tasks.py`:
 
 ```python
-# In _resolve_image_provider / _resolve_video_provider:
-if selected_model.startswith("your_prefix:"):
-    model_id = selected_model.removeprefix("your_prefix:")
-    provider, instance = await _get_provider_by_type(db, "your_type")
-    if provider and instance:
-        return model_id, provider.id, "your_type", instance
+async def _sync_yourprovider_models(provider) -> list[dict]:
+    instance = YourProvider(provider.id, provider.config)
+    await instance.initialize(provider.config)
+    try:
+        resp = await instance.client.get(
+            "https://api.example.com/v1/models",
+            headers={"Authorization": f"Bearer {instance.api_key}"},
+        )
+        models = resp.json().get("data", [])
+        return [
+            {
+                "model_id": m["id"],
+                "provider_model_id": m["id"],
+                "display_name": m["name"],
+                "modality": m.get("type", "image"),
+                "endpoint_type": "generateImage",
+            }
+            for m in models
+        ]
+    finally:
+        await instance.shutdown()
 ```
 
-## Model-Specific Quirks
+Then add an `elif` branch in `_discover_provider_models()` and a cron entry
+in the Celery beat schedule.
 
-Different models often expect different parameter names or have specific limitations. You can handle these variations without changing your provider code by using `parameter_map` and `constraints` in the model configuration.
+### 6. Write Tests
 
-### Parameter Mapping
+Write unit tests that exercise the capability interfaces directly:
 
-The `parameter_map` field renames standard parameters to match what the provider's API expects. For example, if your code passes `image_url` but the API expects `image`, this mapping translates the key automatically during payload construction.
+```python
+import pytest
+from uuid import uuid4
+from your_provider import YourProvider
 
-### Constraints
 
-The `constraints` field defines model limitations like aspect ratios.
-- `supported_aspect_ratios`: A list of aspect ratios the model accepts, such as `["16:9"]`.
-- `requires_aspect_ratio`: A boolean indicating if the aspect ratio parameter must be sent.
+@pytest.mark.asyncio
+async def test_generate_image():
+    provider = YourProvider(uuid4(), {"api_key": "test-key"})
+    await provider.initialize({"api_key": "test-key"})
+    try:
+        asset_id, image_bytes = await provider.generate_image(
+            prompt="A cat",
+            model="test-model",
+            aspect_ratio="1:1",
+        )
+        assert asset_id
+        assert image_bytes
+    finally:
+        await provider.shutdown()
 
-### Example Configuration (WAN 2.7)
 
-Here's a configuration example for WAN 2.7:
+@pytest.mark.asyncio
+async def test_get_status():
+    provider = YourProvider(uuid4(), {"api_key": "test-key"})
+    await provider.initialize({"api_key": "test-key"})
+    try:
+        status = await provider.get_status()
+        assert status.provider_type == "your_type"
+    finally:
+        await provider.shutdown()
 
-```json
-{
-  "parameter_map": {"image_url": "image"},
-  "constraints": {
-    "supported_aspect_ratios": ["16:9"],
-    "requires_aspect_ratio": false
-  }
-}
+
+@pytest.mark.asyncio
+async def test_get_capabilities():
+    provider = YourProvider(uuid4(), {"api_key": "test-key"})
+    caps = provider.get_capabilities()
+    assert caps.supports_image
+    assert not caps.supports_llm
 ```
 
-### When to Use Each Mechanism
+## ComfyUI-Based Providers
 
-Use `parameter_map` when a model expects non-standard parameter names. This keeps your provider code clean and generic.
+Providers that use ComfyUI workflows (ComfyUIDirectProvider,
+RunPodProvider) share a common module at `providers/comfyui/`:
 
-Apply `constraints` to enforce model-specific limits before sending requests. This prevents API errors and saves compute resources.
+- **`workflow_builders.py`**: Functions to construct ComfyUI workflows:
+  - `build_wan_video_workflow()` — Wan2.2 text-to-video
+  - `build_wan_i2v_workflow()` — Wan2.2 image-to-video
+  - `build_ltx_workflow()` — LTX video generation
+  - `upload_image_to_comfyui()` — Upload seed images to ComfyUI input dir
+  - `video_generation_resolution()` — Resolve width/height from aspect ratio
+
+- **`workflows/`**: Static JSON workflow files (wan_s2v.json,
+  flux_image.json, ltx_t2v.json, ltx_i2v.json)
+
+These providers extend `ComfyUIProvider` (alongside the capability
+interfaces) to maintain compatibility with the workflow-based system. The
+legacy `queue_prompt()`, `wait_for_completion()`, and `get_output()` methods
+are used internally by the provider's `generate_image()` /
+`generate_video()` implementations and are not part of the public
+capability contract.
 
 ## Provider Config Reference
 
@@ -406,9 +526,10 @@ settings. Common keys:
 
 | Key | Used By | Description |
 |---|---|---|
-| `api_key` | Poe, custom | API authentication key |
-| `base_url` | Poe, custom | API base URL |
+| `api_key` | Poe, AtlasCloud, custom | API authentication key |
+| `base_url` | Ollama, custom | API base URL |
 | `comfyui_url` | comfyui_direct | ComfyUI server URL |
+| `endpoint_id` | runpod | RunPod serverless endpoint ID |
 | `max_concurrent_jobs` | comfyui_direct | Max parallel ComfyUI jobs |
 | `wan_unet_name` | comfyui_direct | Wan model filename |
 | `wan_clip_name` | comfyui_direct | CLIP model filename |
@@ -416,34 +537,18 @@ settings. Common keys:
 | `wan_video_steps` | comfyui_direct | Sampling steps for video |
 | `wan_video_cfg` | comfyui_direct | CFG scale for video |
 | `wan_video_fps` | comfyui_direct | Output FPS for video |
+| `default_model` | Ollama | Default LLM model name |
+| `cost_per_gpu_hour` | runpod | GPU cost for duration estimates |
+| `idle_timeout_seconds` | runpod | Timeout for cold start detection |
 
 ## Testing Your Provider
 
 1. Create a provider via the Admin UI
-2. Set model preferences in Settings → AI Models
+2. Set model preferences in Settings, AI Models
 3. Create a job and trigger image/video generation
 4. Check worker logs: `docker compose logs worker -f | grep your_type`
 5. Verify output files in the storage directory
 
-## ComfyUI Workflow Reference
-
-If your provider accepts ComfyUI workflows (like `comfyui_direct` and
-`runpod`), you can define custom workflows in JSON files under
-`backend/app/comfyui/workflows/`. These are loaded by
-`load_comfyui_workflow()` in `media_generator.py`.
-
-Existing workflows:
-
-| File | Purpose |
-|---|---|
-| `wan_s2v.json` | Wan 2.2 T2V (text-to-video) |
-| `flux_image.json` | Flux.1-schnell image generation |
-| `ltx_t2v.json` | LTX video generation |
-| `ltx_i2v.json` | LTX image-to-video |
-
-For programmatic workflows, use the builder functions:
-
-- `_build_wan_video_workflow()` — T2V video (no seed image)
-- `_build_wan_i2v_workflow()` — I2V video (with seed image as first frame)
-- `_build_flux_image_workflow()` — Flux image generation
-- `_build_comfyui_image_workflow()` — Generic ComfyUI image workflow
+The core system discovers providers through the registry. Once registered,
+all routing is automatic based on the provider type selected in the user's
+model preferences. No changes to routing code are needed.

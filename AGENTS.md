@@ -21,7 +21,7 @@ VidForge is a web application for automated social media video generation using 
 - **Audio Generation**: AudioCraft/MusicGen (CPU container)
 - **TTS**: edge-tts for narration
 - **LLM**: Ollama (Qwen 3.6, Llama 3.3) or Poe (GLM 5.1)
-- **Providers**: comfyui_direct, poe, runpod (extensible)
+- **Providers**: comfyui_direct, runpod, poe, atlascloud, ollama (capability-based, extensible via registry)
 
 ## Code Style
 
@@ -145,7 +145,7 @@ vidforge/
 │   │   │   ├── video_processor.py  # FFmpeg operations
 │   │   │   ├── llm_service.py      # LLM client
 │   │   │   ├── model_config.py     # Model preferences
-│   │   │   └── providers/          # AI provider implementations
+│   │   │   └── providers/          # AI provider implementations (capability interfaces + registry)
 │   │   ├── workers/    # Celery tasks + context
 │   │   └── storage/    # Storage backends (local, S3, SSH)
 │   ├── plugins/        # Template plugin packages
@@ -202,18 +202,40 @@ async def _my_task(job_id: str):
 Never use `asyncio.run()` in tasks. See [docs/CELERY_REFACTOR.md](docs/CELERY_REFACTOR.md).
 
 ### Provider Pattern
-AI providers extend `ComfyUIProvider` in `app/services/providers/`:
+AI providers extend `ProviderBase` and implement capability interfaces
+(`ImageProvider`, `VideoProvider`, `LLMProvider`) in
+`app/services/providers/`:
 
 ```python
-class ComfyUIProvider(ABC):
-    async def initialize(self, config: dict) -> None: ...
-    async def queue_prompt(self, workflow: dict) -> str: ...
-    async def wait_for_completion(self, job_id: str) -> dict: ...
-    async def get_output(self, result: dict) -> bytes | None: ...
+class YourProvider(ProviderBase, ImageProvider, VideoProvider):
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True, supports_video=True
+        )
+
+    async def generate_image(
+        self, prompt: str, model: str, aspect_ratio: str, **kwargs
+    ) -> tuple[str, bytes]:
+        ...
+        return (model_id, image_bytes)
+
+    async def generate_video(
+        self, prompt: str, model: str, duration: int,
+        aspect_ratio: str, **kwargs
+    ) -> tuple[str, bytes]:
+        ...
+        return (model_id, video_bytes)
 ```
 
-Direct API providers (like Poe) also implement `generate_image()` and
-`generate_video()`. See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md).
+Providers register themselves through the `ProviderRegistry`:
+
+```python
+from app.services.providers import registry
+
+registry.register("your_type", YourProvider)
+```
+
+See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md).
 
 ### Storage Backend Pattern
 ```python
@@ -295,11 +317,10 @@ See [docs/WRITING_PLUGINS.md](docs/WRITING_PLUGINS.md) for full guide.
 
 ### Adding a New AI Provider
 1. Create provider class in `backend/app/services/providers/your_provider.py`
-2. Extend `ComfyUIProvider`, implement `initialize()` + `generate_image()`/`generate_video()`
-3. Register type in `get_provider_instance()` in `media_generator.py`
-4. Add routing logic in `_resolve_image_provider()`/`_resolve_video_provider()`
-5. Add provider via Admin UI, configure models
-6. Test by selecting your model in Settings → AI Models
+2. Extend `ProviderBase`, implement the appropriate capability interfaces (`ImageProvider`, `VideoProvider`, `LLMProvider`)
+3. Register in `providers/__init__.py` using `registry.register("your_type", YourProvider)`
+4. Add provider via Admin UI, configure models
+5. Test by selecting your model in Settings → AI Models
 See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md) for full guide.
 
 ### Adding a New Storage Backend

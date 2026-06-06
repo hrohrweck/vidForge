@@ -54,6 +54,8 @@ Worker process startup
 | `reset_daily_budgets` | — | Resets daily spend counters |
 | `generate_preview` | — | Creates low-res preview of a video |
 | `merge_videos` | — | Concatenates video segments |
+| `sync_provider_models` | — | Syncs available models for all active providers of a given type via `registry.create()` + `instance.sync_models()` |
+| `sync_all_provider_models` | — | Queries all active provider types from DB and dispatches `sync_provider_models` for each |
 
 ## Plugin Dispatcher
 
