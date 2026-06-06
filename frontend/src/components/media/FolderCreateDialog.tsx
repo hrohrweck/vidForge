@@ -39,7 +39,7 @@ export function FolderCreateDialog({
 }: FolderCreateDialogProps) {
   const [folderName, setFolderName] = useState('')
   const [selectedParentId, setSelectedParentId] = useState<string>(
-    parentFolderId ?? ''
+    parentFolderId ?? '__root__'
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -47,7 +47,7 @@ export function FolderCreateDialog({
   useEffect(() => {
     if (isOpen) {
       setFolderName('')
-      setSelectedParentId(parentFolderId ?? '')
+      setSelectedParentId(parentFolderId ?? '__root__')
       setIsSubmitting(false)
     }
   }, [isOpen, parentFolderId])
@@ -79,7 +79,7 @@ export function FolderCreateDialog({
 
     // Check if we're at max depth
     const selectedDepth =
-      selectedParentId === ''
+      selectedParentId === '__root__'
         ? 0
         : folderOptions.find((f) => f.id === selectedParentId)?.depth ?? 0
 
@@ -90,7 +90,7 @@ export function FolderCreateDialog({
 
     setIsSubmitting(true)
     try {
-      await onCreate(folderName.trim(), selectedParentId === '' ? null : selectedParentId)
+      await onCreate(folderName.trim(), selectedParentId === '__root__' ? null : selectedParentId)
       onClose()
     } catch (error) {
       console.error('Failed to create folder:', error)
@@ -100,7 +100,7 @@ export function FolderCreateDialog({
   }
 
   const isAtMaxDepth =
-    selectedParentId === ''
+    selectedParentId === '__root__'
       ? currentDepth >= maxDepth - 1
       : (folderOptions.find((f) => f.id === selectedParentId)?.depth ?? 0) >=
         maxDepth - 1
@@ -137,7 +137,7 @@ export function FolderCreateDialog({
                   <SelectValue placeholder="Select parent folder" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Root (All Assets)</SelectItem>
+                  <SelectItem value="__root__">Root (All Assets)</SelectItem>
                   {folderOptions.map((folder) => (
                     <SelectItem key={folder.id} value={folder.id}>
                       {'\u00A0\u00A0'.repeat(folder.depth)}📁 {folder.name}

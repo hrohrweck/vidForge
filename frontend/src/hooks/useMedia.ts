@@ -120,7 +120,7 @@ export function useUploadAssets() {
       onProgress?: Parameters<typeof mediaApi.uploadAssets>[2]
     }) => mediaApi.uploadAssets(files, folderId, onProgress),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: mediaKeys.assets({}) })
+      queryClient.invalidateQueries({ queryKey: mediaKeys.all })
       queryClient.invalidateQueries({ queryKey: mediaKeys.stats() })
     },
   })

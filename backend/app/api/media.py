@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
-from app.database import User, get_db
+from app.database import MediaEvent, User, get_db
 from app.models.media import MediaAsset, MediaAssetReference, MediaAssetTag, MediaFolder, MediaTag
 from app.schemas.media import (
     AssetListQuery,
@@ -39,6 +39,7 @@ from app.schemas.media import (
     UploadResponse,
 )
 from app.services.app_settings import get_setting
+from app.services.media_events import record_and_publish_media_event
 from app.services.media_metadata import probe_audio, probe_image, probe_video
 from app.services.media_path import asset_path
 from app.services.preview_generator import extract_first_frame
@@ -767,6 +768,14 @@ async def upload_assets(
     for asset in uploaded_assets:
         await db.refresh(asset)
 
+    for asset in uploaded_assets:
+        await record_and_publish_media_event(
+            db=db,
+            user_id=current_user.id,
+            event_type="created",
+            asset_id=asset.id,
+        )
+
     return UploadResponse(
         assets=[asset_to_response(a) for a in uploaded_assets],
         failed=failed,
@@ -859,6 +868,7 @@ async def serve_asset_file(
         path=file_path,
         media_type=asset.mime_type or "application/octet-stream",
         filename=asset.name,
+        headers={"Content-Disposition": f'inline; filename="{asset.name}"'},
     )
 
 
@@ -1000,3 +1010,39 @@ async def quick_generate_media(
         title=req.title,
     )
     return QuickGenerateResponse(task_id=task.id)
+
+
+class MediaEventResponse(BaseModel):
+    id: str
+    user_id: str
+    event_type: str
+    asset_id: str | None
+    seq: int
+    created_at: datetime
+
+
+@router.get("/events/since", response_model=list[MediaEventResponse])
+async def get_media_events_since(
+    seq: int = Query(..., ge=0, description="Sequence number to query from (exclusive)"),
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(MediaEvent)
+        .where(MediaEvent.user_id == current_user.id, MediaEvent.seq > seq)
+        .order_by(MediaEvent.seq)
+        .limit(limit)
+    )
+    events = result.scalars().all()
+    return [
+        MediaEventResponse(
+            id=str(e.id),
+            user_id=str(e.user_id),
+            event_type=e.event_type,
+            asset_id=str(e.asset_id) if e.asset_id else None,
+            seq=e.seq,
+            created_at=e.created_at,
+        )
+        for e in events
+    ]

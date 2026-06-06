@@ -96,7 +96,7 @@ export default function Layout() {
     group.children.some((child) => location.pathname === child.to || location.pathname.startsWith(child.to + '/'))
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen overflow-hidden bg-background flex flex-col">
       <header className="sticky top-0 z-50 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
         <div className="h-14 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
@@ -230,7 +230,7 @@ export default function Layout() {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto bg-background/50">
+        <main className="flex-1 min-h-0 overflow-hidden bg-background/50">
           <div className={isFullPage ? 'h-full w-full p-0' : 'container mx-auto p-6 max-w-6xl'}>
             <Outlet />
           </div>
