@@ -10,13 +10,32 @@ from uuid import UUID
 import httpx
 
 from app.services.llm_service import LLMChunk, LLMError
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
+from app.services.providers.base import (
+    ComfyUIProvider,
+    ImageProvider,
+    LLMProvider,
+    ProviderCapabilities,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderInfo,
+    ProviderOverloadedError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    VideoProvider,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class PoeProvider(ComfyUIProvider):
+class PoeProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvider):
     _models_without_tools: set[str] = set()  # Cache of models that don't support tool calling
+
+    _POE_ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]] = [
+        (("overloaded", "capacity", "queue is full", "engine overloaded"), ProviderOverloadedError),
+        (("rate limit", "429", "too many requests"), ProviderRateLimitError),
+        (("connection", "connectionerror", "network", "dns"), ProviderConnectionError),
+        (("timeout", "timed out", "readtimeout", "connecttimeout"), ProviderTimeoutError),
+    ]
 
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
@@ -97,16 +116,36 @@ class PoeProvider(ComfyUIProvider):
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         raise NotImplementedError("Poe provider uses different method for media generation")
 
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True,
+            supports_video=True,
+            supports_llm=True,
+            supports_model_sync=True,
+        )
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        return self.chat_stream(messages=messages, model=model, **kwargs)
+
     async def chat_stream(
         self,
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[LLMChunk]:
         """Stream Poe chat completions as the shared LLMChunk contract."""
         client = self.client
         if not client:
             raise RuntimeError("Provider not initialized")
+
+        if tools is None:
+            tools = kwargs.get("tools")
 
         # Skip tools if we know this model doesn't support them
         effective_tools = tools
@@ -296,19 +335,31 @@ class PoeProvider(ComfyUIProvider):
         resolution: str = "1080p",
         negative_prompt: str = "",
         image_path: str | None = None,
-    ) -> tuple[str, bytes | None]:
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
+        negative_prompt = str(kwargs.get("negative_prompt", negative_prompt))
+        image_path = kwargs.get("image_path", image_path)
+        if image_path is not None:
+            image_path = str(image_path)
+
         config = await self._get_model_config(model)
+        asset_id: str
+        video_bytes: bytes | None
         if config and config.endpoint_type == "video_endpoint":
-            return await self._generate_video_api(
+            asset_id, video_bytes = await self._generate_video_api(
                 prompt, model, duration, aspect_ratio, image_path,
             )
         else:
-            return await self._generate_video_chat(
+            asset_id, video_bytes = await self._generate_video_chat(
                 prompt, model, duration, aspect_ratio, image_path,
             )
+
+        if video_bytes is None:
+            raise RuntimeError(f"Poe video generation returned no media bytes for model {model}")
+        return asset_id, video_bytes
 
     async def _generate_video_chat(
         self,
@@ -488,9 +539,15 @@ class PoeProvider(ComfyUIProvider):
         quality: str = "high",
         negative_prompt: str = "",
         image_path: str | None = None,
-    ) -> tuple[str, bytes | None]:
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
         if not self.client:
             raise RuntimeError("Provider not initialized")
+
+        negative_prompt = str(kwargs.get("negative_prompt", negative_prompt))
+        image_path = kwargs.get("image_path", image_path)
+        if image_path is not None:
+            image_path = str(image_path)
 
         # Build message content with optional image (OpenAI vision format)
         content: list[dict[str, Any]] | str
@@ -547,7 +604,10 @@ class PoeProvider(ComfyUIProvider):
         result = response.json()
         content = str(result.get("choices", [{}])[0].get("message", {}).get("content", ""))
 
-        return result.get("id", ""), self._parse_media_content(content)
+        image_bytes = self._parse_media_content(content)
+        if image_bytes is None:
+            raise RuntimeError(f"Poe image generation returned no media bytes for model {model}")
+        return result.get("id", ""), image_bytes
 
     def _parse_media_content(self, content: str) -> bytes | None:
         if not content:
@@ -694,6 +754,117 @@ class PoeProvider(ComfyUIProvider):
     async def shutdown(self) -> None:
         if self.client:
             await self.client.aclose()
+
+    def supports_tools(self, model: str) -> bool:
+        return model not in self._models_without_tools
+
+    def classify_error(self, exc: Exception) -> ProviderError:
+        if isinstance(exc, httpx.TimeoutException):
+            return ProviderTimeoutError(str(exc))
+        if isinstance(exc, httpx.ConnectError):
+            return ProviderConnectionError(str(exc))
+
+        message = str(exc)
+        lower_message = message.lower()
+
+        for patterns, error_class in self._POE_ERROR_PATTERNS:
+            if any(pattern in lower_message for pattern in patterns):
+                return error_class(message)
+
+        return ProviderError(message)
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
+        response = await client.get(
+            f"{self.base_url}/models",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Poe model sync failed ({response.status_code}): {response.text[:500]}")
+
+        payload = response.json()
+        raw_models = payload.get("data", [])
+        if not isinstance(raw_models, list):
+            raise RuntimeError("Poe model sync returned invalid payload")
+
+        self._available_models = [m for m in raw_models if isinstance(m, dict) and m.get("id")]
+        self._model_cache = {m["id"]: m for m in self._available_models}
+
+        normalized_models = [self._normalize_poe_model(m) for m in self._available_models]
+
+        self._models_without_tools = {
+            m["model_id"]
+            for m in normalized_models
+            if not m.get("capabilities", {}).get("supports_tools", False)
+        }
+        return normalized_models
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        if not self._available_models:
+            await self.sync_models()
+        return list(self._available_models)
+
+    @staticmethod
+    def _normalize_poe_model(m: dict[str, Any]) -> dict[str, Any]:
+        arch = m.get("architecture", {})
+        inputs = set(arch.get("input_modalities", []))
+        outputs = set(arch.get("output_modalities", []))
+        features = set(m.get("supported_features", []))
+        endpoints = set(m.get("supported_endpoints", []))
+        pricing = m.get("pricing") or {}
+        ctx = m.get("context_window") or {}
+
+        if "video" in outputs:
+            modality = "video"
+        elif "image" in outputs:
+            modality = "image"
+        else:
+            modality = "text"
+
+        if "/v1/images" in endpoints or modality == "image":
+            endpoint = "generateImage"
+        elif modality == "video":
+            endpoint = "generateVideo"
+        else:
+            endpoint = "chat_completions"
+
+        caps: dict[str, Any] = {
+            "accepts_text": "text" in inputs,
+            "accepts_image": "image" in inputs,
+            "accepts_video": "video" in inputs,
+            "outputs_text": "text" in outputs,
+            "outputs_image": "image" in outputs,
+            "outputs_video": "video" in outputs,
+            "supports_tools": "tools" in features,
+            "supports_web_search": "web_search" in features,
+        }
+
+        result: dict[str, Any] = {
+            "model_id": m["id"],
+            "provider_model_id": m.get("root") or m["id"],
+            "display_name": (m.get("metadata", {}).get("display_name") or m.get("id", "")),
+            "modality": modality,
+            "endpoint_type": endpoint,
+            "capabilities": caps,
+        }
+
+        if ctx and (ctx.get("context_length") or ctx.get("max_output_tokens")):
+            result["constraints"] = {
+                "context_length": ctx.get("context_length"),
+                "max_output_tokens": ctx.get("max_output_tokens"),
+            }
+
+        if pricing:
+            cost: dict[str, Any] = {"currency": pricing.get("currency", "compute_points")}
+            compute_points = pricing.get("compute_points")
+            if compute_points is not None:
+                cost["compute_points"] = compute_points
+            result["cost_config"] = cost
+
+        return result
 
     def get_models_by_modality(self, modality: str) -> list[dict]:
         return [

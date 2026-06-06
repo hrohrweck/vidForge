@@ -1,12 +1,39 @@
 import asyncio
+import logging
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from app.services import ComfyUIClient
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
+from app.services.providers.base import (
+    ComfyUIProvider,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderInfo,
+    ProviderOverloadedError,
+    ProviderTimeoutError,
+    VideoProvider,
+)
+from app.services.providers.comfyui.workflow_builders import (
+    build_wan_i2v_workflow,
+    build_wan_video_workflow,
+)
+
+logger = logging.getLogger(__name__)
 
 
-class ComfyUIDirectProvider(ComfyUIProvider):
+def _duration_to_frames(duration: int, fps: int = 16) -> int:
+    frames = int(duration * fps)
+    if frames < 9:
+        frames = 9
+    if frames % 2 == 0:
+        frames += 1
+    return frames
+
+
+class ComfyUIDirectProvider(ImageProvider, VideoProvider, ComfyUIProvider):
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
         self.config = config
@@ -114,3 +141,188 @@ class ComfyUIDirectProvider(ComfyUIProvider):
         if self.client:
             await self.client.close()
             self.client = None
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True,
+            supports_video=True,
+            supports_llm=False,
+            supports_model_sync=True,
+        )
+
+    _ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]] = [
+        (("overloaded", "capacity", "queue is full"), ProviderOverloadedError),
+        (("rate limit", "429"), ProviderError),
+        (("connection", "connectionerror", "connect timeout"), ProviderConnectionError),
+        (("timeout", "timed out", "did not complete"), ProviderTimeoutError),
+        (("comfyui error", "prompt failed"), ProviderError),
+        (("no output data", "returned no output"), ProviderError),
+    ]
+
+    async def generate_image(
+        self,
+        prompt: str,
+        model: str,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        if not self.client:
+            raise RuntimeError("Provider not initialized")
+
+        # Import here to avoid circular imports at module level
+        from app.services.media_generator import (
+            _build_comfyui_image_workflow,
+            _build_flux_image_workflow,
+        )
+
+        if model == "flux1-schnell":
+            workflow = _build_flux_image_workflow(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                provider_config=self.config,
+            )
+        else:
+            workflow = _build_comfyui_image_workflow(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                model_preference=model,
+                provider_config=self.config,
+            )
+
+        prompt_id = await self.queue_prompt(workflow)
+        result = await self.wait_for_completion(prompt_id)
+        image_data = await self.get_output(result)
+        if not image_data:
+            raise ValueError("ComfyUI image generation returned no output data")
+
+        return model, image_data
+
+    async def generate_video(
+        self,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        if not self.client:
+            raise RuntimeError("Provider not initialized")
+
+        frames = _duration_to_frames(duration)
+        reference_image_path: str | None = kwargs.get("reference_image_path")
+
+        if model.startswith("wan"):
+            if reference_image_path:
+                image_path = Path(kwargs.get("storage_path", ".")) / reference_image_path
+                if image_path.exists():
+                    image_name = await self.client.upload_file(
+                        image_path.name, image_path.read_bytes()
+                    )
+                    workflow = build_wan_i2v_workflow(
+                        prompt=prompt,
+                        aspect_ratio=aspect_ratio,
+                        frames=frames,
+                        image_name=image_name,
+                        provider_config=self.config,
+                    )
+                else:
+                    workflow = build_wan_video_workflow(
+                        prompt=prompt,
+                        aspect_ratio=aspect_ratio,
+                        frames=frames,
+                        provider_config=self.config,
+                    )
+            else:
+                workflow = build_wan_video_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    frames=frames,
+                    provider_config=self.config,
+                )
+        else:
+            raise ValueError(f"Unsupported model variant for ComfyUI direct: {model}")
+
+        prompt_id = await self.queue_prompt(workflow)
+        result = await self.wait_for_completion(prompt_id)
+        output_data = await self.get_output(result)
+        if not output_data:
+            raise ValueError("ComfyUI video generation returned no output data")
+
+        return model, output_data
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        if not self.client:
+            raise RuntimeError("Provider not initialized")
+
+        models: list[dict[str, Any]] = []
+        try:
+            response = await self.client.client.get(
+                f"{self.client.base_url}/object_info/UNETLoader"
+            )
+            response.raise_for_status()
+            info = response.json()
+            unet_values = (
+                info.get("UNETLoader", {})
+                .get("input", {})
+                .get("required", {})
+                .get("unet_name", [[]])[0]
+            )
+            for name in unet_values:
+                model_type = "video" if "wan" in name.lower() else "image"
+                models.append({
+                    "model_id": f"comfyui_unet:{name}",
+                    "name": name,
+                    "type": model_type,
+                    "category": "unet",
+                })
+        except Exception as e:
+            logger.warning("Failed to sync UNET models from ComfyUI: %s", e)
+
+        try:
+            response = await self.client.client.get(
+                f"{self.client.base_url}/object_info/CLIPLoader"
+            )
+            response.raise_for_status()
+            info = response.json()
+            clip_values = (
+                info.get("CLIPLoader", {})
+                .get("input", {})
+                .get("required", {})
+                .get("clip_name", [[]])[0]
+            )
+            for name in clip_values:
+                models.append({
+                    "model_id": f"comfyui_clip:{name}",
+                    "name": name,
+                    "type": "clip",
+                    "category": "clip",
+                })
+        except Exception as e:
+            logger.warning("Failed to sync CLIP models from ComfyUI: %s", e)
+
+        try:
+            response = await self.client.client.get(
+                f"{self.client.base_url}/object_info/VAELoader"
+            )
+            response.raise_for_status()
+            info = response.json()
+            vae_values = (
+                info.get("VAELoader", {})
+                .get("input", {})
+                .get("required", {})
+                .get("vae_name", [[]])[0]
+            )
+            for name in vae_values:
+                models.append({
+                    "model_id": f"comfyui_vae:{name}",
+                    "name": name,
+                    "type": "vae",
+                    "category": "vae",
+                })
+        except Exception as e:
+            logger.warning("Failed to sync VAE models from ComfyUI: %s", e)
+
+        return models
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        return await self.sync_models()

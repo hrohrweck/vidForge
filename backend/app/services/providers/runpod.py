@@ -1,16 +1,53 @@
 import asyncio
 import base64
+import logging
+import random
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 import httpx
 
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
+from app.services.providers.base import (
+    ComfyUIProvider,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderInfo,
+    ProviderOverloadedError,
+    ProviderTimeoutError,
+    VideoProvider,
+)
+from app.services.providers.comfyui.workflow_builders import build_wan_video_workflow
+
+logger = logging.getLogger(__name__)
 
 
-class RunPodProvider(ComfyUIProvider):
+class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
+    """RunPod serverless endpoint provider for ComfyUI workflows.
+
+    Implements both ImageProvider and VideoProvider interfaces for
+    the new provider abstraction layer, while maintaining backward
+    compatibility with the legacy ComfyUIProvider contract.
+    """
+
     BASE_URL = "https://api.runpod.ai/v2"
+
+    # RunPod-specific error patterns, checked before the default ProviderBase patterns.
+    _ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]] = [
+        (("cold start", "instance starting", "warming up"), ProviderTimeoutError),
+        (("runpod job failed", "runpod error"), ProviderError),
+        (("runpod job was cancelled", "cancelled"), ProviderError),
+        (("runpod api error", "runpod status check failed"), ProviderConnectionError),
+        (("runpod returned no output", "no output data"), ProviderError),
+        (("endpoint not found", "invalid endpoint"), ProviderConnectionError),
+        # Inherit default patterns from ProviderBase
+        (("overloaded", "capacity", "queue is full"), ProviderOverloadedError),
+        (("rate limit", "429"), ProviderError),
+        (("connection", "connectionerror"), ProviderConnectionError),
+        (("timeout", "timed out"), ProviderTimeoutError),
+    ]
 
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
@@ -187,6 +224,156 @@ class RunPodProvider(ComfyUIProvider):
                 cost_per_job=None,
                 message=f"Error: {str(e)}",
             )
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True,
+            supports_video=True,
+            supports_llm=False,
+            supports_model_sync=True,
+        )
+
+    async def generate_image(
+        self,
+        prompt: str,
+        model: str = "flux1-schnell",
+        aspect_ratio: str = "16:9",
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        workflow = self._build_image_workflow(prompt, aspect_ratio)
+        progress_callback = kwargs.get("progress_callback")
+        run_id = await self.queue_prompt(workflow)
+        result = await self.wait_for_completion(run_id, progress_callback=progress_callback)
+        output_data = await self.get_output(result)
+        if not output_data:
+            raise RuntimeError("RunPod returned no image data")
+        return (model, output_data)
+
+    async def generate_video(
+        self,
+        prompt: str,
+        model: str = "wan2.2",
+        duration: int = 5,
+        aspect_ratio: str = "16:9",
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        fps = int(self.config.get("wan_video_fps") or 16)
+        frames = max(duration * fps, 9)
+        if frames % 2 == 0:
+            frames += 1
+        workflow = build_wan_video_workflow(
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            frames=frames,
+            provider_config=self.config,
+        )
+        progress_callback = kwargs.get("progress_callback")
+        run_id = await self.queue_prompt(workflow)
+        result = await self.wait_for_completion(run_id, progress_callback=progress_callback)
+        output_data = await self.get_output(result)
+        if not output_data:
+            raise RuntimeError("RunPod returned no video data")
+        return (model, output_data)
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        info = await self.get_endpoint_info()
+        models = self._default_models()
+        if info:
+            for m in models:
+                m["endpoint_available"] = info.get("status") in ("RUNNING", "READY")
+        return models
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        return self._default_models()
+
+    def _default_models(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "wan2.2",
+                "name": "Wan 2.2",
+                "type": "video",
+                "capabilities": ["text-to-video", "image-to-video"],
+                "provider_type": "runpod",
+            },
+            {
+                "id": "flux1-schnell",
+                "name": "Flux.1 Schnell",
+                "type": "image",
+                "capabilities": ["text-to-image"],
+                "provider_type": "runpod",
+            },
+        ]
+
+    @staticmethod
+    def _image_resolution(aspect_ratio: str) -> tuple[int, int]:
+        ratios = {
+            "16:9": (1280, 720),
+            "9:16": (720, 1280),
+            "1:1": (1024, 1024),
+            "4:3": (1024, 768),
+            "3:2": (1152, 768),
+            "21:9": (1680, 720),
+        }
+        return ratios.get(aspect_ratio, (1280, 720))
+
+    def _build_image_workflow(self, prompt: str, aspect_ratio: str) -> dict[str, Any]:
+        width, height = self._image_resolution(aspect_ratio)
+        seed = random.randint(0, 2**31 - 1)
+
+        unet_name = str(self.config.get("flux_unet_name") or "flux1-schnell-fp8.safetensors")
+        clip_name1 = str(self.config.get("flux_clip_name1") or "clip_l.safetensors")
+        clip_name2 = str(self.config.get("flux_clip_name2") or "t5xxl_fp8_e4m3fn.safetensors")
+        vae_name = str(self.config.get("flux_vae_name") or "ae.safetensors")
+
+        return {
+            "1": {
+                "class_type": "UNETLoader",
+                "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
+            },
+            "2": {
+                "class_type": "DualCLIPLoader",
+                "inputs": {"clip_name1": clip_name1, "clip_name2": clip_name2, "type": "flux"},
+            },
+            "3": {
+                "class_type": "VAELoader",
+                "inputs": {"vae_name": vae_name},
+            },
+            "4": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": prompt, "clip": ["2", 0]},
+            },
+            "5": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "", "clip": ["2", 0]},
+            },
+            "6": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": width, "height": height, "batch_size": 1},
+            },
+            "7": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": 4,
+                    "cfg": 1.0,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": 1.0,
+                    "model": ["1", 0],
+                    "positive": ["4", 0],
+                    "negative": ["5", 0],
+                    "latent_image": ["6", 0],
+                },
+            },
+            "8": {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["7", 0], "vae": ["3", 0]},
+            },
+            "9": {
+                "class_type": "SaveImage",
+                "inputs": {"images": ["8", 0], "filename_prefix": "vidforge"},
+            },
+        }
 
     async def estimate_cost(self, workflow: dict[str, Any]) -> float:
         estimated_seconds = await self.estimate_duration(workflow)

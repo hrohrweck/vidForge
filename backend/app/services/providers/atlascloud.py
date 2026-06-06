@@ -12,7 +12,19 @@ import httpx
 from app.database import ModelConfig
 from app.services.llm_service import LLMChunk, LLMError
 from app.services.model_config_service import ModelConfigService
-from app.services.providers.base import ComfyUIProvider, ProviderInfo
+from app.services.providers.base import (
+    ComfyUIProvider,
+    ImageProvider,
+    LLMProvider,
+    ProviderCapabilities,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderInfo,
+    ProviderOverloadedError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    VideoProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +32,7 @@ ATLAS_LLM_BASE = "https://api.atlascloud.ai/v1"
 ATLAS_API_BASE = "https://api.atlascloud.ai/api/v1"
 
 
-class AtlasCloudProvider(ComfyUIProvider):
+class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvider):
     """AtlasCloud.ai provider.
 
     LLM: OpenAI-compatible streaming via /v1/chat/completions.
@@ -35,6 +47,38 @@ class AtlasCloudProvider(ComfyUIProvider):
         self.api_key = config.get("api_key", "")
         self.base_url = ATLAS_LLM_BASE
         self.client: httpx.AsyncClient | None = None
+        self._available_models: list[dict[str, Any]] = []
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_image=True,
+            supports_video=True,
+            supports_llm=True,
+            supports_model_sync=True,
+        )
+
+    def classify_error(self, exc: Exception) -> ProviderError:
+        msg = str(exc).lower()
+
+        if any(token in msg for token in ("overloaded", "capacity", "queue is full", "queue full")):
+            return ProviderOverloadedError(str(exc))
+        if any(token in msg for token in ("rate limit", "429", "too many requests")):
+            return ProviderRateLimitError(str(exc))
+        if any(token in msg for token in ("timeout", "timed out")):
+            return ProviderTimeoutError(str(exc))
+        if any(
+            token in msg
+            for token in (
+                "connection",
+                "connectionerror",
+                "connect error",
+                "network error",
+                "connection reset",
+            )
+        ):
+            return ProviderConnectionError(str(exc))
+
+        return super().classify_error(exc)
 
     # ── Initialization ────────────────────────────────────────────
 
@@ -49,7 +93,13 @@ class AtlasCloudProvider(ComfyUIProvider):
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         raise NotImplementedError("AtlasCloud uses direct API calls, not ComfyUI")
 
-    async def wait_for_completion(self, job_id: str) -> dict:
+    async def wait_for_completion(
+        self,
+        job_id: str,
+        poll_interval: float = 2.0,
+        timeout: float = 172800.0,
+        progress_callback: Any = None,
+    ) -> dict:
         raise NotImplementedError("Use generate_image/generate_video instead")
 
     async def get_output(self, result: dict) -> bytes | None:
@@ -73,15 +123,29 @@ class AtlasCloudProvider(ComfyUIProvider):
 
     # ── LLM Chat (OpenAI-compatible — same as Poe) ─────────────────
 
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        return self.chat_stream(messages=messages, model=model, **kwargs)
+
     async def chat_stream(
         self,
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[LLMChunk]:
         client = self.client
         if not client:
             raise RuntimeError("Provider not initialized")
+
+        if tools is None and "tools" in kwargs:
+            maybe_tools = kwargs.get("tools")
+            if isinstance(maybe_tools, list):
+                tools = maybe_tools
 
         effective_tools = tools
         if effective_tools and model in self._models_without_tools:
@@ -221,6 +285,75 @@ class AtlasCloudProvider(ComfyUIProvider):
             else:
                 target[key] = value
 
+    def supports_tools(self, model: str) -> bool:
+        return model not in self._models_without_tools
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        client = self.client
+        if not client:
+            raise RuntimeError("Provider not initialized")
+
+        response = await client.get(
+            f"{ATLAS_API_BASE}/models",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
+        if response.status_code != 200:
+            self._available_models = []
+            return []
+
+        data = response.json()
+        models = data.get("data", [])
+        normalized = [self._normalize_model(m) for m in models if isinstance(m, dict)]
+        self._available_models = normalized
+        return normalized
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        if self._available_models:
+            return self._available_models
+        return await self.sync_models()
+
+    @staticmethod
+    def _normalize_model(model_data: dict[str, Any]) -> dict[str, Any]:
+        atype = model_data.get("type", "Text").lower()
+        model_id = model_data.get("model", "").lower()
+        caps: dict[str, Any] = {"supports_chat": atype == "text"}
+
+        if atype == "image":
+            if any(x in model_id for x in ("/edit", "image-edit", "image-to-image", "img2img")):
+                caps.update({"accepts_image": True, "accepts_text": True, "outputs_image": True})
+            else:
+                caps.update({"accepts_text": True, "outputs_image": True})
+        elif atype == "video":
+            if "image-to-video" in model_id or "/i2v" in model_id or "start-end-frame-to-video" in model_id:
+                caps.update({"accepts_image": True, "outputs_video": True})
+            elif "reference-to-video" in model_id:
+                caps.update({"accepts_image": True, "accepts_video": True, "outputs_video": True})
+            elif any(x in model_id for x in ("extend-video", "video-edit", "video-to-video", "/v2v")):
+                caps.update({"accepts_video": True, "outputs_video": True})
+            elif "text-to-video" in model_id or "/t2v" in model_id:
+                caps.update({"accepts_text": True, "outputs_video": True})
+            else:
+                caps.update({"accepts_text": True, "outputs_video": True})
+        elif atype == "text":
+            caps.update({"accepts_text": True, "outputs_text": True})
+
+        provider_model_id = model_data.get("model", "")
+        return {
+            "model_id": provider_model_id,
+            "provider_model_id": provider_model_id,
+            "display_name": model_data.get("displayName") or provider_model_id,
+            "modality": atype,
+            "endpoint_type": (
+                "generateImage"
+                if atype == "image"
+                else "generateVideo"
+                if atype == "video"
+                else "chat_completions"
+            ),
+            "capabilities": caps,
+            "cost_config": {"currency": "credits"},
+        }
+
     # ── Model Config helper ───────────────────────────────────────
 
     async def _get_model_config(self, model: str) -> ModelConfig | None:
@@ -242,7 +375,8 @@ class AtlasCloudProvider(ComfyUIProvider):
         aspect_ratio: str = "3:2",
         size: str | None = None,
         negative_prompt: str | None = None,
-    ) -> tuple[str, bytes] | None:
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
         """Submit an image generation job and poll until completion."""
         client = self.client
         if not client:
@@ -270,6 +404,9 @@ class AtlasCloudProvider(ComfyUIProvider):
         else:
             if "aspect_ratio" not in payload:
                 payload["aspect_ratio"] = aspect_ratio
+
+        if negative_prompt is None and isinstance(kwargs.get("negative_prompt"), str):
+            negative_prompt = kwargs["negative_prompt"]
 
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
@@ -360,7 +497,8 @@ class AtlasCloudProvider(ComfyUIProvider):
         aspect_ratio: str = "16:9",
         image_path: str | None = None,
         reference_image_url: str | None = None,
-    ) -> tuple[str, bytes] | None:
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
         """Submit a video generation job and poll until completion."""
         client = self.client
         if not client:
@@ -509,7 +647,7 @@ class AtlasCloudProvider(ComfyUIProvider):
             return float(cc.get("credits_per_second", 0)) * duration
         return 0.0
 
-    def estimate_duration(self, workflow: dict[str, Any]) -> float:
+    async def estimate_duration(self, workflow: dict[str, Any]) -> float:
         return 60.0
 
 
