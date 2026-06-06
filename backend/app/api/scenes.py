@@ -260,7 +260,7 @@ async def plan_scenes(
     if text_model:
         provider = await resolve_llm(text_model, db)
 
-    planner = MusicVideoPlanner(provider=provider)
+    planner = MusicVideoPlanner(provider=provider, model=text_model)
     try:
         plan = await planner.plan_music_video(
             lyrics=request.lyrics_data, duration=duration, style=request.style

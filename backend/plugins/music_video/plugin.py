@@ -106,7 +106,7 @@ class MusicVideoPlugin(PluginBase):
             provider = await resolve_llm(text_model, db)
 
         from .planner import plan_music_video
-        plan = await plan_music_video(lyrics=lyrics, duration=duration, style=style, provider=provider)
+        plan = await plan_music_video(lyrics=lyrics, duration=duration, style=style, provider=provider, model=text_model)
 
         # Create VideoScene rows
         from sqlalchemy import delete as sa_delete

@@ -48,6 +48,7 @@ async def plan_scenes_from_prompt(
     style: str = "realistic",
     avatars_context: str | None = None,
     provider: Any | None = None,
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Plan scenes from a single text prompt.
 
@@ -55,7 +56,7 @@ async def plan_scenes_from_prompt(
     ``start_time``, ``end_time``, ``visual_description``,
     ``image_prompt``, ``mood``, ``camera_movement``.
     """
-    llm = LLMClient()
+    llm = LLMClient(model=model)
     try:
         user_prompt = (
             f"Create a scene plan for a {duration}-second video.\n"

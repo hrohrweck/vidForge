@@ -388,7 +388,7 @@ class LLMClient:
                 parts: list[str] = []
                 stream = provider.chat_stream(
                     messages,
-                    model=getattr(provider, "model", None),
+                    model=self.model,
                 )
                 async for chunk in stream:
                     if chunk.type == "text" and chunk.content:
@@ -491,8 +491,8 @@ Output only the enhanced prompt, nothing else."""
         "manga": "manga style, black and white with dramatic shading, strong contrasts, stylized",
     }
 
-    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None):
-        self.llm = llm_client or LLMClient()
+    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None, model: str | None = None):
+        self.llm = llm_client or LLMClient(model=model)
         self.provider = provider
 
     async def close(self) -> None:

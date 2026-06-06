@@ -74,7 +74,7 @@ class PromptToVideoPlugin(PluginBase):
         enhance = input_data.get("enhance_prompt", True)
         if enhance and prompt:
             from app.services.llm_service import PromptEnhancer
-            enhancer = PromptEnhancer(provider=provider)
+            enhancer = PromptEnhancer(provider=provider, model=text_model)
             try:
                 enhanced = await enhancer.enhance(prompt, style)
                 job.input_data = {**input_data, "enhanced_prompt": enhanced}
@@ -115,6 +115,7 @@ class PromptToVideoPlugin(PluginBase):
             style=style,
             avatars_context=avatars_context or None,
             provider=provider,
+            model=text_model,
         )
 
         # Clear any existing scenes

@@ -120,6 +120,7 @@ class ScriptToVideoPlugin(PluginBase):
             style=style,
             avatars_context=avatars_context or None,
             provider=provider,
+            model=text_model,
         )
 
         await db.execute(sa_delete(VideoScene).where(VideoScene.job_id == job.id))

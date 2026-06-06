@@ -47,9 +47,10 @@ async def plan_scenes_from_script(
     style: str = "realistic",
     avatars_context: str | None = None,
     provider: Any | None = None,
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Plan scenes from parsed script segments."""
-    llm = LLMClient()
+    llm = LLMClient(model=model)
     try:
         seg_text = ""
         for i, seg in enumerate(segments):

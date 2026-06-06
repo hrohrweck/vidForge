@@ -32,8 +32,8 @@ When a scene includes an avatar:
 Example image_prompt with avatar: "cinematic style: Alice (a red-haired detective in a trench coat) examining evidence on a dimly lit desk, dramatic lighting, photorealistic"
 Only use avatars that are provided — do NOT invent new characters."""
 
-    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None):
-        self.llm = llm_client or LLMClient(model="huihui_ai/qwen3.6-abliterated:35b-Claude-4.7")
+    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None, model: str | None = None):
+        self.llm = llm_client or LLMClient(model=model)
         self.provider = provider
 
     async def close(self) -> None:
