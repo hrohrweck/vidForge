@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
+
+from app.services.llm_service import LLMChunk
 
 
 @dataclass
@@ -22,7 +25,157 @@ class JobResult:
     cost: float = 0.0
 
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    supports_image: bool = False
+    supports_video: bool = False
+    supports_llm: bool = False
+    supports_model_sync: bool = False
+
+
+@dataclass(frozen=True)
+class ModelListResult:
+    provider_id: str
+    models: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    provider_id: str
+    synced_models: list[dict[str, Any]]
+
+
+class ProviderError(Exception):
+    """Base error for provider operations."""
+
+
+class ProviderOverloadedError(ProviderError):
+    """Raised when a provider is overloaded or at capacity."""
+
+
+class ProviderRateLimitError(ProviderError):
+    """Raised when requests are rate-limited."""
+
+
+class ProviderConnectionError(ProviderError):
+    """Raised when provider connectivity fails."""
+
+
+class ProviderTimeoutError(ProviderError):
+    """Raised when provider operations time out."""
+
+
+class ProviderBase(ABC):
+    # Class-level pattern catalog used by the default ``classify_error`` impl.
+    # Subclasses can extend (or override) this list to add provider-specific
+    # error mapping. Order matters — first matching pattern wins.
+    _ERROR_PATTERNS: list[tuple[tuple[str, ...], type[ProviderError]]] = [
+        (("overloaded", "capacity", "queue is full"), ProviderOverloadedError),
+        (("rate limit", "429"), ProviderRateLimitError),
+        (("connection", "connectionerror"), ProviderConnectionError),
+        (("timeout", "timed out"), ProviderTimeoutError),
+    ]
+
+    @abstractmethod
+    async def initialize(self, config: dict[str, Any]) -> None:
+        """Initialize provider with configuration."""
+        ...
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        """Cleanup provider resources."""
+        ...
+
+    @abstractmethod
+    async def get_status(self) -> ProviderInfo:
+        """Get current provider status."""
+        ...
+
+    @abstractmethod
+    def get_capabilities(self) -> ProviderCapabilities:
+        """Return capability flags for this provider."""
+        ...
+
+    def classify_error(self, exc: Exception) -> ProviderError:
+        """Map arbitrary exceptions to provider-specific error types.
+
+        Default implementation matches common error patterns in the exception
+        message (case-insensitive) against ``_ERROR_PATTERNS``. Subclasses can
+        either extend ``_ERROR_PATTERNS`` with provider-specific patterns or
+        override this method entirely for custom classification logic.
+        """
+        msg = str(exc).lower()
+        for patterns, error_class in self._ERROR_PATTERNS:
+            if any(p in msg for p in patterns):
+                return error_class(str(exc))
+        return ProviderError(str(exc))
+
+    async def sync_models(self) -> list[dict[str, Any]]:
+        """Synchronize provider models into local configuration."""
+        raise NotImplementedError("Provider does not support model sync")
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        """List models available from this provider."""
+        raise NotImplementedError("Provider does not support model listing")
+
+
+class ImageProvider(ProviderBase, ABC):
+    @abstractmethod
+    async def generate_image(
+        self,
+        prompt: str,
+        model: str,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        """Generate an image and return (asset_id, image_bytes)."""
+        ...
+
+
+class VideoProvider(ProviderBase, ABC):
+    @abstractmethod
+    async def generate_video(
+        self,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        **kwargs: Any,
+    ) -> tuple[str, bytes]:
+        """Generate a video and return (asset_id, video_bytes)."""
+        ...
+
+
+class LLMProvider(ProviderBase, ABC):
+    @abstractmethod
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        """Primary chat interface that yields LLMChunk responses."""
+        ...
+
+    @abstractmethod
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        """Stream chat responses as LLMChunk items."""
+        ...
+
+    @abstractmethod
+    def supports_tools(self, model: str) -> bool:
+        """Return True if the given model supports tool calling."""
+        ...
+
+
 class ComfyUIProvider(ABC):
+    """Deprecated provider contract kept for migration compatibility."""
+
     @abstractmethod
     async def initialize(self, config: dict) -> None:
         """Initialize provider with configuration."""
