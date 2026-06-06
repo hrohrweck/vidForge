@@ -32,11 +32,14 @@ When a scene includes an avatar:
 Example image_prompt with avatar: "cinematic style: Alice (a red-haired detective in a trench coat) examining evidence on a dimly lit desk, dramatic lighting, photorealistic"
 Only use avatars that are provided — do NOT invent new characters."""
 
-    def __init__(self):
-        self.llm = LLMClient(model="huihui_ai/qwen3.6-abliterated:35b-Claude-4.7")
+    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None):
+        self.llm = llm_client or LLMClient(model="huihui_ai/qwen3.6-abliterated:35b-Claude-4.7")
+        self.provider = provider
 
     async def close(self) -> None:
         await self.llm.close()
+        if self.provider is not None and hasattr(self.provider, "shutdown"):
+            await self.provider.shutdown()
 
     async def plan_music_video(
         self,
@@ -56,6 +59,7 @@ Only use avatars that are provided — do NOT invent new characters."""
             system=self.SYSTEM_PROMPT,
             max_tokens=4096,
             temperature=0.7,
+            provider=self.provider,
         )
 
         if not response:

@@ -46,11 +46,11 @@ async def plan_scenes_from_script(
     duration: float = 30,
     style: str = "realistic",
     avatars_context: str | None = None,
+    provider: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Plan scenes from parsed script segments."""
     llm = LLMClient()
     try:
-        # Build segment summary
         seg_text = ""
         for i, seg in enumerate(segments):
             narration = seg.get("narration", "")
@@ -72,11 +72,14 @@ async def plan_scenes_from_script(
             system=SYSTEM_PROMPT,
             max_tokens=4096,
             temperature=0.7,
+            provider=provider,
         )
 
         return _parse_response(response, duration)
     finally:
         await llm.close()
+        if provider is not None and hasattr(provider, "shutdown"):
+            await provider.shutdown()
 
 
 def _parse_response(response: str, target_duration: float) -> list[dict[str, Any]]:

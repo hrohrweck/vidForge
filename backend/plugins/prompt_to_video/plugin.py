@@ -62,18 +62,26 @@ class PromptToVideoPlugin(PluginBase):
     ) -> dict[str, Any]:
         input_data = job.input_data or {}
         style = input_data.get("style", "realistic")
+        text_model = input_data.get("text_model")
+
+        provider = None
+        if text_model:
+            from app.services.llm_service import resolve_llm
+            provider = await resolve_llm(text_model, db)
 
         # Optionally enhance the prompt via LLM
         prompt = input_data.get("prompt", "")
         enhance = input_data.get("enhance_prompt", True)
         if enhance and prompt:
             from app.services.llm_service import PromptEnhancer
-            enhancer = PromptEnhancer()
+            enhancer = PromptEnhancer(provider=provider)
             try:
                 enhanced = await enhancer.enhance(prompt, style)
                 job.input_data = {**input_data, "enhanced_prompt": enhanced}
             finally:
                 await enhancer.close()
+        elif provider is not None and hasattr(provider, "shutdown"):
+            await provider.shutdown()
 
         return context
 
@@ -85,6 +93,7 @@ class PromptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
         from app.services.avatar_prompt_builder import build_avatar_context_string
+        from app.services.llm_service import resolve_llm
 
         from .planner import plan_scenes_from_prompt
 
@@ -92,6 +101,11 @@ class PromptToVideoPlugin(PluginBase):
         prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
         style = input_data.get("style", "realistic")
         duration = input_data.get("duration", 10)
+        text_model = input_data.get("text_model")
+
+        provider = None
+        if text_model:
+            provider = await resolve_llm(text_model, db)
 
         avatars_context = build_avatar_context_string(context.get("avatars", []))
 
@@ -100,6 +114,7 @@ class PromptToVideoPlugin(PluginBase):
             duration=duration,
             style=style,
             avatars_context=avatars_context or None,
+            provider=provider,
         )
 
         # Clear any existing scenes

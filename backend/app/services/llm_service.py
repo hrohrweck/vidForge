@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import UUID
 
 import httpx
 
@@ -27,6 +28,130 @@ class LLMChunk:
     tool_calls: list[dict[str, Any]] | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+
+
+async def resolve_llm(model_id: str, db=None) -> "LLMClient | Any":
+    """Resolve a model_id to the appropriate LLM client.
+
+    Looks up the model in model_configs to determine the provider.
+    Falls back to prefix matching for backward compatibility,
+    then to the default LLMClient (Ollama).
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.database import ModelConfig, Provider
+
+    try:
+        if db is None:
+            from app.workers.context import ctx
+
+            async with ctx.session_factory() as db_session:
+                return await resolve_llm(model_id, db_session)
+
+        result = await db.execute(
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
+                ModelConfig.model_id == model_id,
+                ModelConfig.is_active == True,  # noqa: E712
+            )
+        )
+        config = result.scalar_one_or_none()
+        if config and config.provider:
+            provider = config.provider
+            if provider.provider_type == "poe":
+                from app.services.providers import PoeProvider
+
+                instance = PoeProvider(provider.id, provider.config)
+                await instance.initialize(provider.config)
+                return instance
+            elif provider.provider_type == "atlascloud":
+                from app.services.providers import AtlasCloudProvider
+
+                instance = AtlasCloudProvider(provider.id, provider.config)
+                await instance.initialize(provider.config)
+                return instance
+    except Exception:
+        logger.debug("Failed to resolve LLM via model_configs", exc_info=True)
+
+    if model_id.startswith("atlascloud:"):
+        try:
+            from app.services.providers import AtlasCloudProvider
+
+            if db is None:
+                from app.workers.context import ctx
+
+                async with ctx.session_factory() as db_session:
+                    result = await db_session.execute(
+                        select(Provider).where(
+                            Provider.provider_type == "atlascloud",
+                            Provider.is_active == True,  # noqa: E712
+                        )
+                    )
+                    for provider in result.scalars().all():
+                        try:
+                            instance = AtlasCloudProvider(provider.id, provider.config)
+                            await instance.initialize(provider.config)
+                            return instance
+                        except Exception:
+                            continue
+            else:
+                result = await db.execute(
+                    select(Provider).where(
+                        Provider.provider_type == "atlascloud",
+                        Provider.is_active == True,  # noqa: E712
+                    )
+                )
+                for provider in result.scalars().all():
+                    try:
+                        instance = AtlasCloudProvider(provider.id, provider.config)
+                        await instance.initialize(provider.config)
+                        return instance
+                    except Exception:
+                        continue
+        except Exception:
+            logger.debug("Failed to resolve atlascloud fallback", exc_info=True)
+
+    if model_id.startswith("poe:"):
+        try:
+            from app.services.providers import PoeProvider
+
+            if db is None:
+                from app.workers.context import ctx
+
+                async with ctx.session_factory() as db_session:
+                    result = await db_session.execute(
+                        select(Provider).where(
+                            Provider.provider_type == "poe",
+                            Provider.is_active == True,  # noqa: E712
+                        )
+                    )
+                    for provider in result.scalars().all():
+                        try:
+                            instance = PoeProvider(provider.id, provider.config)
+                            await instance.initialize(provider.config)
+                            return instance
+                        except Exception:
+                            continue
+            else:
+                result = await db.execute(
+                    select(Provider).where(
+                        Provider.provider_type == "poe",
+                        Provider.is_active == True,  # noqa: E712
+                    )
+                )
+                for provider in result.scalars().all():
+                    try:
+                        instance = PoeProvider(provider.id, provider.config)
+                        await instance.initialize(provider.config)
+                        return instance
+                    except Exception:
+                        continue
+        except Exception:
+            logger.debug("Failed to resolve poe fallback", exc_info=True)
+
+    return LLMClient()
 
 
 class LLMClient:
@@ -185,11 +310,17 @@ class LLMClient:
         max_tokens: int = 512,
         temperature: float = 0.7,
         retries: int = 3,
+        provider: Any | None = None,
     ) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+
+        if provider is not None:
+            return await self._generate_with_provider(
+                messages, provider, max_tokens, temperature, retries
+            )
 
         last_error: Exception | None = None
         for attempt in range(retries):
@@ -220,10 +351,9 @@ class LLMClient:
                 if not content:
                     raise LLMError(f"Empty response from LLM (model: {self.model})")
 
-                # Strip thinking/reasoning blocks so callers get clean output
                 import re
 
-                clean = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                clean = re.sub(r" <think>.*?</think>", "", content, flags=re.DOTALL).strip()
                 clean = re.sub(r"【thinking】.*?【/thinking】", "", clean, flags=re.DOTALL).strip()
                 if clean:
                     content = clean
@@ -243,6 +373,61 @@ class LLMClient:
                 if attempt < retries - 1:
                     await asyncio.sleep(wait)
                 continue
+
+    async def _generate_with_provider(
+        self,
+        messages: list[dict[str, Any]],
+        provider: Any,
+        max_tokens: int,
+        temperature: float,
+        retries: int,
+    ) -> str:
+        last_error: Exception | None = None
+        for attempt in range(retries):
+            try:
+                parts: list[str] = []
+                stream = provider.chat_stream(
+                    messages,
+                    model=getattr(provider, "model", None),
+                )
+                async for chunk in stream:
+                    if chunk.type == "text" and chunk.content:
+                        parts.append(chunk.content)
+                    if chunk.type == "done":
+                        break
+
+                content = "".join(parts)
+                if not content:
+                    raise LLMError("Empty response from LLM provider")
+
+                import re
+
+                clean = re.sub(r" <think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                clean = re.sub(r"【thinking】.*?【/thinking】", "", clean, flags=re.DOTALL).strip()
+                if clean:
+                    content = clean
+
+                return content
+            except Exception as e:
+                last_error = e
+                wait = 2**attempt
+                logger.warning(
+                    "LLM provider request attempt %d/%d failed (wait=%ds): %s: %s",
+                    attempt + 1,
+                    retries,
+                    wait,
+                    type(e).__name__,
+                    e,
+                )
+                if attempt < retries - 1:
+                    await asyncio.sleep(wait)
+                continue
+
+        error_type = type(last_error).__name__ if last_error else "Unknown"
+        error_msg = str(last_error) if last_error else "no error details"
+        raise LLMError(
+            f"LLM provider request failed after {retries} attempts: {error_type}: {error_msg}"
+        )
 
         error_type = type(last_error).__name__ if last_error else "Unknown"
         error_msg = str(last_error) if last_error else "no error details"
@@ -306,11 +491,14 @@ Output only the enhanced prompt, nothing else."""
         "manga": "manga style, black and white with dramatic shading, strong contrasts, stylized",
     }
 
-    def __init__(self, llm_client: LLMClient | None = None):
+    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None):
         self.llm = llm_client or LLMClient()
+        self.provider = provider
 
     async def close(self) -> None:
         await self.llm.close()
+        if self.provider is not None and hasattr(self.provider, "shutdown"):
+            await self.provider.shutdown()
 
     async def enhance(
         self,
@@ -329,6 +517,7 @@ Output only the enhanced prompt, nothing else."""
             system=self.SYSTEM_PROMPT,
             max_tokens=256,
             temperature=0.7,
+            provider=self.provider,
         )
 
         enhanced = enhanced.strip()

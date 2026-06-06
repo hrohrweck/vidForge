@@ -11,9 +11,10 @@ async def plan_music_video(
     lyrics: dict[str, Any],
     duration: float,
     style: str = "realistic",
+    provider: Any | None = None,
 ) -> dict[str, Any]:
     """Plan music video scenes from lyrics."""
-    planner = MusicVideoPlanner()
+    planner = MusicVideoPlanner(provider=provider)
     try:
         return await planner.plan_music_video(lyrics=lyrics, duration=duration, style=style)
     finally:

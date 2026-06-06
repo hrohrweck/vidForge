@@ -97,9 +97,16 @@ class MusicVideoPlugin(PluginBase):
         lyrics = input_data.get("lyrics", {})
         duration = context.get("audio_duration") or lyrics.get("duration", 30)
         style = input_data.get("style", "realistic")
+        text_model = input_data.get("text_model")
+
+        from app.services.llm_service import resolve_llm
+
+        provider = None
+        if text_model:
+            provider = await resolve_llm(text_model, db)
 
         from .planner import plan_music_video
-        plan = await plan_music_video(lyrics=lyrics, duration=duration, style=style)
+        plan = await plan_music_video(lyrics=lyrics, duration=duration, style=style, provider=provider)
 
         # Create VideoScene rows
         from sqlalchemy import delete as sa_delete

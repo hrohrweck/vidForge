@@ -98,6 +98,7 @@ class ScriptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
         from app.services.avatar_prompt_builder import build_avatar_context_string
+        from app.services.llm_service import resolve_llm
 
         from .planner import plan_scenes_from_script
 
@@ -105,6 +106,11 @@ class ScriptToVideoPlugin(PluginBase):
         segments = context.get("segments", [])
         style = input_data.get("style", "realistic")
         duration = context.get("total_duration", 30)
+        text_model = input_data.get("text_model")
+
+        provider = None
+        if text_model:
+            provider = await resolve_llm(text_model, db)
 
         avatars_context = build_avatar_context_string(context.get("avatars", []))
 
@@ -113,6 +119,7 @@ class ScriptToVideoPlugin(PluginBase):
             duration=duration,
             style=style,
             avatars_context=avatars_context or None,
+            provider=provider,
         )
 
         await db.execute(sa_delete(VideoScene).where(VideoScene.job_id == job.id))
