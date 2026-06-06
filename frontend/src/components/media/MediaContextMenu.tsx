@@ -6,7 +6,6 @@ import {
   FileEdit,
   Copy,
   ExternalLink,
-  Film,
 } from 'lucide-react'
 import type { MediaAsset } from '../../api/types/media'
 
@@ -24,7 +23,6 @@ interface MediaContextMenuProps {
   onDelete?: (asset: MediaAsset) => void
   onDownload?: (asset: MediaAsset) => void
   onTag?: (asset: MediaAsset) => void
-  onUseInProject?: (asset: MediaAsset) => void
   onOpenInNewTab?: (asset: MediaAsset) => void
   onCopyUrl?: (asset: MediaAsset) => void
 }
@@ -38,7 +36,6 @@ export function MediaContextMenu({
   onDelete,
   onDownload,
   onTag,
-  onUseInProject,
   onOpenInNewTab,
   onCopyUrl,
 }: MediaContextMenuProps) {
@@ -109,16 +106,6 @@ export function MediaContextMenu({
         >
           <Tag className="w-4 h-4" />
           Add Tags
-        </button>
-      )}
-
-      {onUseInProject && (
-        <button
-          onClick={() => handleAction(onUseInProject)}
-          className="w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
-        >
-          <Film className="w-4 h-4" />
-          Use in Project
         </button>
       )}
 

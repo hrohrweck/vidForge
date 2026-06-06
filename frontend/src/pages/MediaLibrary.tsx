@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { RenameDialog } from '../components/media/RenameDialog'
 import { DndContext } from '@dnd-kit/core'
 import { FolderRail } from '../components/media/FolderRail'
 import { MediaCanvas } from '../components/media/MediaCanvas'
@@ -12,12 +12,12 @@ import { UploadDropzone } from '../components/media/UploadDropzone'
 import { useFolderDnD } from '../hooks/useFolderDnD'
 import { useMediaKeyboard } from '../hooks/useMediaKeyboard'
 import { useMediaSelection } from '../hooks/useMediaSelection'
-import { useBulkMoveAssets, useBulkDeleteAssets, useUploadAssets, useAssets, useFolderTree, useCreateFolder, useUpdateFolder, useDeleteFolder } from '../hooks/useMedia'
+import { useBulkMoveAssets, useBulkDeleteAssets, useUploadAssets, useAssets, useFolderTree, useCreateFolder, useUpdateFolder, useDeleteFolder, useUpdateAsset } from '../hooks/useMedia'
+import { useMediaUpdates } from '../hooks/useMediaUpdates'
+import { toast } from '../hooks/use-toast'
 import type { MediaAsset, AssetListQuery } from '../api/types/media'
 
 export function MediaLibrary() {
-  const navigate = useNavigate()
-  
   // State
   const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>()
   const [view, setView] = useState<'grid' | 'list' | 'masonry'>('grid')
@@ -38,6 +38,8 @@ export function MediaLibrary() {
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [isLightboxOpen, setIsLightboxOpen] = useState(false)
   
+  const [renameAsset, setRenameAsset] = useState<MediaAsset | null>(null)
+  
   // Detail panel state
   const [selectedAssetForDetails, setSelectedAssetForDetails] = useState<MediaAsset | null>(null)
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false)
@@ -53,6 +55,8 @@ export function MediaLibrary() {
   const bulkMoveMutation = useBulkMoveAssets()
   const bulkDeleteMutation = useBulkDeleteAssets()
   const uploadMutation = useUploadAssets()
+  const updateAssetMutation = useUpdateAsset()
+  useMediaUpdates()
 
   // Folder tree data and CRUD
   const { data: folderTree = [] } = useFolderTree()
@@ -122,9 +126,12 @@ export function MediaLibrary() {
   }, [])
 
   const handleAssetDoubleClick = useCallback((asset: MediaAsset) => {
-    setSelectedAssetForDetails(asset)
-    setIsDetailPanelOpen(true)
-  }, [])
+    const index = allAssets.findIndex((a) => a.id === asset.id)
+    if (index !== -1) {
+      setLightboxIndex(index)
+      setIsLightboxOpen(true)
+    }
+  }, [allAssets])
 
   const handleContextMenu = useCallback((asset: MediaAsset, event: React.MouseEvent) => {
     event.preventDefault()
@@ -161,11 +168,22 @@ export function MediaLibrary() {
 
   const handleFolderChange = useCallback((folderId: string | undefined) => {
     setSelectedFolderId(folderId)
-    setQuery((prev) => ({ ...prev, folder_id: folderId }))
+    setQuery((prev) => {
+      const { search, ...rest } = prev
+      return { ...rest, folder_id: folderId }
+    })
     selection.clear()
   }, [selection])
 
-  const handleRenameAsset = useCallback((_asset: MediaAsset) => {}, [])
+  const handleRenameAsset = useCallback((asset: MediaAsset) => {
+    setRenameAsset(asset)
+  }, [])
+
+  const handleRenameSubmit = useCallback(async (newName: string) => {
+    if (!renameAsset) return
+    await updateAssetMutation.mutateAsync({ id: renameAsset.id, payload: { name: newName } })
+    setRenameAsset(null)
+  }, [renameAsset, updateAssetMutation])
 
   const handleDeleteAsset = useCallback((asset: MediaAsset) => {
     selection.selectOnly(asset.id)
@@ -176,13 +194,14 @@ export function MediaLibrary() {
     window.open(`/api/media/assets/${asset.id}/file?download=1`, '_blank')
   }, [])
 
-  const handleUseInProject = useCallback((asset: MediaAsset) => {
-    navigate(`/editor?asset=${asset.id}`)
-  }, [navigate])
-
-  const handleCopyUrl = useCallback((asset: MediaAsset) => {
+  const handleCopyUrl = useCallback(async (asset: MediaAsset) => {
     const url = `${window.location.origin}/api/media/assets/${asset.id}/file`
-    navigator.clipboard.writeText(url)
+    try {
+      await navigator.clipboard.writeText(url)
+      toast(`URL copied: ${url}`, 'success')
+    } catch {
+      toast('Failed to copy URL', 'error')
+    }
   }, [])
 
   const handleOpenInNewTab = useCallback((asset: MediaAsset) => {
@@ -261,7 +280,6 @@ export function MediaLibrary() {
         onRename={handleRenameAsset}
         onDelete={handleDeleteAsset}
         onDownload={handleDownloadAsset}
-        onUseInProject={handleUseInProject}
         onCopyUrl={handleCopyUrl}
         onOpenInNewTab={handleOpenInNewTab}
       />
@@ -274,6 +292,14 @@ export function MediaLibrary() {
         onClose={() => setIsLightboxOpen(false)}
         onNavigate={setLightboxIndex}
       />
+
+      {renameAsset && (
+        <RenameDialog
+          name={renameAsset.name}
+          onRename={handleRenameSubmit}
+          onCancel={() => setRenameAsset(null)}
+        />
+      )}
 
       {/* Upload Dropzone */}
       <UploadDropzone

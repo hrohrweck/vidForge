@@ -10,6 +10,8 @@ export interface MediaTileProps {
   onToggle?: (id: string) => void
   onRange?: (toId: string, orderedIds?: string[]) => void
   onSelectOnly?: (id: string) => void
+  onAssetClick?: (asset: MediaAsset) => void
+  onAssetDoubleClick?: (asset: MediaAsset) => void
   onRename?: (id: string, newName: string) => Promise<void>
   onMoreClick?: (asset: MediaAsset, event: React.MouseEvent) => void
   onContextMenu?: (asset: MediaAsset, event: React.MouseEvent) => void
@@ -44,6 +46,8 @@ export function MediaTile({
   onToggle,
   onRange,
   onSelectOnly,
+  onAssetClick,
+  onAssetDoubleClick,
   onRename,
   onMoreClick,
   onContextMenu,
@@ -108,11 +112,6 @@ export function MediaTile({
   }, [asset, onMoreClick])
 
   const handleClick = useCallback((e: React.MouseEvent) => {
-    if (e.detail === 2) {
-      // Double-click - don't trigger selection
-      return
-    }
-
     if (onSelectOnly && onToggle && onRange) {
       // Use the selection handlers if provided (for multi-select support)
       if (e.ctrlKey || e.metaKey) {
@@ -121,19 +120,27 @@ export function MediaTile({
         onRange(asset.id)
       } else {
         onSelectOnly(asset.id)
+        onAssetClick?.(asset)
       }
     } else if (onSelect) {
       // Fallback to simple onSelect
       onSelect(asset.id, !selected, e)
     }
-  }, [asset.id, selected, onSelect, onSelectOnly, onToggle, onRange])
+  }, [asset, asset.id, selected, onSelect, onSelectOnly, onToggle, onRange, onAssetClick])
 
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()
-    if (onSelect) {
+    if (onToggle) {
+      onToggle(asset.id)
+    } else if (onSelect) {
       onSelect(asset.id, e.target.checked, e as unknown as React.MouseEvent)
     }
-  }, [asset.id, onSelect])
+  }, [asset.id, onSelect, onToggle])
+
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onAssetDoubleClick?.(asset)
+  }, [asset, onAssetDoubleClick])
 
   const handleNameDoubleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -193,6 +200,7 @@ export function MediaTile({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onContextMenu={onContextMenu ? (e) => onContextMenu(asset, e) : undefined}
     >
       {/* Main content area */}

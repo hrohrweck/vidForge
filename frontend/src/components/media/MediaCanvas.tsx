@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { MediaAsset } from '../../api/types/media'
+import { getAssetUrl, getPreviewUrl } from '../../api/media'
 import { MediaTile } from './MediaTile'
 import type { UseMediaSelectionReturn } from '../../hooks/useMediaSelection'
 
@@ -199,9 +200,9 @@ function MediaListRow({
   }
 
   const previewUrl = asset.preview_path
-    ? `/api/media/assets/${asset.id}/preview`
+    ? getPreviewUrl(asset.id)
     : asset.file_type === 'image'
-    ? `/api/media/assets/${asset.id}`
+    ? getAssetUrl(asset)
     : undefined
 
   return (
@@ -223,10 +224,13 @@ function MediaListRow({
       </td>
       <td className="p-3">
         <div className="h-12 w-16 bg-muted rounded overflow-hidden flex items-center justify-center">
-          {previewUrl && asset.file_type === 'image' ? (
-            <img src={previewUrl} alt="" className="h-full w-full object-cover" />
-          ) : asset.file_type === 'video' ? (
-            <div className="text-xs text-muted-foreground">Video</div>
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt={asset.name}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
           ) : (
             <div className="text-xs text-muted-foreground capitalize">{asset.file_type}</div>
           )}
@@ -311,7 +315,12 @@ export function MediaCanvas({
               onSelectOnly={selection.selectOnly}
               onToggle={selection.toggle}
               onRange={(toId) => selection.range(toId, assets.map((a) => a.id))}
-              onMoreClick={onAssetClick ? (a) => onAssetClick(a) : undefined}
+              onAssetClick={onAssetClick}
+              onAssetDoubleClick={onAssetDoubleClick}
+              onMoreClick={(a, e) => {
+                e.preventDefault()
+                onContextMenu?.(a, e as unknown as React.MouseEvent)
+              }}
               onContextMenu={onContextMenu}
             />
           ))}
@@ -397,7 +406,12 @@ export function MediaCanvas({
                 onSelectOnly={selection.selectOnly}
                 onToggle={selection.toggle}
                 onRange={(toId) => selection.range(toId, assets.map((a) => a.id))}
-                onMoreClick={onAssetClick ? (a) => onAssetClick(a) : undefined}
+                onAssetClick={onAssetClick}
+                onAssetDoubleClick={onAssetDoubleClick}
+                onMoreClick={(a, e) => {
+                  e.preventDefault()
+                  onContextMenu?.(a, e as unknown as React.MouseEvent)
+                }}
                 onContextMenu={onContextMenu}
               />
             </div>
