@@ -253,7 +253,14 @@ async def plan_scenes(
         if lyrics_duration and lyrics_duration > 30 and duration <= 30:
             duration = lyrics_duration
 
-    planner = MusicVideoPlanner()
+    from app.services.llm_service import resolve_llm
+
+    text_model = job.input_data.get("text_model") if job.input_data else None
+    provider = None
+    if text_model:
+        provider = await resolve_llm(text_model, db)
+
+    planner = MusicVideoPlanner(provider=provider)
     try:
         plan = await planner.plan_music_video(
             lyrics=request.lyrics_data, duration=duration, style=request.style

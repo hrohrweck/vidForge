@@ -215,6 +215,26 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
             job.status = "failed"
             job.error_message = str(exc)
             await db.commit()
+
+            try:
+                from app.services.error_capture import log_user_error
+                from app.database import ErrorSeverity, ErrorOrigin
+                friendly = str(exc)
+                if len(friendly) > 200:
+                    friendly = friendly[:200] + "..."
+                await log_user_error(
+                    db,
+                    user_id=job.user_id,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.VIDEO_GENERATION,
+                    message=f"Job failed during {stage}: {friendly}",
+                    details={"stage": stage, "error": str(exc), "job_id": str(job.id)},
+                    source_id=job.id,
+                    source_type="job",
+                )
+            except Exception:
+                logger.warning("Failed to capture error for job %s", job_id, exc_info=True)
+
             raise
 
 
