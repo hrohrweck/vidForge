@@ -283,4 +283,24 @@ async def dispatch_scene_rerender(
             scene.status = "failed"
             scene.error_message = str(exc)
             await db.commit()
+
+            try:
+                from app.services.error_capture import log_user_error
+                from app.database import ErrorSeverity, ErrorOrigin
+                friendly = str(exc)
+                if len(friendly) > 200:
+                    friendly = friendly[:200] + "..."
+                await log_user_error(
+                    db,
+                    user_id=job.user_id,
+                    severity=ErrorSeverity.ERROR,
+                    origin=ErrorOrigin.VIDEO_GENERATION,
+                    message=f"Scene {media_type} generation failed: {friendly}",
+                    details={"media_type": media_type, "error": str(exc), "job_id": str(job.id), "scene_id": str(scene.id)},
+                    source_id=job.id,
+                    source_type="job",
+                )
+            except Exception:
+                logger.warning("Failed to capture error for scene re-render %s", job_id, exc_info=True)
+
             return {"status": "failed", "error": str(exc)}

@@ -571,12 +571,19 @@ async def generate_image(
             )
         if "x" not in aspect_ratio:
             aspect_ratio = _VIDEO_SEED_RESOLUTIONS.get(aspect_ratio, "1024x1024")
-        _cloud_id, image_data = await instance.generate_image(
-            prompt=prompt,
-            model=selected_model,
-            aspect_ratio=aspect_ratio,
-            image_path=reference_image_path if ptype == "poe" else None,
-        )
+        if ptype == "poe":
+            _cloud_id, image_data = await instance.generate_image(
+                prompt=prompt,
+                model=selected_model,
+                aspect_ratio=aspect_ratio,
+                image_path=reference_image_path if ptype == "poe" else None,
+            )
+        else:
+            _cloud_id, image_data = await instance.generate_image(
+                prompt=prompt,
+                model=selected_model,
+                aspect_ratio=aspect_ratio,
+            )
         if not image_data:
             exc = ValueError(f"Poe image generation returned no data (model={selected_model})")
             import asyncio
