@@ -195,6 +195,115 @@ describe('MediaTile', () => {
     })
   })
 
+  describe('click semantics', () => {
+    it('opens sidebar on single click', () => {
+      const onAssetClick = vi.fn()
+      const onSelectOnly = vi.fn()
+      const asset = createMockAsset()
+      renderWithProviders(
+        <MediaTile
+          asset={asset}
+          onSelectOnly={onSelectOnly}
+          onToggle={vi.fn()}
+          onRange={vi.fn()}
+          onAssetClick={onAssetClick}
+        />
+      )
+
+      fireEvent.click(screen.getByTestId('tile-container'))
+      expect(onAssetClick).toHaveBeenCalledWith(asset)
+      expect(onSelectOnly).toHaveBeenCalledWith('test-asset-1')
+    })
+
+    it('opens lightbox on double click', () => {
+      const onAssetDoubleClick = vi.fn()
+      const onSelectOnly = vi.fn()
+      const asset = createMockAsset()
+      renderWithProviders(
+        <MediaTile
+          asset={asset}
+          onSelectOnly={onSelectOnly}
+          onToggle={vi.fn()}
+          onRange={vi.fn()}
+          onAssetDoubleClick={onAssetDoubleClick}
+        />
+      )
+
+      fireEvent.doubleClick(screen.getByTestId('tile-container'))
+      expect(onAssetDoubleClick).toHaveBeenCalledWith(asset)
+      expect(onSelectOnly).not.toHaveBeenCalled()
+    })
+
+    it('toggles selection on Ctrl+click without opening sidebar', () => {
+      const onToggle = vi.fn()
+      const onAssetClick = vi.fn()
+      const onSelectOnly = vi.fn()
+      const onRange = vi.fn()
+      const asset = createMockAsset()
+      renderWithProviders(
+        <MediaTile
+          asset={asset}
+          onSelectOnly={onSelectOnly}
+          onToggle={onToggle}
+          onRange={onRange}
+          onAssetClick={onAssetClick}
+        />
+      )
+
+      fireEvent.click(screen.getByTestId('tile-container'), { ctrlKey: true })
+      expect(onToggle).toHaveBeenCalledWith('test-asset-1')
+      expect(onAssetClick).not.toHaveBeenCalled()
+      expect(onSelectOnly).not.toHaveBeenCalled()
+    })
+
+    it('range selects on Shift+click without opening sidebar', () => {
+      const onRange = vi.fn()
+      const onAssetClick = vi.fn()
+      const onSelectOnly = vi.fn()
+      const onToggle = vi.fn()
+      const asset = createMockAsset()
+      renderWithProviders(
+        <MediaTile
+          asset={asset}
+          onSelectOnly={onSelectOnly}
+          onToggle={onToggle}
+          onRange={onRange}
+          onAssetClick={onAssetClick}
+        />
+      )
+
+      fireEvent.click(screen.getByTestId('tile-container'), { shiftKey: true })
+      expect(onRange).toHaveBeenCalledWith('test-asset-1')
+      expect(onAssetClick).not.toHaveBeenCalled()
+      expect(onSelectOnly).not.toHaveBeenCalled()
+    })
+
+    it('toggles selection via checkbox without opening sidebar', () => {
+      const onToggle = vi.fn()
+      const onAssetClick = vi.fn()
+      const onSelectOnly = vi.fn()
+      const onRange = vi.fn()
+      const asset = createMockAsset()
+      renderWithProviders(
+        <MediaTile
+          asset={asset}
+          onSelectOnly={onSelectOnly}
+          onToggle={onToggle}
+          onRange={onRange}
+          onAssetClick={onAssetClick}
+        />
+      )
+
+      fireEvent.mouseEnter(screen.getByTestId('tile-container'))
+      const checkbox = screen.getByRole('checkbox')
+      fireEvent.click(checkbox)
+
+      expect(onToggle).toHaveBeenCalledWith('test-asset-1')
+      expect(onAssetClick).not.toHaveBeenCalled()
+      expect(onSelectOnly).not.toHaveBeenCalled()
+    })
+  })
+
   describe('video hover preview', () => {
     it('shows video element on hover for video assets', () => {
       const asset = createMockAsset({ file_type: 'video' })
