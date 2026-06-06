@@ -402,7 +402,7 @@ class PluginBase(ABC):
                     if scene_duration <= max_clip_s + 0.5:
                         # ── Short scene: single clip ──────────────────────
                         duration = max(2, int(scene_duration))
-                        video_path, _, _, actual_duration = await self._retry(
+                        video_path, _, _, actual_duration, warning = await self._retry(
                             generate_video,
                             db=db, job=job, prompt=prompt,
                             scene_number=scene.scene_number,
@@ -414,6 +414,10 @@ class PluginBase(ABC):
                         )
                         scene.generated_video_path = video_path
                         scene.duration = actual_duration
+                        if warning:
+                            if scene.warnings is None:
+                                scene.warnings = []
+                            scene.warnings.append(warning)
                     else:
                         # ── Long scene: sub-clip chain ────────────────────
                         scene.generated_video_path, scene.duration = (
@@ -461,6 +465,20 @@ class PluginBase(ABC):
                     )
                     scene.status = "failed"
                     scene.error_message = str(exc)[:500]
+                    await log_user_error(
+                        db,
+                        user_id=job.user_id,
+                        severity=ErrorSeverity.ERROR,
+                        origin=ErrorOrigin.VIDEO_GENERATION,
+                        message=str(exc),
+                        details={
+                            "scene_number": scene.scene_number,
+                            "model": video_model,
+                            "retry_count": attempt,
+                        },
+                        source_id=scene.id,
+                        source_type="scene",
+                    )
                     break
 
             if last_validation_error and scene.status != "video_ready":
@@ -528,7 +546,7 @@ class PluginBase(ABC):
             )
             clip_duration = max(2, int(clip_duration))
 
-            sub_path, _, _, actual = await self._retry(
+            sub_path, _, _, actual, warning = await self._retry(
                 generate_video,
                 db=db, job=job,
                 prompt=prompts[i],
@@ -542,6 +560,10 @@ class PluginBase(ABC):
             )
             sub_clip_paths.append(str(storage / sub_path))
             total_actual_duration += actual
+            if warning:
+                if scene.warnings is None:
+                    scene.warnings = []
+                scene.warnings.append(warning)
 
             # Extract ~80% frame for next clip's seed
             if i < num_clips - 1:
@@ -652,6 +674,20 @@ class PluginBase(ABC):
         output_dir = storage_path / "output" / str(job.id)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Check if any scene needs padding
+        any_needs_padding = False
+        for scene in scenes:
+            if scene.warnings:
+                for w in scene.warnings:
+                    if "aspect ratio" in w.lower():
+                        any_needs_padding = True
+                        break
+            if any_needs_padding:
+                break
+
+        input_data = job.input_data or {}
+        target_aspect = input_data.get("aspect_ratio", "16:9")
+
         # Collect scene video paths
         segment_paths: list[str] = []
         for scene in scenes:
@@ -659,7 +695,15 @@ class PluginBase(ABC):
                 continue
             full = storage_path / scene.generated_video_path
             if full.exists():
-                segment_paths.append(str(full))
+                if any_needs_padding:
+                    padded_path = output_dir / f"padded_scene_{scene.scene_number}.mp4"
+                    await VideoProcessor.pad_to_aspect_ratio(
+                        str(full), str(padded_path), target_aspect
+                    )
+                    scene.generated_video_path = str(padded_path.relative_to(storage_path))
+                    segment_paths.append(str(padded_path))
+                else:
+                    segment_paths.append(str(full))
 
         if not segment_paths:
             raise RuntimeError("No scene videos to render")
@@ -795,7 +839,7 @@ class PluginBase(ABC):
             duration = max(2, int(scene_duration))
             prompt = scene.visual_description or scene.lyrics_segment or ""
             input_data = job.input_data or {}
-            video_path, _mid, _pid, actual_duration = await self._retry(
+            video_path, _mid, _pid, actual_duration, warning = await self._retry(
                 generate_video,
                 db=db, job=job, prompt=prompt,
                 scene_number=scene.scene_number,
@@ -808,6 +852,10 @@ class PluginBase(ABC):
             )
             scene.generated_video_path = video_path
             scene.duration = actual_duration
+            if warning:
+                if scene.warnings is None:
+                    scene.warnings = []
+                scene.warnings.append(warning)
 
         scene.status = "video_ready"
         scene.error_message = None
