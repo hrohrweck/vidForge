@@ -116,7 +116,7 @@ export default function SceneEditor() {
     enabled: !!jobId && job?.stage === 'videos_ready',
   })
 
-  const { data: jobObjects } = useQuery({
+  const { data: jobObjects, isLoading: objectsLoading } = useQuery({
     queryKey: ['jobObjects', jobId],
     queryFn: () => jobsApi.getObjects(jobId!),
     enabled: !!jobId,
@@ -598,7 +598,7 @@ export default function SceneEditor() {
           {/* Detected objects sidebar */}
           <JobObjectsSection
             objects={jobObjects || []}
-            isLoading={!!jobId && !!(job?.status === 'processing')}
+            isLoading={objectsLoading}
           />
 
           {/* Common job status sidebar */}
