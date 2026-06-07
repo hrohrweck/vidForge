@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import {
@@ -47,6 +48,12 @@ import {
 } from '../../components/ui/dialog'
 
 const MODALITY_OPTIONS = ['text', 'image', 'video'] as const
+const CAPABILITY_OPTIONS = [
+  'text_to_image',
+  'image_to_image',
+  'text_to_video',
+  'image_to_video',
+] as const
 const PROMPT_FORMATS = ['string', 'array'] as const
 const ENDPOINT_TYPES = [
   'llm',
@@ -146,10 +153,13 @@ const defaultFormState: ModelFormState = {
 // ─── Component ────────────────────────────────────────────
 export default function ModelManagement() {
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
+  const providerParam = searchParams.get('provider')
 
   // ── Filters & search ──
-  const [providerFilter, setProviderFilter] = useState<string>('all')
+  const [providerFilter, setProviderFilter] = useState<string>(providerParam || 'all')
   const [modalityFilter, setModalityFilter] = useState<string>('all')
+  const [capabilityFilter, setCapabilityFilter] = useState<string>('all')
   const [activeFilter, setActiveFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -185,11 +195,12 @@ export default function ModelManagement() {
   })
 
   const { data: configs, isLoading } = useQuery<ModelConfig[]>({
-    queryKey: ['admin-model-configs', providerFilter, modalityFilter, activeFilter],
+    queryKey: ['admin-model-configs', providerFilter, modalityFilter, capabilityFilter, activeFilter],
     queryFn: () =>
       adminModelConfigsApi.list({
         providerId: providerFilter !== 'all' ? providerFilter : undefined,
         modality: modalityFilter !== 'all' ? modalityFilter : undefined,
+        capability: capabilityFilter !== 'all' ? capabilityFilter : undefined,
         isActive: activeFilter !== 'all' ? activeFilter === 'active' : undefined,
       }),
   })
@@ -223,6 +234,10 @@ export default function ModelManagement() {
   }
   const setModality = (v: string) => {
     setModalityFilter(v)
+    setPage(1)
+  }
+  const setCapability = (v: string) => {
+    setCapabilityFilter(v)
     setPage(1)
   }
   const setActive = (v: string) => {
@@ -586,6 +601,20 @@ export default function ModelManagement() {
             {MODALITY_OPTIONS.map((m) => (
               <SelectItem key={m} value={m}>
                 {m.charAt(0).toUpperCase() + m.slice(1)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={capabilityFilter} onValueChange={setCapability}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All capabilities" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All capabilities</SelectItem>
+            {CAPABILITY_OPTIONS.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
               </SelectItem>
             ))}
           </SelectContent>

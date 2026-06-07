@@ -56,6 +56,7 @@ export interface UpdateModelConfigRequest {
 export interface ListModelConfigsParams {
   providerId?: string
   modality?: string
+  capability?: string
   isActive?: boolean
 }
 
@@ -69,6 +70,7 @@ export const adminModelConfigsApi = {
     const queryParams: Record<string, string> = {}
     if (params?.providerId) queryParams.provider_id = params.providerId
     if (params?.modality) queryParams.modality = params.modality
+    if (params?.capability) queryParams.capability = params.capability
     if (params?.isActive !== undefined) queryParams.is_active = String(params.isActive)
 
     const response = await api.get<ModelConfig[]>('/admin/model-configs', {

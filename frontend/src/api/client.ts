@@ -143,6 +143,7 @@ export interface Provider {
   current_daily_spend: number
   priority: number
   created_at: string
+  redirect_url?: string
 }
 
 export interface ProviderCreateRequest {

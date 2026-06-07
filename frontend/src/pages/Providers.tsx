@@ -105,12 +105,16 @@ export default function Providers() {
     mutationFn: async (data: ProviderCreateRequest) => {
       return providersApi.create(data)
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setActionError('')
       queryClient.invalidateQueries({ queryKey: ['providers'] })
       queryClient.invalidateQueries({ queryKey: ['provider-statuses'] })
       setShowForm(false)
       setFormState(defaultFormState)
+      // Redirect to model config with provider filter
+      if (data?.redirect_url) {
+        navigate(data.redirect_url)
+      }
     },
     onError: (error) => {
       setFormError(getErrorMessage(error))
