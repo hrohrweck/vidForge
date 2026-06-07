@@ -207,15 +207,21 @@ AI providers extend `ProviderBase` and implement capability interfaces
 `app/services/providers/`:
 
 ```python
+from app.services.model_capabilities import ModelCapability
+
 class YourProvider(ProviderBase, ImageProvider, VideoProvider):
     def get_capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
-            supports_image=True, supports_video=True
+            supports_image=True, supports_video=True,
+            capabilities=[ModelCapability.TEXT_TO_IMAGE, ModelCapability.IMAGE_TO_IMAGE]
         )
 
     async def generate_image(
         self, prompt: str, model: str, aspect_ratio: str, **kwargs
     ) -> tuple[str, bytes]:
+        # Read optional reference image for img2img
+        image_path: str | None = kwargs.get("image_path")
+        reference_strength: float = kwargs.get("reference_image_strength", 0.75)
         ...
         return (model_id, image_bytes)
 
@@ -223,6 +229,8 @@ class YourProvider(ProviderBase, ImageProvider, VideoProvider):
         self, prompt: str, model: str, duration: int,
         aspect_ratio: str, **kwargs
     ) -> tuple[str, bytes]:
+        # Read optional reference image for I2V
+        reference_image_path: str | None = kwargs.get("reference_image_path")
         ...
         return (model_id, video_bytes)
 ```
@@ -236,6 +244,39 @@ registry.register("your_type", YourProvider)
 ```
 
 See [docs/WRITING_PROVIDERS.md](docs/WRITING_PROVIDERS.md).
+
+### Model Capability System
+
+Models have structured capability metadata stored in `ModelConfig.capabilities`
+(JSONB). See `app/services/model_capabilities.py` for the enum and utilities:
+
+```python
+from app.services.model_capabilities import (
+    ModelCapability, GenerationType,
+    build_model_capabilities_context, normalize_capabilities
+)
+
+# Capability enums
+class ModelCapability(str, Enum):
+    TEXT_TO_IMAGE = "text_to_image"
+    IMAGE_TO_IMAGE = "image_to_image"
+    IMAGE_TO_VIDEO = "image_to_video"
+    FRAME_TO_VIDEO = "frame_to_video"
+    MULTI_REF_TO_VIDEO = "multi_ref_to_video"
+    TEXT_TO_VIDEO = "text_to_video"
+    ...
+
+# Generate planner context from model configs
+context = build_model_capabilities_context(
+    video_model_config=video_config_dict,
+    image_model_config=image_config_dict
+)
+```
+
+Filter models by capability: `GET /api/models?capability=accepts_image`
+
+Newly synced models default to `is_active=False` — admin must explicitly enable
+them on the `/admin/models` page.
 
 ### Storage Backend Pattern
 ```python

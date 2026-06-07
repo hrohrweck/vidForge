@@ -138,22 +138,120 @@ class ProviderCapabilities:
     supports_video: bool = False
     supports_llm: bool = False
     supports_model_sync: bool = False
+    capabilities: list[ModelCapability] = field(default_factory=list)
 ```
+
+The `capabilities` list holds granular `ModelCapability` enum values (from
+`app/services/model_capabilities.py`) that describe exactly what a provider's
+models can do - text-to-image, image-to-image, image-to-video, etc.
 
 Example:
 
 ```python
+from app.services.model_capabilities import ModelCapability
+
 def get_capabilities(self) -> ProviderCapabilities:
     return ProviderCapabilities(
         supports_image=True,
         supports_video=True,
         supports_llm=False,
         supports_model_sync=True,
+        capabilities=[
+            ModelCapability.TEXT_TO_IMAGE,
+            ModelCapability.IMAGE_TO_IMAGE,
+            ModelCapability.IMAGE_TO_VIDEO,
+        ],
     )
 ```
 
 The core system uses these flags to route requests without knowing the
 concrete provider type.
+
+### Handling Reference Images (img2img / I2V)
+
+Both `generate_image()` and `generate_video()` accept optional reference
+images through `**kwargs`. The pipeline passes these through automatically
+when avatars are configured.
+
+**Image-to-Image (img2img)** — `generate_image()` kwargs:
+
+```python
+async def generate_image(
+    self, prompt: str, model: str, aspect_ratio: str, **kwargs: Any,
+) -> tuple[str, bytes]:
+    image_path: str | None = kwargs.get("image_path")
+    reference_strength: float = kwargs.get("reference_image_strength", 0.75)
+
+    if image_path:
+        # Load the reference image and include it in your workflow/payload
+        with open(image_path, "rb") as f:
+            reference_bytes = f.read()
+        # Use reference_bytes + reference_strength to guide generation
+```
+
+| Kwarg | Type | Default | Purpose |
+|---|---|---|---|
+| `image_path` | `str \| None` | `None` | Filesystem path to the reference image for img2img |
+| `reference_image_strength` | `float` | `0.75` | How strongly the reference influences output (0.0-1.0) |
+
+**Image-to-Video (I2V)** — `generate_video()` kwargs:
+
+```python
+async def generate_video(
+    self, prompt: str, model: str, duration: int,
+    aspect_ratio: str, **kwargs: Any,
+) -> tuple[str, bytes]:
+    reference_image_path: str | None = kwargs.get("reference_image_path")
+
+    if reference_image_path:
+        # Load the seed image and use it as first frame reference
+        with open(reference_image_path, "rb") as f:
+            seed_bytes = f.read()
+```
+
+| Kwarg | Type | Default | Purpose |
+|---|---|---|---|
+| `reference_image_path` | `str \| None` | `None` | Filesystem path to the seed image for I2V |
+
+**img2img → T2I fallback**: When `generate_images()` passes a reference image
+and the provider call fails (all retries exhausted), the pipeline
+automatically retries without the reference image (pure text-to-image). Your
+provider does not need to handle this fallback — it just needs to accept the
+`image_path` kwarg when provided.
+
+### Model Capability Metadata
+
+Provider `sync_models()` implementations should return capability flags in
+each model dict to enable capability-aware routing:
+
+```python
+async def sync_models(self) -> list[dict[str, Any]]:
+    models = await self._fetch_models()
+    return [
+        {
+            "model_id": m["id"],
+            "provider_model_id": m["id"],
+            "display_name": m.get("name", m["id"]),
+            "modality": "image",
+            "capabilities": {
+                "accepts_text": True,
+                "accepts_image": True,
+                "outputs_image": True,
+                # outputs_video, etc.
+            },
+        }
+        for m in models
+    ]
+```
+
+The `capabilities` dict is stored as JSONB in `ModelConfig.capabilities` and
+normalized into a `ModelCapabilities` struct by
+`normalize_capabilities()` from `app/services/model_capabilities.py`.
+
+**New models default to disabled**: Any model discovered via `sync_models()`
+is created with `is_active=False`. An admin must explicitly enable it on the
+Model Management page (`/admin/models`) before it can be used. This prevents
+unvetted models from appearing in user-facing model selectors.
 
 ## Error Classification
 
@@ -223,6 +321,7 @@ Create `backend/app/services/providers/your_provider.py`. Extend
 from typing import Any
 from uuid import UUID
 
+from app.services.model_capabilities import ModelCapability
 from app.services.providers.base import (
     ImageProvider,
     VideoProvider,
@@ -264,6 +363,11 @@ class YourProvider(ImageProvider, VideoProvider):
             supports_video=True,
             supports_llm=False,
             supports_model_sync=True,
+            capabilities=[
+                ModelCapability.TEXT_TO_IMAGE,
+                ModelCapability.IMAGE_TO_IMAGE,
+                ModelCapability.IMAGE_TO_VIDEO,
+            ],
         )
 
     async def generate_image(
