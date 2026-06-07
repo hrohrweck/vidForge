@@ -92,8 +92,10 @@ class PromptToVideoPlugin(PluginBase):
     async def plan_scenes(
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
+        from app.api.models import get_model
         from app.services.avatar_prompt_builder import build_avatar_context_string
         from app.services.llm_service import resolve_llm
+        from app.services.model_capabilities import build_model_capabilities_context
 
         from .planner import plan_scenes_from_prompt
 
@@ -102,6 +104,8 @@ class PromptToVideoPlugin(PluginBase):
         style = input_data.get("style", "realistic")
         duration = input_data.get("duration", 10)
         text_model = input_data.get("text_model")
+        video_model = input_data.get("video_model")
+        image_model = input_data.get("image_model")
 
         provider = None
         if text_model:
@@ -109,11 +113,23 @@ class PromptToVideoPlugin(PluginBase):
 
         avatars_context = build_avatar_context_string(context.get("avatars", []))
 
+        video_config = None
+        if video_model:
+            video_config = await get_model(db, video_model)
+        image_config = None
+        if image_model:
+            image_config = await get_model(db, image_model)
+        model_capabilities_context = build_model_capabilities_context(
+            video_model_config=video_config,
+            image_model_config=image_config,
+        )
+
         scenes = await plan_scenes_from_prompt(
             prompt=prompt,
             duration=duration,
             style=style,
             avatars_context=avatars_context or None,
+            model_capabilities_context=model_capabilities_context,
             provider=provider,
             model=text_model,
         )
