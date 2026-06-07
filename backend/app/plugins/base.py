@@ -81,6 +81,8 @@ class PluginBase(ABC):
         into ``context["avatars"]`` as a list of resolved avatar dicts.
         """
         context = await self._resolve_avatars(db, job, context)
+        if not context.get("avatars"):
+            context = await self._create_auto_avatars(db, job, context)
         return context
 
     async def _resolve_avatars(
@@ -201,6 +203,182 @@ class PluginBase(ABC):
         context["avatars"] = resolved
         return context
 
+    async def _create_auto_avatars(
+        self,
+        db: AsyncSession,
+        job: Job,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Auto-create characters when no avatars are selected for a job.
+
+        1. Use LLM to analyze the job prompt and create 1-3 character descriptions.
+        2. Generate reference images for each character.
+        3. Persist Avatar + AvatarImage records to the database.
+        4. Populate ``context["avatars"]`` with resolved dicts.
+
+        If any step fails gracefully (LLM unavailable, image generation fails,
+        invalid response), the method returns *context* unchanged.
+        """
+        import json as _json
+        from pathlib import Path
+
+        from app.api.models import get_default_model_preferences
+        from app.config import get_settings
+        from app.database import Avatar, AvatarImage
+        from app.services.llm_service import LLMClient
+        from app.services.media_generator import generate_image
+
+        # ── Locate the job prompt ──────────────────────────────────────
+        input_data = job.input_data or {}
+        prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
+        if not prompt or not prompt.strip():
+            logger.debug("No prompt in job %s, skipping auto-avatar creation", job.id)
+            return context
+
+        # ── LLM: create character descriptions ─────────────────────────
+        system = (
+            "You are a character designer. Based on the video prompt, create 1-3 distinct "
+            "characters.\n"
+            "Output ONLY valid JSON:\n"
+            '{"characters": [{"name": "...", "gender": "male/female/other", '
+            '"bio": "2-3 sentence backstory", "role": "their role in this video"}]}\n'
+            "Choose characters that naturally fit the story. Be specific about appearance in "
+            "the bio."
+        )
+
+        try:
+            llm = LLMClient()
+            response = await llm.generate(
+                prompt=f"Video prompt: {prompt}",
+                system=system,
+                max_tokens=1024,
+                temperature=0.8,
+            )
+        except Exception as exc:
+            logger.warning(
+                "LLM unavailable during auto-avatar creation for job %s: %s",
+                job.id, exc,
+            )
+            return context
+
+        # ── Parse JSON ─────────────────────────────────────────────────
+        try:
+            text = response.strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                text = "\n".join(lines)
+            data = _json.loads(text)
+            characters: list[dict[str, str]] = data.get("characters", [])
+        except (_json.JSONDecodeError, KeyError, TypeError) as exc:
+            logger.warning(
+                "Failed to parse auto-avatar LLM response for job %s: %s\nResponse: %s",
+                job.id, exc, response[:500],
+            )
+            return context
+
+        if not characters:
+            logger.debug("LLM returned empty character list for job %s", job.id)
+            return context
+
+        # ── Generate images & persist ──────────────────────────────────
+        settings = get_settings()
+        storage_root = Path(settings.storage_path)
+        defaults = await get_default_model_preferences(db)
+        image_model = defaults.get("text_to_image_model") or defaults.get("image_model", "")
+        resolved_avatars: list[dict[str, Any]] = []
+
+        for char in characters:
+            name = char.get("name", "Unnamed")
+            gender = char.get("gender", "other")
+            bio = char.get("bio", "")
+            role = char.get("role", "")
+
+            # Generate reference portrait
+            image_path: str | None = None
+            try:
+                img_prompt = (
+                    f"Portrait of {name}, {gender}, {bio}. "
+                    "Clean background, well-lit, photorealistic portrait, looking at camera."
+                )
+                relative_path, _model_id, _pid = await generate_image(
+                    db=db,
+                    job=job,
+                    prompt=img_prompt,
+                    scene_number=0,  # special: auto-avatar generation
+                    model_preference=image_model if image_model else None,
+                    aspect_ratio="1:1",
+                    title=f"avatar_{name}",
+                )
+                # Verify the file actually exists on disk
+                full_path = storage_root / relative_path
+                if not full_path.exists():
+                    logger.error(
+                        "Generated avatar image not found on disk for %s: %s",
+                        name, full_path,
+                    )
+                    image_path = None
+                else:
+                    image_path = relative_path
+            except Exception as exc:
+                logger.warning(
+                    "Image generation failed for auto-avatar %r (job %s): %s — "
+                    "character will be text-only (no reference image)",
+                    name, job.id, exc,
+                )
+
+            # Persist avatar record
+            try:
+                avatar = Avatar(
+                    name=name,
+                    gender=gender,
+                    bio=bio,
+                    user_id=job.user_id,
+                    consistency_strategy="prompt_only",
+                )
+                db.add(avatar)
+                await db.flush()  # get avatar.id
+
+                if image_path:
+                    avatar_img = AvatarImage(
+                        avatar_id=avatar.id,
+                        storage_path=image_path,
+                        is_primary=True,
+                        sort_order=0,
+                    )
+                    db.add(avatar_img)
+                    await db.flush()
+                    avatar.primary_image_id = avatar_img.id
+
+                await db.commit()
+                await db.refresh(avatar)
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist auto-avatar %r for job %s: %s",
+                    name, job.id, exc,
+                )
+                await db.rollback()
+                continue
+
+            # Build resolved dict matching _resolve_avatars format
+            resolved_avatars.append({
+                "id": str(avatar.id),
+                "name": avatar.name,
+                "gender": avatar.gender,
+                "bio": avatar.bio,
+                "role": role,
+                "consistency_strategy": avatar.consistency_strategy,
+                "primary_image_path": str(storage_root / image_path) if image_path else None,
+                "all_image_paths": [str(storage_root / image_path)] if image_path else [],
+                "deleted": False,
+            })
+
+        context["avatars"] = resolved_avatars
+        return context
+
     # ------------------------------------------------------------------
     # Stage: plan scenes
     # ------------------------------------------------------------------
@@ -312,10 +490,34 @@ class PluginBase(ABC):
         The default implementation iterates over *scenes* and calls the
         core image generator for each scene's ``image_prompt``.
         """
+        from pathlib import Path
+
         from app.services.media_generator import generate_image
 
         input_data = job.input_data or {}
         image_model = input_data.get("image_model")
+
+        # Extract avatar reference images from context
+        avatars = context.get("avatars", [])
+        avatar_ref_path: str | None = None
+        if avatars:
+            first = avatars[0]
+            avatar_ref_path = first.get("primary_image_path")
+            if not avatar_ref_path:
+                logger.warning(
+                    "Avatar %s has no primary_image_path, "
+                    "falling back to text-to-image",
+                    first.get("name", first.get("id", "unknown")),
+                )
+                avatar_ref_path = None
+            elif not Path(avatar_ref_path).exists():
+                logger.warning(
+                    "Avatar %s primary image not found on disk at %s, "
+                    "falling back to text-to-image",
+                    first.get("name", first.get("id", "unknown")),
+                    avatar_ref_path,
+                )
+                avatar_ref_path = None
         for scene in scenes:
             if scene.reference_image_path:
                 continue
@@ -331,6 +533,8 @@ class PluginBase(ABC):
                     scene_number=scene.scene_number,
                     model_preference=image_model,
                     provider_id=job.image_provider_id,
+                    reference_image_path=avatar_ref_path,
+                    reference_image_strength=0.75,
                     label=f"image-s{scene.scene_number}",
                 )
                 scene.reference_image_path = image_path
@@ -346,6 +550,44 @@ class PluginBase(ABC):
                 done = sum(1 for s in scenes if s.status == "image_ready")
                 job.progress = min(20 + int(20 * done / max(total, 1)), 40)
             except Exception as exc:
+                # If we were using a reference image, try T2I fallback
+                if avatar_ref_path:
+                    logger.warning(
+                        "[image-s%s] img2img failed (retries exhausted), "
+                        "falling back to T2I: %s",
+                        scene.scene_number, exc,
+                    )
+                    try:
+                        image_path, _media_id, _provider_id = await self._retry(
+                            generate_image,
+                            db=db,
+                            job=job,
+                            prompt=prompt,
+                            scene_number=scene.scene_number,
+                            model_preference=image_model,
+                            provider_id=job.image_provider_id,
+                            label=f"image-s{scene.scene_number}-t2i",
+                        )
+                        scene.reference_image_path = image_path
+                        scene.status = "image_ready"
+                        # Auto-import to media library
+                        await _import_scene_asset(
+                            db, job, scene.reference_image_path,
+                            f"scene-{scene.scene_number}-image",
+                            "image", scene.scene_number,
+                        )
+                        # Update progress
+                        total = len(scenes)
+                        done = sum(1 for s in scenes if s.status == "image_ready")
+                        job.progress = min(20 + int(20 * done / max(total, 1)), 40)
+                        continue  # Skip the failure marking below
+                    except Exception as fallback_exc:
+                        logger.error(
+                            "[image-s%s] T2I fallback also failed: %s",
+                            scene.scene_number, fallback_exc,
+                        )
+
+                # Original error handling (mark scene failed)
                 logger.error(
                     "[image-s%s] generate_images failed: %s",
                     scene.scene_number, exc, exc_info=True,
@@ -384,6 +626,9 @@ class PluginBase(ABC):
         input_data = job.input_data or {}
         aspect_ratio = input_data.get("aspect_ratio", "16:9")
         video_model = input_data.get("video_model")
+
+        # Extract avatar context for sub-scene prompt hardening
+        avatars = context.get("avatars", [])
 
         for scene in scenes:
             if scene.generated_video_path:
@@ -427,6 +672,7 @@ class PluginBase(ABC):
                                 max_clip_s=max_clip_s,
                                 crossfade_s=crossfade_s,
                                 aspect_ratio=aspect_ratio,
+                                avatars=avatars,
                             )
                         )
 
@@ -506,6 +752,7 @@ class PluginBase(ABC):
         max_clip_s: int,
         crossfade_s: float,
         aspect_ratio: str,
+        avatars: list[dict[str, Any]] | None = None,
     ) -> tuple[str, float]:
         """Split a long scene into chained sub-clips.
 
@@ -532,7 +779,7 @@ class PluginBase(ABC):
 
         num_clips = math.ceil(scene_duration / max_clip_s)
         prompts = await self._generate_sub_scene_prompts(
-            db, job, scene, num_clips,
+            db, job, scene, num_clips, avatars,
         )
 
         sub_clip_paths: list[str] = []
@@ -598,14 +845,42 @@ class PluginBase(ABC):
         job: Job,
         scene: VideoScene,
         num_clips: int,
+        avatars: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         """Use the LLM to decompose a scene into evolving sub-clip prompts.
 
         Falls back to the original prompt + a continuation suffix if
         the LLM is unavailable.
+
+        When avatar characters are provided, their descriptions are included
+        in the system prompt so the LLM maintains character consistency across
+        sub-clips.
         """
         original_prompt = scene.visual_description or scene.lyrics_segment or ""
         image_prompt = scene.image_prompt or original_prompt
+
+        # Build character context string from avatars
+        character_context = ""
+        if avatars:
+            active = [
+                a for a in avatars
+                if not a.get("deleted") and a.get("name")
+            ]
+            if active:
+                chars = []
+                for a in active:
+                    parts = [a["name"]]
+                    if a.get("gender"):
+                        parts.append(f"({a['gender']})")
+                    if a.get("role"):
+                        parts.append(f"– {a['role']}")
+                    if a.get("bio"):
+                        parts.append(f": {a['bio']}")
+                    chars.append(" ".join(parts))
+                character_context = (
+                    "CHARACTERS (must remain visually consistent across "
+                    "all sub-clips):\n" + "\n".join(f"  – {c}" for c in chars)
+                )
 
         try:
             from app.services.llm_service import LLMClient
@@ -620,6 +895,9 @@ class PluginBase(ABC):
                 "Keep each prompt under 100 words. "
                 "Output ONLY a JSON array of strings."
             )
+            if character_context:
+                system = character_context + "\n\n" + system
+
             user = (
                 f"Original scene description: {original_prompt}\n"
                 f"Original image prompt: {image_prompt}\n"

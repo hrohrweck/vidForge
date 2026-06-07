@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.avatar_prompt_builder import build_avatar_context_string
+from app.services.avatar_prompt_builder import (
+    build_avatar_context_string,
+    build_avatar_visual_context,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +318,397 @@ async def test_script_planner_no_avatar_context_omits_section():
     prompt_text = call_kwargs["prompt"]
     assert "AVATAR CAST:" not in prompt_text
     assert "No avatars here" in prompt_text
+
+
+# ---------------------------------------------------------------------------
+# Enhanced context tests — image references and consistency strategy
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_with_image_reference():
+    """When primary_image_path set, output includes 'Image reference available'."""
+    avatar = {
+        "name": "Alice",
+        "gender": "Female",
+        "bio": "Detective",
+        "role": "Lead",
+        "primary_image_path": "/avatars/alice.png",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Image reference available: /avatars/alice.png" in result
+
+
+def test_build_context_without_image_reference():
+    """When primary_image_path is empty, no image line in output."""
+    avatar = {
+        "name": "Bob",
+        "gender": "Male",
+        "bio": "Suspect",
+        "role": "Supporting",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Image reference available" not in result
+
+
+def test_build_context_with_consistency_strategy():
+    """Non-default consistency strategy appears in output."""
+    avatar = {
+        "name": "Carol",
+        "gender": "Female",
+        "bio": "Hacker",
+        "role": "Lead",
+        "consistency_strategy": "lora",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Visual consistency: uses lora method" in result
+
+
+def test_build_context_omits_prompt_only_strategy():
+    """Default prompt_only strategy is omitted from output."""
+    avatar = {
+        "name": "Dave",
+        "gender": "Male",
+        "bio": "Extra",
+        "role": "Background",
+        "consistency_strategy": "prompt_only",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Visual consistency" not in result
+
+
+def test_build_context_with_image_and_strategy():
+    """Both image reference and non-default strategy present."""
+    avatar = {
+        "name": "Eve",
+        "gender": "Female",
+        "bio": "Spy",
+        "role": "Lead",
+        "primary_image_path": "/avatars/eve.png",
+        "consistency_strategy": "ip_adapter",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Image reference available: /avatars/eve.png" in result
+    assert "Visual consistency: uses ip_adapter method" in result
+
+
+def test_build_context_empty_strategy():
+    """Empty consistency_strategy treated same as prompt_only (omitted)."""
+    avatar = {
+        "name": "Frank",
+        "gender": "Male",
+        "bio": "Drifter",
+        "role": "Extra",
+        "consistency_strategy": "",
+    }
+    result = build_avatar_context_string([avatar])
+    assert "Visual consistency" not in result
+
+
+# ---------------------------------------------------------------------------
+# build_avatar_visual_context tests
+# ---------------------------------------------------------------------------
+
+
+def test_visual_context_single_with_image():
+    """Single avatar with image ref produces correct line."""
+    avatars = [
+        {
+            "name": "Alice",
+            "primary_image_path": "/avatars/alice.png",
+            "consistency_strategy": "ip_adapter",
+        }
+    ]
+    result = build_avatar_visual_context(avatars)
+    assert result.startswith("CHARACTER REFERENCES:")
+    assert "Alice: reference image at /avatars/alice.png" in result
+    assert "strategy: ip_adapter" in result
+
+
+def test_visual_context_single_no_image():
+    """Single avatar without image ref shows 'no reference image'."""
+    avatars = [
+        {
+            "name": "Bob",
+            "consistency_strategy": "prompt_only",
+        }
+    ]
+    result = build_avatar_visual_context(avatars)
+    assert "Bob: no reference image (strategy: prompt_only)" in result
+
+
+def test_visual_context_multiple():
+    """Multiple avatars each get their own line."""
+    avatars = [
+        {
+            "name": "Alice",
+            "primary_image_path": "/avatars/alice.png",
+            "consistency_strategy": "face_swap",
+        },
+        {
+            "name": "Bob",
+            "consistency_strategy": "prompt_only",
+        },
+    ]
+    result = build_avatar_visual_context(avatars)
+    assert "Alice: reference image at /avatars/alice.png (strategy: face_swap)" in result
+    assert "Bob: no reference image (strategy: prompt_only)" in result
+
+
+def test_visual_context_empty():
+    """Empty list returns empty string."""
+    assert build_avatar_visual_context([]) == ""
+
+
+def test_visual_context_no_name_fallback():
+    """Missing name uses 'Unknown' fallback."""
+    avatars = [
+        {
+            "primary_image_path": "/imgs/someone.png",
+            "consistency_strategy": "lora",
+        }
+    ]
+    result = build_avatar_visual_context(avatars)
+    assert "Unknown: reference image at /imgs/someone.png" in result
+
+
+# ---------------------------------------------------------------------------
+# Model capabilities context in scene planner
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prompt_to_video_planner_accepts_model_capabilities():
+    """plan_scenes_from_prompt signature includes model_capabilities_context param."""
+    from plugins.prompt_to_video.planner import plan_scenes_from_prompt
+    import inspect
+
+    sig = inspect.signature(plan_scenes_from_prompt)
+    assert "model_capabilities_context" in sig.parameters
+    param = sig.parameters["model_capabilities_context"]
+    assert param.default is None
+
+
+@pytest.mark.asyncio
+async def test_planner_includes_model_capabilities_in_prompt():
+    """When model_capabilities_context is provided, the LLM prompt contains it."""
+    caps_ctx = (
+        "VIDEO MODEL CAPABILITIES:\n"
+        "  Model: wan2.2\n"
+        "  Generation type: text_to_video (text prompt only → video)\n\n"
+        "IMAGE MODEL CAPABILITIES:\n"
+        "  Model: flux1-schnell\n"
+        "  Generation type: text_to_image (text prompt only — no reference image needed)\n"
+    )
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"scenes": [{"start_time": 0, "end_time": 5, '
+        '"visual_description": "test", "image_prompt": "test", '
+        '"mood": "neutral", "camera_movement": "static"}]}'
+    )
+    mock_llm.close = AsyncMock()
+
+    with patch(
+        "plugins.prompt_to_video.planner.LLMClient",
+        return_value=mock_llm,
+    ):
+        from plugins.prompt_to_video.planner import plan_scenes_from_prompt
+
+        await plan_scenes_from_prompt(
+            prompt="A sci-fi story",
+            duration=10,
+            model_capabilities_context=caps_ctx,
+        )
+
+    mock_llm.generate.assert_called_once()
+    call_kwargs = mock_llm.generate.call_args.kwargs
+    prompt_text = call_kwargs["prompt"]
+    assert "VIDEO MODEL CAPABILITIES:" in prompt_text
+    assert "IMAGE MODEL CAPABILITIES:" in prompt_text
+    assert "wan2.2" in prompt_text
+    assert "flux1-schnell" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_planner_none_model_capabilities_omits_block():
+    """When model_capabilities_context is None, prompt does NOT contain CAPABILITIES block."""
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"scenes": [{"start_time": 0, "end_time": 5, '
+        '"visual_description": "test", "image_prompt": "test", '
+        '"mood": "neutral", "camera_movement": "static"}]}'
+    )
+    mock_llm.close = AsyncMock()
+
+    with patch(
+        "plugins.prompt_to_video.planner.LLMClient",
+        return_value=mock_llm,
+    ):
+        from plugins.prompt_to_video.planner import plan_scenes_from_prompt
+
+        await plan_scenes_from_prompt(
+            prompt="A simple story",
+            duration=10,
+            model_capabilities_context=None,
+        )
+
+    call_kwargs = mock_llm.generate.call_args.kwargs
+    prompt_text = call_kwargs["prompt"]
+    assert "VIDEO MODEL CAPABILITIES:" not in prompt_text
+    assert "IMAGE MODEL CAPABILITIES:" not in prompt_text
+    assert "A simple story" in prompt_text
+
+
+def test_system_prompt_contains_story_arc():
+    """SYSTEM_PROMPT includes story arc structure and consistency rules."""
+    from plugins.prompt_to_video.planner import SYSTEM_PROMPT
+
+    assert "STORY ARC" in SYSTEM_PROMPT
+    assert "Opening" in SYSTEM_PROMPT
+    assert "Development" in SYSTEM_PROMPT
+    assert "Climax" in SYSTEM_PROMPT
+    assert "Resolution" in SYSTEM_PROMPT
+    assert "CONSISTENCY RULES:" in SYSTEM_PROMPT
+    assert "consistent visual description" in SYSTEM_PROMPT
+    assert "Color palette" in SYSTEM_PROMPT
+
+
+def test_system_prompt_contains_model_guidance():
+    """SYSTEM_PROMPT includes MODEL GUIDANCE for adapting to capabilities."""
+    from plugins.prompt_to_video.planner import SYSTEM_PROMPT
+
+    assert "MODEL GUIDANCE:" in SYSTEM_PROMPT
+    assert "seed images" in SYSTEM_PROMPT
+    assert "seed_image_prompt" in SYSTEM_PROMPT
+    assert "start+end frames" in SYSTEM_PROMPT
+
+
+def test_system_prompt_retains_avatar_instructions():
+    """SYSTEM_PROMPT still contains the original avatar cast instructions."""
+    from plugins.prompt_to_video.planner import SYSTEM_PROMPT
+
+    assert "AVATAR CAST MEMBERS:" in SYSTEM_PROMPT
+    assert "Only use avatars that are provided" in SYSTEM_PROMPT
+    assert "do NOT invent new characters" in SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Script-to-Video planner — model capabilities context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_script_to_video_planner_accepts_model_capabilities():
+    """plan_scenes_from_script signature includes model_capabilities_context param."""
+    from plugins.script_to_video.planner import plan_scenes_from_script
+    import inspect
+
+    sig = inspect.signature(plan_scenes_from_script)
+    assert "model_capabilities_context" in sig.parameters
+    param = sig.parameters["model_capabilities_context"]
+    assert param.default is None
+
+
+@pytest.mark.asyncio
+async def test_script_planner_includes_model_capabilities_in_prompt():
+    """When model_capabilities_context is provided, the LLM prompt contains it."""
+    caps_ctx = (
+        "VIDEO MODEL CAPABILITIES:\n"
+        "  Model: wan2.2\n"
+        "  Generation type: text_to_video (text prompt only → video)\n\n"
+        "IMAGE MODEL CAPABILITIES:\n"
+        "  Model: flux1-schnell\n"
+        "  Generation type: text_to_image (text prompt only — no reference image needed)\n"
+    )
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"scenes": [{"start_time": 0, "end_time": 5, '
+        '"narration": "test", "visual_description": "test", '
+        '"image_prompt": "test", "mood": "neutral", "camera_movement": "static"}]}'
+    )
+    mock_llm.close = AsyncMock()
+
+    with patch(
+        "plugins.script_to_video.planner.LLMClient",
+        return_value=mock_llm,
+    ):
+        from plugins.script_to_video.planner import plan_scenes_from_script
+
+        await plan_scenes_from_script(
+            segments=[{"narration": "A sci-fi story segment"}],
+            duration=30,
+            model_capabilities_context=caps_ctx,
+        )
+
+    mock_llm.generate.assert_called_once()
+    call_kwargs = mock_llm.generate.call_args.kwargs
+    prompt_text = call_kwargs["prompt"]
+    assert "VIDEO MODEL CAPABILITIES:" in prompt_text
+    assert "IMAGE MODEL CAPABILITIES:" in prompt_text
+    assert "wan2.2" in prompt_text
+    assert "flux1-schnell" in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_script_planner_none_model_capabilities_omits_block():
+    """When model_capabilities_context is None, prompt does NOT contain CAPABILITIES block."""
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"scenes": [{"start_time": 0, "end_time": 5, '
+        '"narration": "test", "visual_description": "test", '
+        '"image_prompt": "test", "mood": "neutral", "camera_movement": "static"}]}'
+    )
+    mock_llm.close = AsyncMock()
+
+    with patch(
+        "plugins.script_to_video.planner.LLMClient",
+        return_value=mock_llm,
+    ):
+        from plugins.script_to_video.planner import plan_scenes_from_script
+
+        await plan_scenes_from_script(
+            segments=[{"narration": "A simple story segment"}],
+            duration=30,
+            model_capabilities_context=None,
+        )
+
+    call_kwargs = mock_llm.generate.call_args.kwargs
+    prompt_text = call_kwargs["prompt"]
+    assert "VIDEO MODEL CAPABILITIES:" not in prompt_text
+    assert "IMAGE MODEL CAPABILITIES:" not in prompt_text
+    assert "A simple story segment" in prompt_text
+
+
+def test_script_system_prompt_contains_story_arc():
+    """script_to_video SYSTEM_PROMPT includes story arc structure and consistency rules."""
+    from plugins.script_to_video.planner import SYSTEM_PROMPT
+
+    assert "STORY ARC" in SYSTEM_PROMPT
+    assert "Opening" in SYSTEM_PROMPT
+    assert "Development" in SYSTEM_PROMPT
+    assert "Climax" in SYSTEM_PROMPT
+    assert "Resolution" in SYSTEM_PROMPT
+    assert "CONSISTENCY RULES:" in SYSTEM_PROMPT
+    assert "consistent visual description" in SYSTEM_PROMPT
+    assert "Color palette" in SYSTEM_PROMPT
+
+
+def test_script_system_prompt_contains_model_guidance():
+    """script_to_video SYSTEM_PROMPT includes MODEL GUIDANCE for adapting to capabilities."""
+    from plugins.script_to_video.planner import SYSTEM_PROMPT
+
+    assert "MODEL GUIDANCE:" in SYSTEM_PROMPT
+    assert "seed images" in SYSTEM_PROMPT
+    assert "seed_image_prompt" in SYSTEM_PROMPT
+    assert "start+end frames" in SYSTEM_PROMPT
+
+
+def test_script_system_prompt_retains_narration():
+    """script_to_video SYSTEM_PROMPT still contains narration-specific instructions."""
+    from plugins.script_to_video.planner import SYSTEM_PROMPT
+
+    assert "narration" in SYSTEM_PROMPT
+    assert "Narration is the text that will be spoken" in SYSTEM_PROMPT
+    assert "AVATAR CAST MEMBERS:" in SYSTEM_PROMPT
+    assert "Only use avatars that are provided" in SYSTEM_PROMPT

@@ -42,4 +42,52 @@ def build_avatar_context_string(avatars: list[dict[str, Any]]) -> str:
         if role:
             lines.append(f"  Role in this video: {role}")
 
+        # Image reference info
+        primary_path = a.get("primary_image_path", "")
+        if primary_path:
+            lines.append(f"  Image reference available: {primary_path}")
+
+        # Consistency strategy (omit default "prompt_only")
+        strategy = a.get("consistency_strategy", "")
+        if strategy and strategy != "prompt_only":
+            lines.append(f"  Visual consistency: uses {strategy} method")
+
+    return "\n".join(lines)
+
+
+def build_avatar_visual_context(avatars: list[dict[str, Any]]) -> str:
+    """Return a concise visual summary for model-capabilities context.
+
+    Args:
+        avatars: List of resolved avatar dicts (same shape as
+                 build_avatar_context_string).
+
+    Returns:
+        A formatted string like:
+
+        CHARACTER REFERENCES:
+        - Alice: reference image at /path/to/alice.png (strategy: ip_adapter)
+        - Bob: reference image at /path/to/bob.png (strategy: face_swap)
+        - Carol: no reference image (strategy: prompt_only)
+
+    Returns empty string if avatars list is empty.
+    """
+    if not avatars:
+        return ""
+
+    lines = ["CHARACTER REFERENCES:"]
+    for a in avatars:
+        name = a.get("name", "Unknown")
+        img = a.get("primary_image_path", "")
+        strategy = a.get("consistency_strategy", "prompt_only") or "prompt_only"
+
+        if img:
+            lines.append(
+                f"- {name}: reference image at {img} (strategy: {strategy})"
+            )
+        else:
+            lines.append(
+                f"- {name}: no reference image (strategy: {strategy})"
+            )
+
     return "\n".join(lines)
