@@ -224,7 +224,7 @@ class PluginBase(ABC):
 
         from app.api.models import get_default_model_preferences
         from app.config import get_settings
-        from app.database import Avatar, AvatarImage
+        from app.database import Avatar, AvatarImage, JobObjectRef, ObjectRef
         from app.services.llm_service import LLMClient
         from app.services.media_generator import generate_image
 
@@ -233,17 +233,27 @@ class PluginBase(ABC):
         prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
         if not prompt or not prompt.strip():
             logger.debug("No prompt in job %s, skipping auto-avatar creation", job.id)
+            context.setdefault("objects", [])
             return context
 
-        # ── LLM: create character descriptions ─────────────────────────
+        # ── LLM: create character + object descriptions ─────────────────
         system = (
-            "You are a character designer. Based on the video prompt, create 1-3 distinct "
-            "characters.\n"
+            "You are a scene analyst. Based on the video prompt, identify:\n"
+            "1. CHARACTERS (1-3): people with name, gender (male/female/other), bio, role\n"
+            "2. OBJECTS (0-5): recurring props/items/vehicles/tools that appear in multiple "
+            "scenes.\n"
+            "   For each object: name, description (1-2 sentences), visual_properties (dict of "
+            "   color, make, model, size, distinctive features), role (how the object appears "
+            "   in the story)\n\n"
             "Output ONLY valid JSON:\n"
-            '{"characters": [{"name": "...", "gender": "male/female/other", '
-            '"bio": "2-3 sentence backstory", "role": "their role in this video"}]}\n'
-            "Choose characters that naturally fit the story. Be specific about appearance in "
-            "the bio."
+            '{"characters": [{"name": "...", "gender": "...", "bio": "...", "role": "..."}],\n'
+            ' "objects": [{"name": "...", "description": "...", "visual_properties": {...}, '
+            '"role": "..."}]}\n\n'
+            "Only include objects that are RECURRING and STORY-SIGNIFICANT. Skip one-off "
+            "mentions. A car that appears in 3+ scenes is important. A wristwatch mentioned "
+            "once is not.\n"
+            "Max 5 objects. Be precise about visual properties — they must remain consistent "
+            "across scenes."
         )
 
         try:
@@ -259,6 +269,7 @@ class PluginBase(ABC):
                 "LLM unavailable during auto-avatar creation for job %s: %s",
                 job.id, exc,
             )
+            context.setdefault("objects", [])
             return context
 
         # ── Parse JSON ─────────────────────────────────────────────────
@@ -272,16 +283,21 @@ class PluginBase(ABC):
                     lines = lines[:-1]
                 text = "\n".join(lines)
             data = _json.loads(text)
-            characters: list[dict[str, str]] = data.get("characters", [])
+            characters: list[dict[str, Any]] = data.get("characters", [])
+            objects_data: list[dict[str, Any]] = data.get("objects", [])
         except (_json.JSONDecodeError, KeyError, TypeError) as exc:
             logger.warning(
                 "Failed to parse auto-avatar LLM response for job %s: %s\nResponse: %s",
                 job.id, exc, response[:500],
             )
+            context.setdefault("objects", [])
             return context
 
         if not characters:
             logger.debug("LLM returned empty character list for job %s", job.id)
+
+        if not characters and not objects_data:
+            context.setdefault("objects", [])
             return context
 
         # ── Generate images & persist ──────────────────────────────────
@@ -377,6 +393,60 @@ class PluginBase(ABC):
             })
 
         context["avatars"] = resolved_avatars
+
+        # ── Persist objects (no images yet — deferred to Task 8) ───────
+        resolved_objects: list[dict[str, Any]] = []
+        for idx, obj_data in enumerate(objects_data[:5]):
+            obj_name = obj_data.get("name") or f"Object {idx + 1}"
+            description = obj_data.get("description", "")
+            visual_props = obj_data.get("visual_properties") or {}
+            obj_role = obj_data.get("role", "")
+
+            try:
+                obj = ObjectRef(
+                    user_id=job.user_id,
+                    name=obj_name,
+                    description=description if description else None,
+                    visual_properties=visual_props if visual_props else None,
+                    category=obj_data.get("category"),
+                )
+                db.add(obj)
+                await db.flush()
+
+                job_obj = JobObjectRef(
+                    job_id=job.id,
+                    object_ref_id=obj.id,
+                    role=obj_role if obj_role else None,
+                    importance_score=None,
+                )
+                db.add(job_obj)
+                await db.commit()
+                await db.refresh(obj)
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist auto-object %r for job %s: %s",
+                    obj_name, job.id, exc,
+                )
+                await db.rollback()
+                continue
+
+            resolved_objects.append({
+                "id": str(obj.id),
+                "name": obj.name,
+                "description": obj.description,
+                "visual_properties": obj.visual_properties,
+                "role": obj_role,
+                "primary_image_path": None,
+            })
+
+        if resolved_objects:
+            logger.info(
+                "Auto-created %d object(s) from prompt for job %s: %s",
+                len(resolved_objects), job.id,
+                [o["name"] for o in resolved_objects],
+            )
+
+        context["objects"] = resolved_objects
         return context
 
     # ------------------------------------------------------------------
@@ -475,6 +545,103 @@ class PluginBase(ABC):
         raise last_exc
 
     # ------------------------------------------------------------------
+    # Deferred object reference image generation
+    # ------------------------------------------------------------------
+
+    async def _generate_object_references(
+        self,
+        db: "AsyncSession",
+        job: "Job",
+        context: dict[str, Any],
+    ) -> None:
+        """Generate reference images for objects the planner selected.
+
+        Called from :meth:`generate_images` before the scene loop.  Only
+        objects listed in ``context["object_selections"]`` get a reference
+        image.  Objects that are not selected, or whose generation fails,
+        stay text-only.
+        """
+        from pathlib import Path
+        from uuid import UUID
+
+        from sqlalchemy import select
+
+        from app.config import get_settings
+        from app.database import ObjectRef, ObjectRefImage
+        from app.services.media_generator import generate_image
+
+        object_selections: list[dict[str, Any]] = context.get("object_selections", [])
+        if not object_selections:
+            return
+
+        objects: list[dict[str, Any]] = context.get("objects", [])
+        if not objects:
+            return
+
+        for selection in object_selections:
+            obj_name: str | None = selection.get("object_name")
+            seed_prompt: str = selection.get("seed_image_prompt", "")
+            if not obj_name or not seed_prompt:
+                continue
+
+            # Find the matching object in the resolved context list
+            obj: dict[str, Any] | None = next(
+                (o for o in objects if o.get("name") == obj_name), None
+            )
+            if not obj:
+                logger.warning(
+                    "Object %r selected by planner but not found in context.objects",
+                    obj_name,
+                )
+                continue
+
+            try:
+                image_path, _media_id, _provider_id = await self._retry(
+                    generate_image,
+                    db=db,
+                    job=job,
+                    prompt=seed_prompt,
+                    scene_number=0,  # object reference — not scene-specific
+                    model_preference=job.input_data.get("image_model") if job.input_data else None,
+                    provider_id=job.image_provider_id,
+                    label=f"obj-ref-{obj_name}",
+                )
+
+                # Persist ObjectRefImage record
+                result = await db.execute(
+                    select(ObjectRef).where(ObjectRef.id == UUID(obj["id"]))
+                )
+                obj_ref = result.scalar_one_or_none()
+                if obj_ref:
+                    obj_img = ObjectRefImage(
+                        object_ref_id=obj_ref.id,
+                        storage_path=image_path,
+                        is_primary=True,
+                    )
+                    db.add(obj_img)
+                    await db.commit()
+
+                    settings = get_settings()
+                    obj["primary_image_path"] = str(Path(settings.storage_path) / image_path)
+                    logger.info(
+                        "Generated object reference for %r (path=%s)",
+                        obj_name, image_path,
+                    )
+                else:
+                    logger.warning(
+                        "ObjectRef row not found for context object %r (id=%s)",
+                        obj_name, obj["id"],
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to generate object reference for %r: %s — "
+                    "object will be text-only",
+                    obj_name, exc,
+                )
+
+        context["objects"] = objects
+
+    # ------------------------------------------------------------------
     # Stage: generate images
     # ------------------------------------------------------------------
 
@@ -518,12 +685,38 @@ class PluginBase(ABC):
                     avatar_ref_path,
                 )
                 avatar_ref_path = None
+
+        await self._generate_object_references(db, job, context)
+
         for scene in scenes:
             if scene.reference_image_path:
                 continue
             prompt = scene.image_prompt or scene.visual_description or ""
             if not prompt:
                 continue
+
+            # Inject object visual properties for this scene
+            objects_ctx = context.get("objects", [])
+            object_selections_ctx = context.get("object_selections", [])
+            if objects_ctx and object_selections_ctx:
+                scene_objects = [
+                    sel for sel in object_selections_ctx
+                    if scene.scene_number in sel.get("scenes", [])
+                ]
+                if scene_objects:
+                    best = max(scene_objects, key=lambda s: s.get("importance_score", 0))
+                    obj = next(
+                        (o for o in objects_ctx if o.get("name") == best.get("object_name")),
+                        None,
+                    )
+                    if obj and obj.get("primary_image_path"):
+                        obj_visual = obj.get("visual_properties", {})
+                        if obj_visual:
+                            props_str = ", ".join(
+                                f"{k}={v}" for k, v in obj_visual.items()
+                            )
+                            prompt = f"{prompt} [Object reference: {props_str}]"
+
             try:
                 image_path, _media_id, _provider_id = await self._retry(
                     generate_image,
@@ -637,6 +830,26 @@ class PluginBase(ABC):
             scene_duration = scene.end_time - scene.start_time
             prompt = scene.visual_description or scene.lyrics_segment or ""
 
+            # Inject object visual properties for this scene (short clip path)
+            objects_ctx = context.get("objects", [])
+            object_selections_ctx = context.get("object_selections", [])
+            if objects_ctx and object_selections_ctx and prompt:
+                scene_objs = [
+                    sel for sel in object_selections_ctx
+                    if scene.scene_number in sel.get("scenes", [])
+                ]
+                if scene_objs:
+                    best = max(scene_objs, key=lambda s: s.get("importance_score", 0))
+                    obj = next(
+                        (o for o in objects_ctx if o.get("name") == best.get("object_name")),
+                        None,
+                    )
+                    if obj and obj.get("primary_image_path") and obj.get("visual_properties"):
+                        props_str = ", ".join(
+                            f"{k}={v}" for k, v in obj["visual_properties"].items()
+                        )
+                        prompt = f"{prompt} [Object reference: {props_str}]"
+
             from app.database import ErrorOrigin, ErrorSeverity
             from app.services.error_capture import log_user_error
             from app.services.video_processor import InvalidVideoOutputError
@@ -673,6 +886,7 @@ class PluginBase(ABC):
                                 crossfade_s=crossfade_s,
                                 aspect_ratio=aspect_ratio,
                                 avatars=avatars,
+                                objects=context.get("objects", []),
                             )
                         )
 
@@ -753,6 +967,7 @@ class PluginBase(ABC):
         crossfade_s: float,
         aspect_ratio: str,
         avatars: list[dict[str, Any]] | None = None,
+        objects: list[dict[str, Any]] | None = None,
     ) -> tuple[str, float]:
         """Split a long scene into chained sub-clips.
 
@@ -779,7 +994,7 @@ class PluginBase(ABC):
 
         num_clips = math.ceil(scene_duration / max_clip_s)
         prompts = await self._generate_sub_scene_prompts(
-            db, job, scene, num_clips, avatars,
+            db, job, scene, num_clips, avatars, objects,
         )
 
         sub_clip_paths: list[str] = []
@@ -846,6 +1061,7 @@ class PluginBase(ABC):
         scene: VideoScene,
         num_clips: int,
         avatars: list[dict[str, Any]] | None = None,
+        objects: list[dict[str, Any]] | None = None,
     ) -> list[str]:
         """Use the LLM to decompose a scene into evolving sub-clip prompts.
 
@@ -882,6 +1098,26 @@ class PluginBase(ABC):
                     "all sub-clips):\n" + "\n".join(f"  – {c}" for c in chars)
                 )
 
+        # Build object context string from objects with reference images
+        object_context = ""
+        if objects:
+            ref_objects = [
+                o for o in objects
+                if o.get("primary_image_path") and o.get("visual_properties")
+            ]
+            if ref_objects:
+                obj_lines = []
+                for o in ref_objects:
+                    name = o.get("name", "unknown")
+                    props = o.get("visual_properties", {})
+                    props_str = ", ".join(f"{k}={v}" for k, v in props.items())
+                    obj_lines.append(f"  – {name}: {props_str}")
+                object_context = (
+                    "OBJECT REFERENCES (maintain visual consistency for "
+                    "these objects across all sub-clips):\n"
+                    + "\n".join(obj_lines)
+                )
+
         try:
             from app.services.llm_service import LLMClient
             llm = LLMClient()
@@ -897,6 +1133,8 @@ class PluginBase(ABC):
             )
             if character_context:
                 system = character_context + "\n\n" + system
+            if object_context:
+                system = object_context + "\n\n" + system
 
             user = (
                 f"Original scene description: {original_prompt}\n"

@@ -16,6 +16,7 @@ from app.api import (
     media,
     models,
     notifications,
+    objects,
     projects,
     providers,
     scenes,
@@ -104,6 +105,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(avatars.router, prefix="/api/avatars", tags=["avatars"])
+app.include_router(objects.router, prefix="/api/objects", tags=["objects"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])

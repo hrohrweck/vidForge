@@ -268,6 +268,16 @@ export interface BatchJobResponse {
   job_ids: string[]
 }
 
+export interface JobObject {
+  object_id: string
+  object_name: string
+  role: string | null
+  importance_score: number | null
+  category: string | null
+  description: string | null
+  primary_image_path: string | null
+}
+
 export interface Template {
   id: string
   name: string
@@ -367,6 +377,11 @@ export const jobsApi = {
     // Returns a URL that triggers a browser download with Content-Disposition
     const token = localStorage.getItem('token')
     return `/api/jobs/${id}/download?token=${token}`
+  },
+
+  getObjects: async (id: string) => {
+    const response = await api.get<JobObject[]>(`/jobs/${id}/objects`)
+    return response.data
   },
 }
 

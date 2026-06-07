@@ -98,9 +98,15 @@ class ScriptToVideoPlugin(PluginBase):
         self, db: AsyncSession, job: Job, context: dict[str, Any],
     ) -> dict[str, Any]:
         from app.api.models import get_model
-        from app.services.avatar_prompt_builder import build_avatar_context_string
+        from app.services.avatar_prompt_builder import (
+            build_avatar_context_string,
+            build_combined_context,
+        )
         from app.services.llm_service import resolve_llm
-        from app.services.model_capabilities import build_model_capabilities_context
+        from app.services.model_capabilities import (
+            build_model_capabilities_context,
+            build_reference_capacity_context,
+        )
 
         from .planner import plan_scenes_from_script
 
@@ -116,7 +122,9 @@ class ScriptToVideoPlugin(PluginBase):
         if text_model:
             provider = await resolve_llm(text_model, db)
 
-        avatars_context = build_avatar_context_string(context.get("avatars", []))
+        avatars = context.get("avatars", [])
+        objects = context.get("objects", [])
+        avatars_context = build_avatar_context_string(avatars)
 
         video_config = None
         if video_model:
@@ -129,15 +137,26 @@ class ScriptToVideoPlugin(PluginBase):
             image_model_config=image_config,
         )
 
-        scenes = await plan_scenes_from_script(
+        objects_context = build_combined_context(avatars, objects) or None
+        reference_capacity_context = build_reference_capacity_context(
+            video_model_config=video_config,
+            char_count=len(avatars),
+        )
+
+        result = await plan_scenes_from_script(
             segments=segments,
             duration=duration,
             style=style,
             avatars_context=avatars_context or None,
             model_capabilities_context=model_capabilities_context,
+            objects_context=objects_context,
+            reference_capacity_context=reference_capacity_context,
             provider=provider,
             model=text_model,
         )
+
+        scenes = result["scenes"]
+        context["object_selections"] = result.get("object_selections", [])
 
         await db.execute(sa_delete(VideoScene).where(VideoScene.job_id == job.id))
         await db.commit()

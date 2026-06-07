@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Avatar, AvatarImage, Job, VideoScene
+from app.database import Avatar, AvatarImage, Job, JobObjectRef, ObjectRef, VideoScene
 from app.plugins.base import PluginBase
 
 
@@ -66,6 +66,70 @@ SINGLE_CHAR_RESPONSE = (
 SINGLE_CHAR_RESPONSE_2 = (
     '{"characters": [{"name": "Eve", "gender": "female", '
     '"bio": "A spy.", "role": "Protagonist"}]}'
+)
+
+CHARS_WITH_OBJECTS_RESPONSE = (
+    '{"characters": ['
+    '{"name": "Alice", "gender": "female", '
+    '"bio": "A young detective with sharp instincts.", '
+    '"role": "Lead investigator"}'
+    "],"
+    '"objects": ['
+    '{"name": "Notebook", "description": "A leather-bound detective notebook.", '
+    '"visual_properties": {"color": "brown", "size": "small"}, '
+    '"role": "Alice\'s evidence log"}, '
+    '{"name": "Magnifying Glass", "description": "A brass magnifying glass.", '
+    '"visual_properties": {"color": "gold", "make": "antique"}, '
+    '"role": "Investigation tool"}'
+    "]}"
+)
+
+CHARS_ONLY_NO_OBJECTS_RESPONSE = (
+    '{"characters": ['
+    '{"name": "Alice", "gender": "female", '
+    '"bio": "A detective.", "role": "Lead"}'
+    "],"
+    '"objects": []'
+    "}"
+)
+
+SIX_OBJECTS_RESPONSE = (
+    '{"characters": ['
+    '{"name": "Alice", "gender": "female", '
+    '"bio": "A detective.", "role": "Lead"}'
+    "],"
+    '"objects": ['
+    '{"name": "Obj1", "description": "Desc1", "visual_properties": {}, "role": "r1"}, '
+    '{"name": "Obj2", "description": "Desc2", "visual_properties": {}, "role": "r2"}, '
+    '{"name": "Obj3", "description": "Desc3", "visual_properties": {}, "role": "r3"}, '
+    '{"name": "Obj4", "description": "Desc4", "visual_properties": {}, "role": "r4"}, '
+    '{"name": "Obj5", "description": "Desc5", "visual_properties": {}, "role": "r5"}, '
+    '{"name": "Obj6", "description": "Desc6", "visual_properties": {}, "role": "r6"}'
+    "]}"
+)
+
+OBJECT_MISSING_PROPS_RESPONSE = (
+    '{"characters": ['
+    '{"name": "Alice", "gender": "female", '
+    '"bio": "A detective.", "role": "Lead"}'
+    "],"
+    '"objects": ['
+    '{"name": "Lamp", "description": "A desk lamp.", '
+    '"role": "Lighting"}'
+    "]}"
+)
+
+OBJECTS_ONLY_RESPONSE = (
+    '{"characters": [],'
+    '"objects": ['
+    '{"name": "Sports Car", "description": "A red Ferrari F40.", '
+    '"visual_properties": {"color": "red", "make": "Ferrari", "model": "F40"}, '
+    '"role": "Protagonist\'s vehicle"}'
+    "]}"
+)
+
+ALL_MISSING_RESPONSE = (
+    '{"characters": [], "objects": []}'
 )
 
 
@@ -259,7 +323,7 @@ class TestCreateAutoAvatarsLLM:
                 db_session, job, {"avatars": []}
             )
 
-        assert ctx == {"avatars": []}
+        assert ctx == {"avatars": [], "objects": []}
         assert log_mock.warning.called
 
     @pytest.mark.asyncio
@@ -285,7 +349,7 @@ class TestCreateAutoAvatarsLLM:
                 db_session, job, {"avatars": []}
             )
 
-        assert ctx == {"avatars": []}
+        assert ctx == {"avatars": [], "objects": []}
         assert log_mock.warning.called
 
     @pytest.mark.asyncio
@@ -446,7 +510,7 @@ class TestCreateAutoAvatarsPrompt:
                 db_session, job, {"avatars": []}
             )
 
-        assert ctx == {"avatars": []}
+        assert ctx == {"avatars": [], "objects": []}
         llm_mock.assert_not_called()
 
 
@@ -626,3 +690,220 @@ class TestGenerateImagesAvatar:
 
         assert captured_kwargs["reference_image_path"] is None
         assert log_mock.warning.called
+
+
+class TestCreateAutoObjects:
+
+    @pytest.mark.asyncio
+    async def test_characters_and_objects_both_processed(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=CHARS_WITH_OBJECTS_RESPONSE)
+        gen_image_mock = _make_gen_image_mock(temp_storage)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_GEN_IMAGE, gen_image_mock),
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(db_session, job, {})
+        assert len(ctx["avatars"]) == 1
+        assert ctx["avatars"][0]["name"] == "Alice"
+        assert len(ctx["objects"]) == 2
+        assert ctx["objects"][0]["name"] == "Notebook"
+        assert ctx["objects"][0]["visual_properties"] == {"color": "brown", "size": "small"}
+        assert ctx["objects"][0]["role"] == "Alice's evidence log"
+        assert ctx["objects"][0]["primary_image_path"] is None
+        assert ctx["objects"][1]["name"] == "Magnifying Glass"
+
+        result = await db_session.execute(
+            select(ObjectRef).where(ObjectRef.user_id == regular_user.id)
+        )
+        objects = result.scalars().all()
+        assert len(objects) == 2
+        assert objects[0].name == "Notebook"
+        assert objects[0].visual_properties == {"color": "brown", "size": "small"}
+
+        result = await db_session.execute(
+            select(JobObjectRef).where(JobObjectRef.job_id == job.id)
+        )
+        links = result.scalars().all()
+        assert len(links) == 2
+        link_roles = {l.role for l in links}
+        assert link_roles == {"Alice's evidence log", "Investigation tool"}
+        assert all(l.importance_score is None for l in links)
+
+    @pytest.mark.asyncio
+    async def test_characters_only_no_objects(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=CHARS_ONLY_NO_OBJECTS_RESPONSE)
+        gen_image_mock = _make_gen_image_mock(temp_storage)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_GEN_IMAGE, gen_image_mock),
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(db_session, job, {})
+        assert len(ctx["avatars"]) == 1
+        assert "objects" in ctx
+        assert ctx["objects"] == []
+
+        result = await db_session.execute(
+            select(ObjectRef).where(ObjectRef.user_id == regular_user.id)
+        )
+        assert len(result.scalars().all()) == 0
+
+    @pytest.mark.asyncio
+    async def test_six_objects_capped_at_five(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=SIX_OBJECTS_RESPONSE)
+        gen_image_mock = _make_gen_image_mock(temp_storage)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_GEN_IMAGE, gen_image_mock),
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(db_session, job, {})
+        assert len(ctx["objects"]) == 5
+        assert ctx["objects"][-1]["name"] == "Obj5"
+
+        result = await db_session.execute(
+            select(ObjectRef).where(ObjectRef.user_id == regular_user.id)
+        )
+        assert len(result.scalars().all()) == 5
+
+    @pytest.mark.asyncio
+    async def test_object_missing_visual_properties(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=OBJECT_MISSING_PROPS_RESPONSE)
+        gen_image_mock = _make_gen_image_mock(temp_storage)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_GEN_IMAGE, gen_image_mock),
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(db_session, job, {})
+        assert len(ctx["objects"]) == 1
+        assert ctx["objects"][0]["name"] == "Lamp"
+        assert ctx["objects"][0]["description"] == "A desk lamp."
+        assert ctx["objects"][0]["visual_properties"] is None
+
+    @pytest.mark.asyncio
+    async def test_parse_failure_returns_context_unchanged(
+        self, db_session, regular_user
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=INVALID_LLM_RESPONSE)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_PREFS, prefs_mock),
+            patch(PATCH_LOGGER) as log_mock,
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(
+                db_session, job, {"avatars": []}
+            )
+
+        assert ctx == {"avatars": [], "objects": []}
+        assert log_mock.warning.called
+
+        result = await db_session.execute(
+            select(ObjectRef).where(ObjectRef.user_id == regular_user.id)
+        )
+        assert len(result.scalars().all()) == 0
+
+    @pytest.mark.asyncio
+    async def test_objects_only_no_characters(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=OBJECTS_ONLY_RESPONSE)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(db_session, job, {})
+        assert "avatars" in ctx
+        assert ctx["avatars"] == []
+        assert len(ctx["objects"]) == 1
+        assert ctx["objects"][0]["name"] == "Sports Car"
+        assert ctx["objects"][0]["visual_properties"] == {
+            "color": "red", "make": "Ferrari", "model": "F40"
+        }
+
+    @pytest.mark.asyncio
+    async def test_all_missing_returns_empty(
+        self, db_session, regular_user, temp_storage
+    ):
+        job = make_job(regular_user.id)
+        db_session.add(job)
+        await db_session.commit()
+
+        plugin = TestAutoAvatarPlugin()
+
+        llm_mock = AsyncMock(return_value=ALL_MISSING_RESPONSE)
+        prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
+
+        with (
+            patch(PATCH_LLM) as llm_cls,
+            patch(PATCH_PREFS, prefs_mock),
+        ):
+            llm_cls.return_value.generate = llm_mock
+            ctx = await plugin._create_auto_avatars(
+                db_session, job, {"avatars": []}
+            )
+        assert ctx["avatars"] == []
+        assert ctx["objects"] == []

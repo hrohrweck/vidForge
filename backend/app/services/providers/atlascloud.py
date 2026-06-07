@@ -417,10 +417,10 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         # Handle reference image for img2img models
         if image_path:
             try:
+                import base64
                 from pathlib import Path
 
                 from app.config import get_settings
-                import base64
 
                 settings = get_settings()
                 full_path = Path(settings.storage_path) / image_path

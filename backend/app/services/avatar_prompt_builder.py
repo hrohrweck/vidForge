@@ -91,3 +91,78 @@ def build_avatar_visual_context(avatars: list[dict[str, Any]]) -> str:
             )
 
     return "\n".join(lines)
+
+
+def build_object_catalog_string(objects: list[dict[str, Any]]) -> str:
+    """Format object catalog data into a compact text block for the LLM prompt.
+
+    Args:
+        objects: List of object dicts from context["objects"].
+                 Each dict has: name, description, visual_properties (dict),
+                 role, importance_score.
+
+    Returns:
+        A formatted string like:
+        OBJECT CATALOG (no reference images yet — planner decides which need them):
+        - Object: sports car | Category: vehicle
+          Description: Red Ferrari F40, low profile, racing stripes
+          Visual properties: color=red, make=Ferrari, model=F40
+          Role: protagonist's vehicle
+
+    Returns empty string if objects list is empty.
+    """
+    if not objects:
+        return ""
+
+    lines = [
+        "OBJECT CATALOG (no reference images yet — planner decides which need them):"
+    ]
+    for obj in objects[:10]:
+        name = obj.get("name", "Unknown")
+        category = obj.get("category", "")
+        description = obj.get("description", "")
+        visual_properties = obj.get("visual_properties") or {}
+        role = obj.get("role", "")
+
+        header_parts = [f"Object: {name}"]
+        if category:
+            header_parts.append(f"Category: {category}")
+        lines.append(f"- {' | '.join(header_parts)}")
+
+        if description:
+            lines.append(f"  Description: {description}")
+
+        if visual_properties:
+            props_str = ", ".join(
+                f"{k}={v}" for k, v in visual_properties.items()
+            )
+            lines.append(f"  Visual properties: {props_str}")
+
+        if role:
+            lines.append(f"  Role: {role}")
+
+    return "\n".join(lines)
+
+
+def build_combined_context(
+    avatars: list[dict[str, Any]], objects: list[dict[str, Any]]
+) -> str:
+    """Combine avatar cast and object catalog into a single context string.
+
+    Args:
+        avatars: List of resolved avatar dicts.
+        objects: List of resolved object dicts.
+
+    Returns:
+        Combined output with clear section breaks. Empty sections are omitted.
+    """
+    avatar_section = build_avatar_context_string(avatars)
+    object_section = build_object_catalog_string(objects)
+
+    sections = []
+    if avatar_section:
+        sections.append(avatar_section)
+    if object_section:
+        sections.append(object_section)
+
+    return "\n\n".join(sections)

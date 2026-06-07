@@ -196,7 +196,10 @@ class TestNormalizeCapabilities:
 # build_model_capabilities_context
 # ────────────────────────────────────────────────────────────────────────────
 
-from app.services.model_capabilities import build_model_capabilities_context
+from app.services.model_capabilities import (
+    build_model_capabilities_context,
+    build_reference_capacity_context,
+)
 
 
 def _video_cfg(
@@ -478,3 +481,111 @@ class TestBuildModelCapabilitiesContext:
             image_model_config=None,
         )
         assert "unknown" in result.lower()
+
+
+@pytest.mark.reference_capacity
+class TestBuildReferenceCapacityContext:
+    """build_reference_capacity_context generates reference slot guidance."""
+
+    def test_image_to_video_zero_chars(self):
+        """IMAGE_TO_VIDEO with 0 chars → 1 slot available."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={
+                    "accepts_text": True,
+                    "accepts_image": True,
+                    "outputs_video": True,
+                }
+            ),
+            char_count=0,
+        )
+        assert "accepts up to 1 reference image per scene" in result
+        assert "0 slots are consumed by character avatars" in result
+        assert "1 slot remains for objects" in result
+        assert "The top 1 object will receive reference images" in result
+
+    def test_image_to_video_one_char(self):
+        """IMAGE_TO_VIDEO with 1 char → 0 slots available."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={
+                    "accepts_text": True,
+                    "accepts_image": True,
+                    "outputs_video": True,
+                }
+            ),
+            char_count=1,
+        )
+        assert "accepts up to 1 reference image per scene" in result
+        assert "1 slot is consumed by character avatars" in result
+        assert "All reference slots consumed by characters" in result
+        assert "Objects must be described in words only" in result
+
+    def test_frame_to_video_one_char(self):
+        """FRAME_TO_VIDEO with 1 char → 1 slot available."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={
+                    "accepts_text": True,
+                    "accepts_start_end_images": True,
+                    "outputs_video": True,
+                }
+            ),
+            char_count=1,
+        )
+        assert "accepts up to 2 reference images per scene" in result
+        assert "1 slot is consumed by character avatars" in result
+        assert "1 slot remains for objects" in result
+        assert "The top 1 object will receive reference images" in result
+
+    def test_multi_ref_to_video_two_chars_max_refs_five(self):
+        """MULTI_REF_TO_VIDEO with 2 chars and max_refs=5 → 3 available."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={
+                    "accepts_text": True,
+                    "accepts_multiple_images": True,
+                    "outputs_video": True,
+                },
+                constraints={"max_refs": 5},
+            ),
+            char_count=2,
+        )
+        assert "accepts up to 5 reference images per scene" in result
+        assert "2 slots are consumed by character avatars" in result
+        assert "3 slots remain for objects" in result
+        assert "The top 3 objects will receive reference images" in result
+
+    def test_text_to_video_zero_available(self):
+        """TEXT_TO_VIDEO → 0 slots, text-only model."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={"accepts_text": True, "outputs_video": True}
+            ),
+            char_count=0,
+        )
+        assert "does not accept reference images" in result
+        assert "All objects must be described in words only" in result
+
+    def test_none_model_returns_unknown(self):
+        """No video model → unknown capacity."""
+        result = build_reference_capacity_context(
+            video_model_config=None,
+            char_count=0,
+        )
+        assert "Reference capacity: unknown (no video model selected)" == result
+
+    def test_more_chars_than_slots_warning(self):
+        """More characters than slots → warning message."""
+        result = build_reference_capacity_context(
+            video_model_config=_video_cfg(
+                capabilities={
+                    "accepts_text": True,
+                    "accepts_image": True,
+                    "outputs_video": True,
+                }
+            ),
+            char_count=3,
+        )
+        assert "WARNING: More characters than reference slots" in result
+        assert "Only 1 total slot available" in result

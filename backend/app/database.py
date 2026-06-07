@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -253,6 +254,9 @@ class User(Base):
     media_events: Mapped[list["MediaEvent"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    object_refs: Mapped[list["ObjectRef"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserSettings(Base):
@@ -358,6 +362,9 @@ class Job(Base):
     )
     avatar_assignments: Mapped[list["JobAvatar"]] = relationship(
         back_populates="job", lazy="selectin"
+    )
+    object_ref_assignments: Mapped[list["JobObjectRef"]] = relationship(
+        back_populates="job"
     )
 
 
@@ -908,3 +915,67 @@ class JobAvatar(Base):
 
     job: Mapped["Job"] = relationship(back_populates="avatar_assignments")
     avatar: Mapped["Avatar"] = relationship(back_populates="job_assignments")
+
+
+class ObjectRef(Base):
+    __tablename__ = "object_refs"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    visual_properties: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    user: Mapped["User"] = relationship(back_populates="object_refs")
+    images: Mapped[list["ObjectRefImage"]] = relationship(
+        back_populates="object_ref", cascade="all, delete-orphan"
+    )
+    job_assignments: Mapped[list["JobObjectRef"]] = relationship(back_populates="object_ref")
+
+
+class ObjectRefImage(Base):
+    __tablename__ = "object_ref_images"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    object_ref_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("object_refs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    object_ref: Mapped["ObjectRef"] = relationship(back_populates="images")
+
+
+class JobObjectRef(Base):
+    __tablename__ = "job_object_refs"
+
+    job_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    object_ref_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("object_refs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    importance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    job: Mapped["Job"] = relationship(back_populates="object_ref_assignments")
+    object_ref: Mapped["ObjectRef"] = relationship(back_populates="job_assignments")

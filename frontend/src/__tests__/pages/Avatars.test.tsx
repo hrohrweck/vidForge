@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import Avatars from '../../pages/Avatars'
 import { renderWithProviders } from '../../test/utils'
 import { avatarsApi, type Avatar } from '../../api/avatars'
+import { objectsApi, type ObjectRef } from '../../api/objects'
 
 // ─── Mock avatarsApi module ──────────────────────────────────────────
 
@@ -18,6 +19,16 @@ vi.mock('../../api/avatars', () => ({
     deleteImage: vi.fn(),
     generatePoses: vi.fn(),
     trainLora: vi.fn(),
+  },
+}))
+
+// ─── Mock objectsApi module ───────────────────────────────────────────
+
+vi.mock('../../api/objects', () => ({
+  objectsApi: {
+    list: vi.fn(),
+    get: vi.fn(),
+    delete: vi.fn(),
   },
 }))
 
@@ -47,6 +58,31 @@ function mockAvatar(overrides: Partial<Avatar> = {}): Avatar {
     loraTrainingStatus: 'not_trained',
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function mockObject(overrides: Partial<ObjectRef> = {}): ObjectRef {
+  return {
+    id: 'obj-1',
+    user_id: 'user-1',
+    name: 'Red Car',
+    description: 'A fast red sports car',
+    category: 'vehicle',
+    visual_properties: { color: 'red' },
+    images: [
+      {
+        id: 'objimg-1',
+        storage_path: '/objects/car/front.png',
+        is_primary: true,
+        sort_order: 0,
+        width: 1024,
+        height: 768,
+      },
+    ],
+    job_count: 2,
+    created_at: '2024-05-01T00:00:00Z',
+    updated_at: '2024-05-01T00:00:00Z',
     ...overrides,
   }
 }
@@ -254,6 +290,150 @@ describe('Avatars Page', () => {
 
     await waitFor(() => {
       expect(avatarsApi.delete).toHaveBeenCalledWith('avatar-1')
+    })
+  })
+
+  // ── Objects Tab Tests ─────────────────────────────────────────
+
+  describe('Objects Tab', () => {
+    beforeEach(() => {
+      vi.mocked(avatarsApi.list).mockResolvedValue({ avatars: [], total: 0 })
+      vi.mocked(objectsApi.list).mockResolvedValue({ objects: [], total: 0 })
+      vi.mocked(objectsApi.delete).mockResolvedValue(undefined)
+    })
+
+    it('switches to Objects tab when tab button is clicked', async () => {
+      const user = userEvent.setup()
+      renderWithProviders(<Avatars />)
+
+      await waitFor(() => {
+        expect(screen.getByText('No avatars yet')).toBeInTheDocument()
+      })
+
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      await user.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('No objects yet')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Objects auto-detected from your scenes')).toBeInTheDocument()
+    })
+
+    it('renders object cards when objects are returned from API', async () => {
+      vi.mocked(objectsApi.list).mockResolvedValue({
+        objects: [
+          mockObject({ name: 'Red Car', category: 'vehicle' }),
+          mockObject({
+            id: 'obj-2',
+            name: 'Blue Vase',
+            description: 'A ceramic vase',
+            category: 'decor',
+            images: [],
+            job_count: 0,
+          }),
+        ],
+        total: 2,
+      })
+
+      const user = userEvent.setup()
+      renderWithProviders(<Avatars />)
+
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      await user.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('Red Car')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Blue Vase')).toBeInTheDocument()
+
+      // Category badges
+      expect(screen.getByText('vehicle')).toBeInTheDocument()
+      expect(screen.getByText('decor')).toBeInTheDocument()
+
+      // Description
+      expect(screen.getByText('A ceramic vase')).toBeInTheDocument()
+
+      // Object without image shows "Pending" badge
+      expect(screen.getByText('Pending')).toBeInTheDocument()
+
+      // Job count
+      expect(screen.getByText('Used in 2 jobs')).toBeInTheDocument()
+    })
+
+    it('shows empty state in objects tab when no objects exist', async () => {
+      vi.mocked(objectsApi.list).mockResolvedValue({ objects: [], total: 0 })
+      const user = userEvent.setup()
+      renderWithProviders(<Avatars />)
+
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      await user.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('No objects yet')).toBeInTheDocument()
+      })
+      expect(
+        screen.getByText(/Objects are automatically detected/)
+      ).toBeInTheDocument()
+    })
+
+    it('switches back to avatars tab correctly', async () => {
+      vi.mocked(avatarsApi.list).mockResolvedValue({
+        avatars: [mockAvatar({ name: 'My Char' })],
+        total: 1,
+      })
+      const user = userEvent.setup()
+      renderWithProviders(<Avatars />)
+
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      await user.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('No objects yet')).toBeInTheDocument()
+      })
+
+      const avatarsTab = screen.getByRole('button', { name: /avatars/i })
+      await user.click(avatarsTab)
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: 'Avatars' })).toBeInTheDocument()
+        expect(screen.getByText('My Char')).toBeInTheDocument()
+      })
+    })
+
+    it('shows delete confirmation and calls objectsApi.delete when confirm clicked', async () => {
+      vi.mocked(objectsApi.list).mockResolvedValue({
+        objects: [mockObject({ name: 'ToDeleteObj' })],
+        total: 1,
+      })
+      renderWithProviders(<Avatars />)
+
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      fireEvent.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('ToDeleteObj')).toBeInTheDocument()
+      })
+
+      const card = screen.getByText('ToDeleteObj').closest('.group') as HTMLElement
+      fireEvent.mouseOver(card)
+
+      const deleteBtn = within(card).getByRole('button', { name: /delete/i })
+      fireEvent.click(deleteBtn)
+
+      await waitFor(() => {
+        expect(screen.getByText('Delete Object')).toBeInTheDocument()
+      })
+
+      const modalContainer = screen.getByText('Delete Object').closest('.fixed') as HTMLElement
+      const checkbox = within(modalContainer).getByRole('checkbox')
+      fireEvent.click(checkbox)
+
+      const confirmDeleteBtn = within(modalContainer).getByRole('button', { name: /^delete$/i })
+      fireEvent.click(confirmDeleteBtn)
+
+      await waitFor(() => {
+        expect(objectsApi.delete).toHaveBeenCalledWith('obj-1')
+      })
     })
   })
 })

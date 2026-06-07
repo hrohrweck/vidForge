@@ -214,7 +214,7 @@ _SCENE_INSTRUCTIONS: dict[GenerationType, str] = {
     ),
     GenerationType.MULTI_REF_TO_VIDEO: (
         "For each scene: provide multiple reference images to guide "
-        "video generation."
+        "video generation. See REFERENCE CAPACITY for exact count."
     ),
 }
 
@@ -326,10 +326,93 @@ def _build_model_section(config: dict, *, modality: str) -> list[str]:
     return lines
 
 
+def build_reference_capacity_context(
+    video_model_config: dict | None,
+    char_count: int,
+) -> str:
+    """Generate a ``REFERENCE CAPACITY`` block for scene-planner prompts.
+
+    Tells the planner how many reference-image slots the video model
+    supports and how many are already consumed by character avatars.
+
+    Parameters
+    ----------
+    video_model_config : dict | None
+        Dict with keys ``capabilities`` and ``constraints``.
+    char_count : int
+        Number of character avatars that consume reference slots.
+
+    Returns
+    -------
+    str
+        Multi-line text block describing available reference slots.
+    """
+    if video_model_config is None:
+        return "Reference capacity: unknown (no video model selected)"
+
+    caps_raw = video_model_config.get("capabilities", {})
+    if isinstance(caps_raw, dict):
+        caps = normalize_capabilities(caps_raw)
+    else:
+        caps = ModelCapabilities()
+
+    gen_type = caps.generation_type
+
+    if gen_type == GenerationType.TEXT_TO_VIDEO:
+        total_slots = 0
+    elif gen_type == GenerationType.IMAGE_TO_VIDEO:
+        total_slots = 1
+    elif gen_type == GenerationType.FRAME_TO_VIDEO:
+        total_slots = 2
+    elif gen_type == GenerationType.MULTI_REF_TO_VIDEO:
+        constraints: dict = video_model_config.get("constraints") or {}
+        total_slots = constraints.get("max_refs", 4)
+    else:
+        total_slots = 0
+
+    available = total_slots - char_count
+
+    if total_slots == 0:
+        return (
+            "REFERENCE CAPACITY: This video model does not accept reference images.\n"
+            "All objects must be described in words only."
+        )
+
+    if available <= 0:
+        if char_count > total_slots:
+            return (
+                f"REFERENCE CAPACITY: This video model accepts up to {total_slots} "
+                f"reference image{'s' if total_slots != 1 else ''} per scene.\n"
+                f"WARNING: More characters than reference slots! Only {total_slots} "
+                f"total slot{'s' if total_slots != 1 else ''} available.\n"
+                f"All reference slots are consumed by character avatars. "
+                f"Objects must be described in words only."
+            )
+        return (
+            f"REFERENCE CAPACITY: This video model accepts up to {total_slots} "
+            f"reference image{'s' if total_slots != 1 else ''} per scene.\n"
+            f"{char_count} slot{'s' if char_count != 1 else ''} "
+            f"{'are' if char_count != 1 else 'is'} consumed by character avatars. "
+            f"All reference slots consumed by characters. Objects must be described in words only."
+        )
+
+    return (
+        f"REFERENCE CAPACITY: This video model accepts up to {total_slots} "
+        f"reference image{'s' if total_slots != 1 else ''} per scene.\n"
+        f"{char_count} slot{'s' if char_count != 1 else ''} "
+        f"{'are' if char_count != 1 else 'is'} consumed by character avatars. "
+        f"{available} slot{'s' if available != 1 else ''} "
+        f"{'remain' if available != 1 else 'remains'} for objects.\n\n"
+        f"PRIORITY RULE: Rank objects by narrative importance. The top {available} object{'s' if available != 1 else ''} "
+        f"will receive reference images. Remaining objects must be described in words."
+    )
+
+
 __all__ = [
     "GenerationType",
     "ModelCapabilities",
     "ModelCapability",
     "build_model_capabilities_context",
+    "build_reference_capacity_context",
     "normalize_capabilities",
 ]

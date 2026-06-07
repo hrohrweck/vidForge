@@ -12,12 +12,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   RefreshCw, ChevronLeft, Image, Video, Download, Pencil,
   CheckCircle, Clock, AlertCircle, Trash2, Plus, Loader2, XCircle,
+  Box, Tag, ImageOff,
 } from 'lucide-react'
 import {
   jobsApi, scenesApi, templatesApi, modelsApi, type VideoScene, type SceneUpdate,
+  type JobObject,
 } from '../api/client'
 import { cn } from '../lib/utils'
 import { Button } from '../components/ui/button'
+import { Badge } from '../components/ui/badge'
 import { SceneEditModal } from '../components/SceneEditModal'
 import { ExportModal } from '../components/ExportModal'
 
@@ -111,6 +114,17 @@ export default function SceneEditor() {
     queryKey: ['exportOptions', jobId],
     queryFn: () => scenesApi.getExportOptions(jobId!),
     enabled: !!jobId && job?.stage === 'videos_ready',
+  })
+
+  const { data: jobObjects } = useQuery({
+    queryKey: ['jobObjects', jobId],
+    queryFn: () => jobsApi.getObjects(jobId!),
+    enabled: !!jobId,
+    refetchInterval: () => {
+      const j = queryClient.getQueryData<{ status?: string }>(['job', jobId])
+      if (j?.status === 'processing') return 5000
+      return false
+    },
   })
 
   // ── Derived state ────────────────────────────────────────────────
@@ -581,6 +595,12 @@ export default function SceneEditor() {
             <ScriptToVideoPanel job={job} jobId={jobId!} scenes={scenes} />
           )}
 
+          {/* Detected objects sidebar */}
+          <JobObjectsSection
+            objects={jobObjects || []}
+            isLoading={!!jobId && !!(job?.status === 'processing')}
+          />
+
           {/* Common job status sidebar */}
           <div className="bg-card rounded-lg border p-4">
             <h3 className="font-semibold mb-2">Job Status</h3>
@@ -789,6 +809,91 @@ function ModelSwitcher({ job, onModelsChanged }: { job?: { id: string; input_dat
           <p className="text-xs text-muted-foreground pt-1">
             {saving ? 'Saving...' : 'Changes apply to the next generation run for all scenes.'}
           </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Job Objects Section (sidebar) ──────────────────────────────────
+
+function JobObjectsSection({
+  objects,
+  isLoading,
+}: {
+  objects: JobObject[]
+  isLoading: boolean
+}) {
+  if (objects.length === 0 && !isLoading) return null
+
+  return (
+    <div className="bg-card rounded-lg border p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Box className="h-4 w-4" />
+        <h3 className="font-semibold text-sm">Detected Objects</h3>
+      </div>
+
+      {isLoading && objects.length === 0 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>Looking for objects…</span>
+        </div>
+      )}
+
+      {objects.length > 0 && (
+        <div className="space-y-2">
+          {objects.map((obj) => (
+            <div
+              key={obj.object_id}
+              className="flex items-start gap-3 p-2 rounded-md bg-muted/50"
+            >
+              {/* Thumbnail */}
+              <div className="flex-shrink-0 w-10 h-10 rounded overflow-hidden bg-muted">
+                {obj.primary_image_path ? (
+                  <img
+                    src={`/api/uploads/stream/${obj.primary_image_path}`}
+                    alt={obj.object_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center w-full h-full">
+                    <ImageOff className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-medium truncate">
+                    {obj.object_name}
+                  </span>
+                  {!obj.primary_image_path && (
+                    <span
+                      className="inline-flex items-center gap-0.5 rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] font-medium text-yellow-800"
+                      title="Reference image not yet generated"
+                    >
+                      <Clock className="h-2.5 w-2.5" />
+                      Pending
+                    </span>
+                  )}
+                </div>
+                {obj.category && (
+                  <div className="mt-0.5">
+                    <Badge variant="outline" className="text-[10px] px-1 py-0">
+                      <Tag className="h-2.5 w-2.5 mr-0.5" />
+                      {obj.category}
+                    </Badge>
+                  </div>
+                )}
+                {obj.importance_score != null && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Relevance: {(obj.importance_score * 100).toFixed(0)}%
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

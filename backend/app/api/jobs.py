@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.config import get_settings
-from app.database import Avatar, Job, JobAvatar, Template, User, get_db
+from app.database import Avatar, Job, JobAvatar, JobObjectRef, ObjectRef, Template, User, get_db
 from app.workers.tasks import process_scene_video_job, process_video_job
 
 router = APIRouter()
@@ -88,6 +88,18 @@ class JobAvatarDetail(BaseModel):
     avatar_name: str
     role: str | None = None
     consistency_strategy_override: str | None = None
+
+
+class JobObjectDetail(BaseModel):
+    object_id: UUID
+    object_name: str
+    role: str | None = None
+    importance_score: float | None = None
+    category: str | None = None
+    description: str | None = None
+    primary_image_path: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JobResponse(BaseModel):
@@ -325,6 +337,43 @@ async def patch_job(
     await db.commit()
     await db.refresh(job)
     return job
+
+
+@router.get("/{job_id}/objects", response_model=list[JobObjectDetail])
+async def get_job_objects(
+    job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[JobObjectDetail]:
+    """Return object references assigned to a job with role/importance metadata."""
+    result = await db.execute(
+        select(JobObjectRef, ObjectRef)
+        .join(ObjectRef, JobObjectRef.object_ref_id == ObjectRef.id)
+        .join(Job, JobObjectRef.job_id == Job.id)
+        .options(selectinload(ObjectRef.images))
+        .where(
+            JobObjectRef.job_id == job_id,
+            Job.user_id == current_user.id,
+            ObjectRef.deleted_at.is_(None),
+        )
+    )
+    rows = result.all()
+    return [
+        JobObjectDetail(
+            object_id=obj_ref.id,
+            object_name=obj_ref.name,
+            role=assoc.role,
+            importance_score=assoc.importance_score,
+            category=obj_ref.category,
+            description=obj_ref.description,
+            primary_image_path=(
+                next((img.storage_path for img in (obj_ref.images or []) if img.is_primary), None)
+                if obj_ref.images
+                else None
+            ),
+        )
+        for assoc, obj_ref in rows
+    ]
 
 
 @router.delete("/{job_id}")
