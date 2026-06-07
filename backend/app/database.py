@@ -508,7 +508,7 @@ class ModelConfig(Base):
     constraints: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     cost_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     comfyui_workflow: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     is_deprecated: Mapped[bool] = mapped_column(Boolean, default=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -259,6 +259,7 @@ class ModelConfigService:
         create_data = {
             "provider_id": provider_id,
             "model_id": model_id,
+            "is_active": False,
             "display_name": defaults.get("display_name", model_id),
             "provider_model_id": defaults.get("provider_model_id", model_id),
             "modality": defaults.get("modality", "image"),

@@ -25,6 +25,7 @@ def _make_data(**overrides) -> dict:
         "display_name": "Test Model",
         "modality": "image",
         "endpoint_type": "comfyui",
+        "is_active": True,
     }
     defaults.update(overrides)
     return defaults
@@ -175,6 +176,40 @@ class TestGetOrCreate:
         assert result.model_id == "new-model"
         assert result.display_name == "New Model"
         assert result.modality == "video"
+
+    async def test_get_or_create_new_model_is_inactive(self, db_session):
+        """New model created via get_or_create defaults to is_active=False."""
+        result = await ModelConfigService.get_or_create(
+            db_session, PROVIDER_ID, "brand-new-model",
+            {"display_name": "Brand New"},
+        )
+        assert result.is_active is False
+
+    async def test_get_or_create_existing_active_stays_active(self, db_session):
+        """Existing model with is_active=True keeps its state."""
+        existing = await ModelConfigService.create(
+            db_session,
+            _make_data(is_active=True, model_id="active-kept"),
+        )
+        result = await ModelConfigService.get_or_create(
+            db_session, PROVIDER_ID, "active-kept",
+            {"display_name": "Should Not Change"},
+        )
+        assert result.id == existing.id
+        assert result.is_active is True
+
+    async def test_get_or_create_existing_inactive_stays_inactive(self, db_session):
+        """Existing model with is_active=False keeps its state."""
+        existing = await ModelConfigService.create(
+            db_session,
+            _make_data(is_active=False, model_id="inactive-kept"),
+        )
+        result = await ModelConfigService.get_or_create(
+            db_session, PROVIDER_ID, "inactive-kept",
+            {"display_name": "Should Not Change"},
+        )
+        assert result.id == existing.id
+        assert result.is_active is False
 
 
 # ---------------------------------------------------------------------------
