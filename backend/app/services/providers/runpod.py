@@ -3,6 +3,7 @@ import base64
 import logging
 import random
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import UUID
 
@@ -19,7 +20,10 @@ from app.services.providers.base import (
     ProviderTimeoutError,
     VideoProvider,
 )
-from app.services.providers.comfyui.workflow_builders import build_wan_video_workflow
+from app.services.providers.comfyui.workflow_builders import (
+    build_wan_i2v_workflow,
+    build_wan_video_workflow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +82,18 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
     def _get_endpoint_url(self, path: str = "") -> str:
         return f"{self.BASE_URL}/{self.endpoint_id}{path}"
 
-    async def queue_prompt(self, workflow: dict[str, Any]) -> str:
+    async def queue_prompt(
+        self, workflow: dict[str, Any], input_images: list[dict[str, str]] | None = None
+    ) -> str:
         if not self.client:
             raise RuntimeError("RunPod provider not initialized")
 
+        payload: dict[str, Any] = {"input": {"workflow": workflow}}
+        if input_images:
+            payload["input"]["images"] = input_images
+
         response = await self.client.post(
-            self._get_endpoint_url("/run"), json={"input": {"workflow": workflow}}
+            self._get_endpoint_url("/run"), json=payload
         )
 
         if response.status_code >= 400:
@@ -240,9 +250,38 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         aspect_ratio: str = "16:9",
         **kwargs: Any,
     ) -> tuple[str, bytes]:
-        workflow = self._build_image_workflow(prompt, aspect_ratio)
+        image_path: str | None = kwargs.get("image_path")
         progress_callback = kwargs.get("progress_callback")
-        run_id = await self.queue_prompt(workflow)
+
+        if image_path:
+            from pathlib import Path
+
+            from app.config import get_settings
+
+            settings = get_settings()
+            full_path = Path(settings.storage_path) / image_path
+
+            if full_path.exists():
+                image_bytes = full_path.read_bytes()
+                image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                image_name = "reference.png"
+
+                workflow = self._build_image_workflow(
+                    prompt, aspect_ratio, image_name=image_name
+                )
+                input_images = [{"name": image_name, "data": image_b64}]
+                run_id = await self.queue_prompt(workflow, input_images=input_images)
+            else:
+                logger.warning(
+                    "RunPod img2img: image not found at %s, falling back to T2I",
+                    full_path,
+                )
+                workflow = self._build_image_workflow(prompt, aspect_ratio)
+                run_id = await self.queue_prompt(workflow)
+        else:
+            workflow = self._build_image_workflow(prompt, aspect_ratio)
+            run_id = await self.queue_prompt(workflow)
+
         result = await self.wait_for_completion(run_id, progress_callback=progress_callback)
         output_data = await self.get_output(result)
         if not output_data:
@@ -261,14 +300,47 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         frames = max(duration * fps, 9)
         if frames % 2 == 0:
             frames += 1
-        workflow = build_wan_video_workflow(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            frames=frames,
-            provider_config=self.config,
-        )
+
+        image_path: str | None = kwargs.get("image_path")
         progress_callback = kwargs.get("progress_callback")
-        run_id = await self.queue_prompt(workflow)
+        input_images: list[dict[str, str]] | None = None
+
+        if image_path:
+            from app.config import get_settings
+            settings = get_settings()
+            full_path = Path(settings.storage_path) / image_path
+            if full_path.exists():
+                image_bytes = full_path.read_bytes()
+                image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                image_name = "reference.png"
+                workflow = build_wan_i2v_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    frames=frames,
+                    image_name=image_name,
+                    provider_config=self.config,
+                )
+                input_images = [{"name": image_name, "data": image_b64}]
+            else:
+                logger.warning(
+                    "RunPod I2V: image not found at %s, falling back to T2V",
+                    full_path,
+                )
+                workflow = build_wan_video_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    frames=frames,
+                    provider_config=self.config,
+                )
+        else:
+            workflow = build_wan_video_workflow(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                frames=frames,
+                provider_config=self.config,
+            )
+
+        run_id = await self.queue_prompt(workflow, input_images=input_images)
         result = await self.wait_for_completion(run_id, progress_callback=progress_callback)
         output_data = await self.get_output(result)
         if not output_data:
@@ -299,7 +371,7 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
                 "id": "flux1-schnell",
                 "name": "Flux.1 Schnell",
                 "type": "image",
-                "capabilities": ["text-to-image"],
+                "capabilities": ["text-to-image", "image-to-image"],
                 "provider_type": "runpod",
             },
         ]
@@ -316,7 +388,9 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         }
         return ratios.get(aspect_ratio, (1280, 720))
 
-    def _build_image_workflow(self, prompt: str, aspect_ratio: str) -> dict[str, Any]:
+    def _build_image_workflow(
+        self, prompt: str, aspect_ratio: str, image_name: str | None = None
+    ) -> dict[str, Any]:
         width, height = self._image_resolution(aspect_ratio)
         seed = random.randint(0, 2**31 - 1)
 
@@ -325,7 +399,8 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         clip_name2 = str(self.config.get("flux_clip_name2") or "t5xxl_fp8_e4m3fn.safetensors")
         vae_name = str(self.config.get("flux_vae_name") or "ae.safetensors")
 
-        return {
+        # Shared model/CLIP/VAE loading nodes (1–5)
+        base_nodes = {
             "1": {
                 "class_type": "UNETLoader",
                 "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
@@ -346,6 +421,49 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
                 "class_type": "CLIPTextEncode",
                 "inputs": {"text": "", "clip": ["2", 0]},
             },
+        }
+
+        if image_name:
+            # img2img: Load reference image → VAEEncode → KSampler (lower denoise)
+            img2img_denoise = float(self.config.get("flux_img2img_denoise") or 0.75)
+            return {
+                **base_nodes,
+                "6": {
+                    "class_type": "LoadImage",
+                    "inputs": {"image": image_name},
+                },
+                "7": {
+                    "class_type": "VAEEncode",
+                    "inputs": {"pixels": ["6", 0], "vae": ["3", 0]},
+                },
+                "8": {
+                    "class_type": "KSampler",
+                    "inputs": {
+                        "seed": seed,
+                        "steps": 4,
+                        "cfg": 1.0,
+                        "sampler_name": "euler",
+                        "scheduler": "normal",
+                        "denoise": img2img_denoise,
+                        "model": ["1", 0],
+                        "positive": ["4", 0],
+                        "negative": ["5", 0],
+                        "latent_image": ["7", 0],
+                    },
+                },
+                "9": {
+                    "class_type": "VAEDecode",
+                    "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+                },
+                "10": {
+                    "class_type": "SaveImage",
+                    "inputs": {"images": ["9", 0], "filename_prefix": "vidforge"},
+                },
+            }
+
+        # T2I (backward compatible): EmptyLatentImage → KSampler (full denoise)
+        return {
+            **base_nodes,
             "6": {
                 "class_type": "EmptyLatentImage",
                 "inputs": {"width": width, "height": height, "batch_size": 1},

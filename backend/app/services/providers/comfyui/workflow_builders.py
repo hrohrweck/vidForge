@@ -337,3 +337,116 @@ async def build_ltx_workflow(
 
 
 _build_ltx_workflow = build_ltx_workflow
+
+
+def build_ip_adapter_image_workflow(
+    prompt: str,
+    aspect_ratio: str,
+    image_name: str,
+    ip_adapter_strength: float = 0.75,
+    provider_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an IP-Adapter image-to-image generation workflow.
+
+    Uses a reference image to guide SD-based generation via IP-Adapter
+    conditioning, combined with text prompt for additional control.
+    The workflow uses CheckpointLoaderSimple to load an SD checkpoint
+    (SD1.5, SDXL, etc.) and applies IP-Adapter conditioning via
+    IPAdapterModelLoader + CLIPVisionLoader + IPAdapterApply nodes.
+    """
+    from app.services.media_generator import _aspect_ratio_to_dimensions
+
+    config = provider_config or {}
+    width, height = _aspect_ratio_to_dimensions(aspect_ratio)
+    seed = random.randint(0, 2**31 - 1)
+
+    checkpoint = str(
+        config.get("ip_adapter_checkpoint")
+        or config.get("image_checkpoint")
+        or "sd_xl_base_1.0.safetensors"
+    )
+    ip_adapter_model = str(
+        config.get("ip_adapter_model") or "ip-adapter-plus_sdxl_vit-h.safetensors"
+    )
+    clip_vision_model = str(
+        config.get("clip_vision_model")
+        or "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    )
+    negative_prompt = str(config.get("image_negative_prompt") or "")
+    steps = int(config.get("image_steps") or 30)
+    cfg = float(config.get("image_cfg") or 7.5)
+    sampler_name = str(config.get("image_sampler") or "euler")
+    scheduler = str(config.get("image_scheduler") or "normal")
+
+    return {
+        "1": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": checkpoint},
+        },
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": prompt, "clip": ["1", 1]},
+        },
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": negative_prompt, "clip": ["1", 1]},
+        },
+        "4": {
+            "class_type": "LoadImage",
+            "inputs": {"image": image_name},
+        },
+        "5": {
+            "class_type": "IPAdapterModelLoader",
+            "inputs": {"ipadapter_file": ip_adapter_model},
+        },
+        "6": {
+            "class_type": "CLIPVisionLoader",
+            "inputs": {"clip_name": clip_vision_model},
+        },
+        "7": {
+            "class_type": "CLIPVisionEncode",
+            "inputs": {"clip_vision": ["6", 0], "image": ["4", 0]},
+        },
+        "8": {
+            "class_type": "IPAdapterApply",
+            "inputs": {
+                "ipadapter": ["5", 0],
+                "clip_vision": ["7", 0],
+                "model": ["1", 0],
+                "weight": ip_adapter_strength,
+            },
+        },
+        "9": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+        },
+        "10": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": seed,
+                "steps": steps,
+                "cfg": cfg,
+                "sampler_name": sampler_name,
+                "scheduler": scheduler,
+                "denoise": 1.0,
+                "model": ["8", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["9", 0],
+            },
+        },
+        "11": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["10", 0], "vae": ["1", 2]},
+        },
+        "12": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "filename_prefix": "ip_adapter_output",
+                "images": ["11", 0],
+            },
+        },
+    }
+
+
+_build_ip_adapter_image_workflow = build_ip_adapter_image_workflow

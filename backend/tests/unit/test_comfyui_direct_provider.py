@@ -182,6 +182,168 @@ class TestGenerateImage:
         with pytest.raises(ValueError, match="no output data"):
             await provider.generate_image("test", "flux1-schnell", "16:9")
 
+    @pytest.mark.asyncio
+    async def test_with_image_path_uses_ip_adapter_workflow(
+        self, provider: ComfyUIDirectProvider, tmp_path: Any
+    ) -> None:
+        mock_client = AsyncMock()
+        provider.client = mock_client
+
+        ref_image = tmp_path / "reference.png"
+        ref_image.write_bytes(b"fake-png-data")
+
+        mock_client.upload_file.return_value = "reference.png"
+        mock_client.queue_prompt.return_value = {"prompt_id": "test-prompt-id"}
+        mock_client.get_history.return_value = {
+            "test-prompt-id": {
+                "status": {"completed": True},
+                "outputs": {"12": {"images": [{"filename": "test.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        mock_client.get_output.return_value = b"fake-image-data"
+        mock_client.get_video_output.return_value = b"fake-image-data"
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+
+            model, image_bytes = await provider.generate_image(
+                "a cat in the style of the reference",
+                "sd_xl",
+                "1:1",
+                image_path="reference.png",
+                reference_image_strength=0.85,
+            )
+
+        assert model == "sd_xl"
+        assert image_bytes == b"fake-image-data"
+        mock_client.upload_file.assert_called_once_with("reference.png", b"fake-png-data")
+        workflow = mock_client.queue_prompt.call_args[0][0]
+        class_types = {node.get("class_type") for node in workflow.values()}
+        assert "IPAdapterModelLoader" in class_types
+        assert "CLIPVisionLoader" in class_types
+        assert "IPAdapterApply" in class_types
+        assert "CheckpointLoaderSimple" in class_types
+
+    @pytest.mark.asyncio
+    async def test_ip_adapter_strength_default_value(
+        self, provider: ComfyUIDirectProvider, tmp_path: Any
+    ) -> None:
+        mock_client = AsyncMock()
+        provider.client = mock_client
+
+        ref_image = tmp_path / "reference.png"
+        ref_image.write_bytes(b"fake-png-data")
+
+        mock_client.upload_file.return_value = "reference.png"
+        mock_client.queue_prompt.return_value = {"prompt_id": "test-prompt-id"}
+        mock_client.get_history.return_value = {
+            "test-prompt-id": {
+                "status": {"completed": True},
+                "outputs": {"12": {"images": [{"filename": "test.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        mock_client.get_output.return_value = b"fake-image-data"
+        mock_client.get_video_output.return_value = b"fake-image-data"
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+
+            await provider.generate_image(
+                "a cat", "sd_xl", "1:1",
+                image_path="reference.png",
+            )
+
+        workflow = mock_client.queue_prompt.call_args[0][0]
+        ip_adapter_node = next(
+            (n for n in workflow.values() if n.get("class_type") == "IPAdapterApply"),
+            None,
+        )
+        assert ip_adapter_node is not None
+        assert ip_adapter_node["inputs"]["weight"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_ip_adapter_strength_custom_value(
+        self, provider: ComfyUIDirectProvider, tmp_path: Any
+    ) -> None:
+        mock_client = AsyncMock()
+        provider.client = mock_client
+
+        ref_image = tmp_path / "reference.png"
+        ref_image.write_bytes(b"fake-png-data")
+
+        mock_client.upload_file.return_value = "reference.png"
+        mock_client.queue_prompt.return_value = {"prompt_id": "test-prompt-id"}
+        mock_client.get_history.return_value = {
+            "test-prompt-id": {
+                "status": {"completed": True},
+                "outputs": {"12": {"images": [{"filename": "test.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        mock_client.get_output.return_value = b"fake-image-data"
+        mock_client.get_video_output.return_value = b"fake-image-data"
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+
+            await provider.generate_image(
+                "a cat", "sd_xl", "1:1",
+                image_path="reference.png",
+                reference_image_strength=0.3,
+            )
+
+        workflow = mock_client.queue_prompt.call_args[0][0]
+        ip_adapter_node = next(
+            (n for n in workflow.values() if n.get("class_type") == "IPAdapterApply"),
+            None,
+        )
+        assert ip_adapter_node is not None
+        assert ip_adapter_node["inputs"]["weight"] == 0.3
+
+    @pytest.mark.asyncio
+    async def test_without_image_path_uses_t2i_workflow(
+        self, provider: ComfyUIDirectProvider
+    ) -> None:
+        mock_client = AsyncMock()
+        provider.client = mock_client
+
+        mock_client.queue_prompt.return_value = {"prompt_id": "test-prompt-id"}
+        mock_client.get_history.return_value = {
+            "test-prompt-id": {
+                "status": {"completed": True},
+                "outputs": {"10": {"images": [{"filename": "test.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        mock_client.get_output.return_value = b"fake-image-data"
+        mock_client.get_video_output.return_value = b"fake-image-data"
+
+        model, image_bytes = await provider.generate_image(
+            "a cat", "wan2.2-ti2v", "1:1"
+        )
+
+        assert model == "wan2.2-ti2v"
+        assert image_bytes == b"fake-image-data"
+        workflow = mock_client.queue_prompt.call_args[0][0]
+        class_types = {node.get("class_type") for node in workflow.values()}
+        assert "IPAdapterModelLoader" not in class_types
+        assert "IPAdapterApply" not in class_types
+        assert "UNETLoader" in class_types
+
+    @pytest.mark.asyncio
+    async def test_image_path_missing_file_raises(
+        self, provider: ComfyUIDirectProvider, tmp_path: Any
+    ) -> None:
+        mock_client = AsyncMock()
+        provider.client = mock_client
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+
+            with pytest.raises(FileNotFoundError, match="Reference image not found"):
+                await provider.generate_image(
+                    "a cat", "sd_xl", "1:1",
+                    image_path="nonexistent.png",
+                )
+
 
 class TestGenerateVideo:
     @pytest.mark.asyncio

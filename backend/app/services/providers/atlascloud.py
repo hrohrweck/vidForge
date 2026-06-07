@@ -504,7 +504,9 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         if not client:
             raise RuntimeError("Provider not initialized")
 
-        ref_url = image_path or reference_image_url
+        # Accept reference_image_path from kwargs as a fallback
+        reference_image_path: str | None = kwargs.get("reference_image_path")
+        ref_url = image_path or reference_image_url or reference_image_path
 
         model_config = await self._get_model_config(model)
         if model_config is None:
@@ -541,13 +543,13 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
                 payload["aspect_ratio"] = aspect_ratio
 
         # Upload local image to AtlasCloud first for I2V models
-        if image_path and not (image_path.startswith("http://") or image_path.startswith("https://")):
+        if ref_url and not (ref_url.startswith("http://") or ref_url.startswith("https://")):
             try:
                 from pathlib import Path
 
                 from app.config import get_settings
                 settings = get_settings()
-                full_path = Path(settings.storage_path) / image_path
+                full_path = Path(settings.storage_path) / ref_url
                 with open(str(full_path), "rb") as f:
                     upload_resp = await client.post(
                         f"{ATLAS_API_BASE}/model/uploadMedia",

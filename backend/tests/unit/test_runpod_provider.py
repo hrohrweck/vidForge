@@ -227,6 +227,173 @@ class TestGenerateImage:
         assert workflow["2"]["inputs"]["clip_name1"] == "custom-clip1.safetensors"
 
 
+class TestRunpodImg2Img:
+    """Tests for RunPod image-to-image generation via generate_image + image_path."""
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_builds_workflow_with_loadimage(self, tmp_path):
+        provider = _make_provider()
+        # Create a fake reference image
+        ref_path = tmp_path / "ref.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        provider.queue_prompt = AsyncMock(return_value="run-img2img")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=b"img-data")
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_image(
+                prompt="a cat in the same style",
+                model="flux1-schnell",
+                aspect_ratio="16:9",
+                image_path="ref.png",
+            )
+
+        # Workflow should contain LoadImage + VAEEncode (img2img), not EmptyLatentImage
+        workflow = provider.queue_prompt.call_args[0][0]
+        class_types = {n["class_type"] for n in workflow.values()}
+        assert "LoadImage" in class_types
+        assert "VAEEncode" in class_types
+        assert "EmptyLatentImage" not in class_types
+        # KSampler should use VAEEncode output (node "7") as latent_image
+        sampler = workflow["8"]
+        assert sampler["inputs"]["latent_image"] == ["7", 0]
+        # denoise should be < 1.0 for img2img
+        assert sampler["inputs"]["denoise"] < 1.0
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_passes_image_data_to_queue(self, tmp_path):
+        provider = _make_provider()
+        ref_path = tmp_path / "ref.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        provider.queue_prompt = AsyncMock(return_value="run-img2img-2")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=b"img-data")
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_image(
+                prompt="enhance this image",
+                model="flux1-schnell",
+                aspect_ratio="1:1",
+                image_path="ref.png",
+            )
+
+        # queue_prompt was called with input_images kwarg
+        call_args = provider.queue_prompt.call_args
+        assert call_args is not None
+        _, call_kwargs = call_args
+        input_images = call_kwargs.get("input_images")
+        assert input_images is not None
+        assert len(input_images) == 1
+        assert input_images[0]["name"] == "reference.png"
+        assert "data" in input_images[0]
+        # Verify it's valid base64
+        decoded = base64.b64decode(input_images[0]["data"])
+        assert decoded == b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_without_path_uses_t2i(self):
+        provider = _make_provider()
+        provider.queue_prompt = AsyncMock(return_value="run-t2i")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=b"img-data")
+
+        await provider.generate_image(
+            prompt="a sunset", model="flux1-schnell", aspect_ratio="16:9"
+        )
+
+        # Backward compatible: T2I workflow (no LoadImage)
+        workflow = provider.queue_prompt.call_args[0][0]
+        class_types = {n["class_type"] for n in workflow.values()}
+        assert "EmptyLatentImage" in class_types
+        assert "LoadImage" not in class_types
+        assert "VAEEncode" not in class_types
+        # KSampler should reference EmptyLatentImage output
+        sampler = workflow["7"]
+        assert sampler["inputs"]["latent_image"] == ["6", 0]
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_missing_image_falls_back_to_t2i(self, tmp_path):
+        provider = _make_provider()
+        provider.queue_prompt = AsyncMock(return_value="run-fallback")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=b"img-data")
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_image(
+                prompt="a sunset",
+                model="flux1-schnell",
+                aspect_ratio="16:9",
+                image_path="nonexistent.png",
+            )
+
+        # Should fall back to T2I workflow
+        workflow = provider.queue_prompt.call_args[0][0]
+        class_types = {n["class_type"] for n in workflow.values()}
+        assert "EmptyLatentImage" in class_types
+        assert "LoadImage" not in class_types
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_denoise_configurable(self, tmp_path):
+        provider = _make_provider({"flux_img2img_denoise": 0.6})
+        ref_path = tmp_path / "ref.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        provider.queue_prompt = AsyncMock(return_value="run-denoise")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=b"img-data")
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_image(
+                prompt="variation",
+                model="flux1-schnell",
+                aspect_ratio="16:9",
+                image_path="ref.png",
+            )
+
+        workflow = provider.queue_prompt.call_args[0][0]
+        sampler = workflow["8"]
+        assert sampler["inputs"]["denoise"] == pytest.approx(0.6)
+
+    @pytest.mark.asyncio
+    async def test_runpod_img2img_returns_model_and_bytes(self, tmp_path):
+        provider = _make_provider()
+        ref_path = tmp_path / "ref.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+        fake_output = b"\x89PNG\r\n\x1a\n" + b"\xff" * 50
+
+        provider.queue_prompt = AsyncMock(return_value="run-ret")
+        provider.wait_for_completion = AsyncMock(return_value={})
+        provider.get_output = AsyncMock(return_value=fake_output)
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            model, data = await provider.generate_image(
+                prompt="variation",
+                model="flux1-schnell",
+                aspect_ratio="16:9",
+                image_path="ref.png",
+            )
+
+        assert model == "flux1-schnell"
+        assert data == fake_output
+
+
+class TestRunpodModelCapabilities:
+    """Verify model metadata reflects img2img support."""
+
+    def test_flux_model_includes_image_to_image_capability(self):
+        provider = _make_provider()
+        models = provider._default_models()
+        flux = next(m for m in models if m["id"] == "flux1-schnell")
+        assert "image-to-image" in flux["capabilities"]
+
+
 class TestCostTracking:
     @pytest.mark.asyncio
     async def test_estimate_cost_uses_gpu_hour_rate(self):

@@ -169,25 +169,53 @@ class ComfyUIDirectProvider(ImageProvider, VideoProvider, ComfyUIProvider):
         if not self.client:
             raise RuntimeError("Provider not initialized")
 
-        # Import here to avoid circular imports at module level
-        from app.services.media_generator import (
-            _build_comfyui_image_workflow,
-            _build_flux_image_workflow,
-        )
+        reference_image_path: str | None = kwargs.get("image_path")
 
-        if model == "flux1-schnell":
-            workflow = _build_flux_image_workflow(
+        if reference_image_path:
+            from app.config import get_settings
+            settings = get_settings()
+            image_full_path = Path(settings.storage_path) / reference_image_path
+            if not image_full_path.exists():
+                raise FileNotFoundError(
+                    f"Reference image not found: {image_full_path}"
+                )
+
+            image_name = await self.client.upload_file(
+                image_full_path.name, image_full_path.read_bytes()
+            )
+            ip_adapter_strength = float(
+                kwargs.get("reference_image_strength", 0.75)
+            )
+
+            from app.services.providers.comfyui.workflow_builders import (
+                build_ip_adapter_image_workflow,
+            )
+            workflow = build_ip_adapter_image_workflow(
                 prompt=prompt,
                 aspect_ratio=aspect_ratio,
+                image_name=image_name,
+                ip_adapter_strength=ip_adapter_strength,
                 provider_config=self.config,
             )
         else:
-            workflow = _build_comfyui_image_workflow(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-                model_preference=model,
-                provider_config=self.config,
+            from app.services.media_generator import (
+                _build_comfyui_image_workflow,
+                _build_flux_image_workflow,
             )
+
+            if model == "flux1-schnell":
+                workflow = _build_flux_image_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    provider_config=self.config,
+                )
+            else:
+                workflow = _build_comfyui_image_workflow(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    model_preference=model,
+                    provider_config=self.config,
+                )
 
         prompt_id = await self.queue_prompt(workflow)
         result = await self.wait_for_completion(prompt_id)

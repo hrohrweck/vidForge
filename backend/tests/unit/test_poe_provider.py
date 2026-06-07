@@ -1,7 +1,9 @@
+import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
@@ -412,3 +414,211 @@ class TestPoeNormalization:
         assert result["endpoint_type"] == "chat_completions"
         assert "cost_config" not in result
         assert "constraints" not in result
+
+
+# ── Poe img2img / I2V verification tests ─────────────────────────
+
+
+@pytest.mark.poe_img2img
+class TestPoeImg2Img:
+    """Verification tests confirming Poe's existing img2img + I2V handling."""
+
+    @pytest.mark.asyncio
+    async def test_generate_image_with_path_sends_base64(self, tmp_path) -> None:
+        """generate_image(image_path=...) encodes image as base64 in request."""
+        ref_path = tmp_path / "ref.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        image_payload = json.dumps(
+            {"image_base64": base64.b64encode(b"output-image").decode("ascii")}
+        )
+
+        client = FakeClient()
+        client.post_responses["https://api.poe.com/v1/chat/completions"] = FakeResponse(
+            status_code=200,
+            json_data={
+                "id": "img-456",
+                "choices": [{"message": {"content": image_payload}}],
+            },
+        )
+        provider = _provider_with_client(client)
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_image(
+                prompt="enhance this",
+                model="GPT-Image-1",
+                aspect_ratio="1:1",
+                image_path="ref.png",
+            )
+
+        req = client.post_requests[0]
+        content = req["json"]["messages"][0]["content"]
+        assert isinstance(content, list)
+        # First part should be the reference image
+        assert content[0]["type"] == "image_url"
+        assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        # Second part should be the prompt text
+        assert content[1]["type"] == "text"
+        assert content[1]["text"] == "enhance this"
+
+    @pytest.mark.asyncio
+    async def test_generate_image_without_path_uses_text_only(self) -> None:
+        """generate_image without image_path sends plain text (T2I compat)."""
+        image_payload = json.dumps(
+            {"image_base64": base64.b64encode(b"output-image").decode("ascii")}
+        )
+
+        client = FakeClient()
+        client.post_responses["https://api.poe.com/v1/chat/completions"] = FakeResponse(
+            status_code=200,
+            json_data={
+                "id": "img-t2i",
+                "choices": [{"message": {"content": image_payload}}],
+            },
+        )
+        provider = _provider_with_client(client)
+
+        await provider.generate_image(
+            prompt="a landscape",
+            model="GPT-Image-1",
+            aspect_ratio="1:1",
+        )
+
+        req = client.post_requests[0]
+        content = req["json"]["messages"][0]["content"]
+        # Without image_path, content should be a plain string
+        assert isinstance(content, str)
+        assert content == "a landscape"
+
+    @pytest.mark.asyncio
+    async def test_generate_video_with_path_sends_base64_chat(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """generate_video(image_path=...) encodes image as base64 in chat path."""
+        ref_path = tmp_path / "seed.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        video_payload = json.dumps(
+            {"video_base64": base64.b64encode(b"output-video").decode("ascii")}
+        )
+
+        async def _no_config(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        client = FakeClient()
+        client.post_responses["https://api.poe.com/v1/chat/completions"] = FakeResponse(
+            status_code=200,
+            json_data={
+                "id": "vid-i2v",
+                "choices": [{"message": {"content": video_payload}}],
+            },
+        )
+        provider = _provider_with_client(client)
+        monkeypatch.setattr(provider, "_get_model_config", _no_config)
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_video(
+                prompt="animate this",
+                model="Veo-3",
+                duration=6,
+                aspect_ratio="16:9",
+                image_path="seed.png",
+            )
+
+        req = client.post_requests[0]
+        content = req["json"]["messages"][0]["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "image_url"
+        assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert content[1]["type"] == "text"
+        assert content[1]["text"] == "animate this"
+
+    @pytest.mark.asyncio
+    async def test_generate_video_with_path_sends_base64_api(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """generate_video(image_path=...) sends input_image via videos API."""
+        ref_path = tmp_path / "seed.png"
+        ref_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+
+        # Prevent real asyncio.sleep during polling
+        monkeypatch.setattr("app.services.providers.poe.asyncio.sleep", AsyncMock())
+
+        # Configure model with video_endpoint so it takes the API path
+        class _VideoEndpointConfig:
+            endpoint_type = "video_endpoint"
+        provider = _provider_with_client(FakeClient())
+        monkeypatch.setattr(
+            provider, "_get_model_config",
+            AsyncMock(return_value=_VideoEndpointConfig()),
+        )
+
+        # Mock the videos create + poll cycles
+        client = provider.client
+        client.post_responses["https://api.poe.com/v1/videos"] = FakeResponse(
+            status_code=201,
+            json_data={"id": "vid-api", "status": "queued"},
+        )
+        client.get_responses["https://api.poe.com/v1/videos/vid-api"] = FakeResponse(
+            status_code=200,
+            json_data={"id": "vid-api", "status": "completed", "video_url": "https://cdn.test/v.mp4"},
+        )
+        client.get_responses["https://api.poe.com/v1/videos/vid-api/content"] = FakeResponse(
+            status_code=200, content=b"video-bytes"
+        )
+        client.get_responses["https://cdn.test/v.mp4"] = FakeResponse(
+            status_code=200, content=b"video-bytes"
+        )
+
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.storage_path = str(tmp_path)
+            await provider.generate_video(
+                prompt="animate from image",
+                model="Veo-3",
+                duration=6,
+                aspect_ratio="16:9",
+                image_path="seed.png",
+            )
+
+        create_req = client.post_requests[0]
+        assert create_req["url"] == "https://api.poe.com/v1/videos"
+        assert "input_image" in create_req["json"]
+        assert create_req["json"]["input_image"].startswith("data:image/png;base64,")
+
+    @pytest.mark.asyncio
+    async def test_generate_video_without_path_uses_text_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """generate_video without image_path sends plain text (T2V compat)."""
+        video_payload = json.dumps(
+            {"video_base64": base64.b64encode(b"output-video").decode("ascii")}
+        )
+
+        async def _no_config(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        client = FakeClient()
+        client.post_responses["https://api.poe.com/v1/chat/completions"] = FakeResponse(
+            status_code=200,
+            json_data={
+                "id": "vid-t2v",
+                "choices": [{"message": {"content": video_payload}}],
+            },
+        )
+        provider = _provider_with_client(client)
+        monkeypatch.setattr(provider, "_get_model_config", _no_config)
+
+        await provider.generate_video(
+            prompt="a drone shot",
+            model="Veo-3",
+            duration=6,
+            aspect_ratio="16:9",
+        )
+
+        req = client.post_requests[0]
+        content = req["json"]["messages"][0]["content"]
+        # Without image_path, content should be a plain string
+        assert isinstance(content, str)
+        assert content == "a drone shot"
