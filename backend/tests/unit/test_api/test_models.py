@@ -275,3 +275,117 @@ class TestCapabilitiesField:
         model_ids = [m["id"] for m in models]
         assert "has-img2img" in model_ids
         assert "no-img2img" not in model_ids
+
+
+# ── Capability query parameter filter ────────────────────────────────
+
+
+class TestCapabilityQueryParameter:
+    """?capability=<name> on /api/models filters by that capability."""
+
+    @pytest.mark.asyncio
+    async def test_outputs_image_filter(self, client: AsyncClient, db_session):
+        """?capability=outputs_image returns only image models."""
+        provider = await _create_provider(db_session)
+        img_model = await _create_model(
+            db_session, provider,
+            model_id="img-model",
+            modality="image",
+            capabilities=["text_to_image"],
+        )
+        vid_model = await _create_model(
+            db_session, provider,
+            model_id="vid-model",
+            modality="video",
+            capabilities=["text_to_video"],
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/models?capability=outputs_image")
+        assert response.status_code == 200
+        models = response.json()
+
+        model_ids = [m["id"] for m in models]
+        assert "img-model" in model_ids
+        assert "vid-model" not in model_ids
+        for m in models:
+            caps = m.get("capabilities", {})
+            assert isinstance(caps, dict)
+            assert caps.get("outputs_image") is True, (
+                f"Model {m['id']} should have outputs_image=True"
+            )
+
+    @pytest.mark.asyncio
+    async def test_outputs_video_filter(self, client: AsyncClient, db_session):
+        """?capability=outputs_video returns only video models."""
+        provider = await _create_provider(db_session)
+        vid_model = await _create_model(
+            db_session, provider,
+            model_id="vid-model",
+            modality="video",
+            capabilities=["text_to_video"],
+        )
+        img_model = await _create_model(
+            db_session, provider,
+            model_id="img-model",
+            modality="image",
+            capabilities=["text_to_image"],
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/models?capability=outputs_video")
+        assert response.status_code == 200
+        models = response.json()
+
+        model_ids = [m["id"] for m in models]
+        assert "vid-model" in model_ids
+        assert "img-model" not in model_ids
+        for m in models:
+            caps = m.get("capabilities", {})
+            assert isinstance(caps, dict)
+            assert caps.get("outputs_video") is True, (
+                f"Model {m['id']} should have outputs_video=True"
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_capability_returns_all(self, client: AsyncClient, db_session):
+        """Without ?capability, all active models are returned."""
+        provider = await _create_provider(db_session)
+        await _create_model(
+            db_session, provider,
+            model_id="model-a",
+            modality="image",
+            capabilities=["text_to_image"],
+        )
+        await _create_model(
+            db_session, provider,
+            model_id="model-b",
+            modality="video",
+            capabilities=["text_to_video"],
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/models")
+        assert response.status_code == 200
+        models = response.json()
+
+        model_ids = [m["id"] for m in models]
+        assert "model-a" in model_ids
+        assert "model-b" in model_ids
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_capability_returns_empty(self, client: AsyncClient, db_session):
+        """?capability=nonexistent gracefully returns an empty list."""
+        provider = await _create_provider(db_session)
+        await _create_model(
+            db_session, provider,
+            model_id="some-model",
+            modality="image",
+            capabilities=["text_to_image"],
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/models?capability=accepts_audio")
+        assert response.status_code == 200
+        models = response.json()
+        assert models == []

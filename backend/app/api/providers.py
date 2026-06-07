@@ -47,6 +47,7 @@ class ProviderResponse(BaseModel):
     daily_budget_limit: float | None
     current_daily_spend: float
     priority: int
+    redirect_url: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -211,7 +212,9 @@ async def create_provider(
     db.add(provider)
     await db.commit()
     await db.refresh(provider)
-    return provider
+    resp = ProviderResponse.model_validate(provider)
+    resp.redirect_url = f"/admin/models?provider={provider.id}"
+    return resp
 
 
 @router.get("/{provider_id}", response_model=ProviderResponse)

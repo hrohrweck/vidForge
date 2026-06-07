@@ -2,7 +2,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -345,9 +345,16 @@ async def update_model_preferences(
 
 @router.get("", response_model=list[dict[str, Any]])
 async def list_models(
+    capability: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
     models = await get_all_models(db)
+    if capability:
+        models = [
+            m for m in models
+            if isinstance(m.get("capabilities"), dict)
+            and m["capabilities"].get(capability) is True
+        ]
     # Include only the fields the frontend expects
     return [
         {

@@ -712,6 +712,7 @@ class ModelConfigUpdate(BaseModel):
 async def list_model_configs(
     provider_id: UUID | None = None,
     modality: str | None = None,
+    capability: str | None = None,
     is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
@@ -725,9 +726,18 @@ async def list_model_configs(
     if is_active is not None:
         stmt = stmt.where(ModelConfig.is_active == is_active)
 
-        stmt = stmt.options(selectinload(ModelConfig.provider)).order_by(ModelConfig.modality, ModelConfig.display_name)
+    stmt = stmt.options(selectinload(ModelConfig.provider)).order_by(ModelConfig.modality, ModelConfig.display_name)
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    configs = list(result.scalars().all())
+
+    # Filter by capability in Python (capabilities is JSONB, not directly filterable in SQL)
+    if capability:
+        configs = [
+            c for c in configs
+            if c.capabilities and c.capabilities.get(capability) is True
+        ]
+
+    return configs
 
 
 @router.post("/model-configs", status_code=201, response_model=ModelConfigResponse)

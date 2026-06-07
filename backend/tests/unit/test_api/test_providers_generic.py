@@ -50,6 +50,7 @@ class TestProviderCRUD:
         data = resp.json()
         assert data["provider_type"] == "comfyui_direct"
         assert data["name"] == "Test Provider"
+        assert data["redirect_url"] == f"/admin/models?provider={data['id']}"
 
     @pytest.mark.asyncio
     async def test_create_provider_with_invalid_type_returns_400(
