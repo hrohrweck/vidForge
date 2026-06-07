@@ -6,8 +6,18 @@ import Providers from '../../pages/Providers'
 import { renderWithProviders } from '../../test/utils'
 import { server } from '../../test/mocks/server'
 
+const mockNavigate = vi.fn()
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  }
+})
+
 describe('Providers Page', () => {
   beforeEach(() => {
+    mockNavigate.mockClear()
     server.resetHandlers()
 
     server.use(
@@ -281,5 +291,45 @@ describe('Providers Page', () => {
     expect(await screen.findByText('Enter a valid non-negative number')).toBeInTheDocument()
 
     promptSpy.mockRestore()
+  })
+
+  it('navigates to model config page after provider creation', async () => {
+    const user = userEvent.setup()
+
+    const providerId = 'provider-created'
+    server.use(
+      http.post('*/api/providers', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          {
+            id: providerId,
+            name: (body.name as string) || 'New Provider',
+            provider_type: 'comfyui_direct',
+            config: (body.config as Record<string, unknown>) || {},
+            is_active: true,
+            daily_budget_limit: 50,
+            current_daily_spend: 0,
+            priority: 0,
+            created_at: '2024-01-02T00:00:00Z',
+            redirect_url: `/admin/models?provider=${providerId}`,
+          },
+          { status: 201 }
+        )
+      })
+    )
+
+    renderWithProviders(<Providers />, { superuser: true })
+    await user.click(screen.getByRole('button', { name: /new provider/i }))
+
+    await user.type(screen.getByLabelText('Name'), 'Redirect Test Provider')
+    await user.type(screen.getByLabelText('ComfyUI URL'), 'http://127.0.0.1:8188')
+
+    await user.click(screen.getByRole('button', { name: /save provider/i }))
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/admin/models?provider=${providerId}`
+      )
+    })
   })
 })

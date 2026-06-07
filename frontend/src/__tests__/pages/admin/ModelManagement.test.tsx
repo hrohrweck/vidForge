@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
+import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ModelManagement from '../../../pages/admin/ModelManagement'
 import { renderWithProviders } from '../../../test/utils'
 import { server } from '../../../test/mocks/server'
+import { useAuthStore } from '../../../stores/auth'
 
 const mockProviders = [
   {
@@ -254,5 +257,46 @@ describe('ModelManagement Page', () => {
       expect(deleteCalled).toBe(true)
       expect(deletedId).toBe('config-1')
     })
+  })
+
+  it('pre-selects provider filter from ?provider= query param', async () => {
+    let requestedProviderId: string | null = null
+    server.use(
+      http.get('*/api/admin/model-configs', ({ request }) => {
+        const url = new URL(request.url)
+        requestedProviderId = url.searchParams.get('provider_id')
+        return HttpResponse.json(mockConfigs)
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    useAuthStore.setState({
+      token: 'superuser-token',
+      user: {
+        id: '1',
+        email: 'admin@example.com',
+        is_active: true,
+        is_superuser: true,
+        groups: [],
+        permissions: [],
+      },
+      isAuthenticated: true,
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/models?provider=provider-1']}>
+          <ModelManagement />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Qwen 3.6')).toBeInTheDocument()
+    })
+
+    expect(requestedProviderId).toBe('provider-1')
   })
 })
