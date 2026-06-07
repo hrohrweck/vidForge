@@ -313,6 +313,22 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         return await self.sync_models()
 
     @staticmethod
+    def _aspect_to_pixels(ratio: str, max_dim: int = 1536) -> str:
+        """Convert aspect ratio like '3:2' to pixel dimensions like '1536*1024'."""
+        try:
+            w_ratio, h_ratio = ratio.split(":")
+            w_ratio, h_ratio = float(w_ratio), float(h_ratio)
+            if w_ratio >= h_ratio:
+                width = max_dim
+                height = int(max_dim * (h_ratio / w_ratio))
+            else:
+                height = max_dim
+                width = int(max_dim * (w_ratio / h_ratio))
+            return f"{width}*{height}"
+        except (ValueError, ZeroDivisionError):
+            return ratio  # fallback: return as-is
+
+    @staticmethod
     def _normalize_model(model_data: dict[str, Any]) -> dict[str, Any]:
         atype = model_data.get("type", "Text").lower()
         model_id = model_data.get("model", "").lower()
@@ -398,8 +414,8 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         size_family = (model_config.constraints or {}).get("size_param_family", "ratio")
         if size_family == "pixel_x":
             payload["size"] = aspect_ratio
-        elif size_family == "pixel_star":
-            payload["size"] = aspect_ratio.replace("x", "*")
+        elif size_family in ("pixel_star", "pixel_star_wh"):
+            payload["size"] = self._aspect_to_pixels(aspect_ratio)
         elif size_family == "wh_int":
             w_str, h_str = aspect_ratio.split("x")
             payload["width"] = int(w_str)
@@ -427,10 +443,19 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
                 if full_path.exists():
                     image_bytes = full_path.read_bytes()
                     image_b64 = base64.b64encode(image_bytes).decode("ascii")
-                    if image_path.startswith("http://") or image_path.startswith("https://"):
-                        payload["image_url"] = image_path
+                    ref_uri = (
+                        image_path
+                        if image_path.startswith("http://") or image_path.startswith("https://")
+                        else f"data:image/png;base64,{image_b64}"
+                    )
+
+                    # Edit/image-edit models expect "images" array
+                    model_id = model.lower()
+                    is_edit_model = any(x in model_id for x in ("/edit", "image-edit"))
+                    if is_edit_model:
+                        payload["images"] = [ref_uri]
                     else:
-                        payload["image_url"] = f"data:image/png;base64,{image_b64}"
+                        payload["image_url"] = ref_uri
                 else:
                     logger.warning("Reference image not found: %s", image_path)
             except Exception as e:

@@ -302,3 +302,205 @@ class TestAtlasCloudNormalization:
         assert result["modality"] == "text"
         assert result["endpoint_type"] == "chat_completions"
         assert result["cost_config"] == {"currency": "credits"}
+
+
+# ---------------------------------------------------------------------------
+# _aspect_to_pixels unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestAspectToPixels:
+    def test_landscape_ratio_3_2(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("3:2") == "1536*1024"
+
+    def test_landscape_ratio_16_9(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("16:9") == "1536*864"
+
+    def test_square_ratio_1_1(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("1:1") == "1536*1536"
+
+    def test_portrait_ratio_9_16(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("9:16") == "864*1536"
+
+    def test_portrait_ratio_2_3(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("2:3") == "1024*1536"
+
+    def test_custom_max_dim(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("3:2", max_dim=1024) == "1024*682"
+
+    def test_fallback_on_invalid_ratio(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("invalid") == "invalid"
+
+    def test_fallback_on_zero_division(self) -> None:
+        assert AtlasCloudProvider._aspect_to_pixels("0:0") == "0:0"
+
+
+# ---------------------------------------------------------------------------
+# generate_image — edit model payload tests
+# ---------------------------------------------------------------------------
+
+
+def _get_post_payload(client: FakeAtlasClient) -> dict[str, Any]:
+    """Extract the JSON payload from the POST call to /model/generateImage."""
+    for call in client.calls:
+        if call["method"] == "POST" and "/model/generateImage" in call["url"]:
+            return call["json"] or {}
+    return {}
+
+
+@pytest.mark.asyncio
+async def test_edit_model_uses_pixel_star_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Edit models with pixel_star family convert aspect ratio to WIDTH*HEIGHT."""
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.providers.atlascloud.asyncio.sleep", _no_sleep)
+
+    image_url = "https://cdn.test/generated-image.png"
+    client = FakeAtlasClient(
+        poll_results=[{"data": {"status": "completed", "url": image_url}}],
+        assets={image_url: b"image-bytes"},
+    )
+    provider = _provider_with_client(client)
+    mc = FakeModelConfig("qwen/qwen-image-2.0/edit")
+    mc.constraints = {"size_param_family": "pixel_star"}
+    provider._get_model_config = AsyncMock(return_value=mc)
+
+    await provider.generate_image(
+        prompt="edit this image",
+        model="qwen/qwen-image-2.0/edit",
+        aspect_ratio="3:2",
+    )
+
+    payload = _get_post_payload(client)
+    assert payload["size"] == "1536*1024", f"Expected 1536*1024, got {payload.get('size')}"
+
+
+@pytest.mark.asyncio
+async def test_non_edit_model_uses_aspect_ratio(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-edit models with ratio family keep aspect_ratio unchanged."""
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.providers.atlascloud.asyncio.sleep", _no_sleep)
+
+    image_url = "https://cdn.test/generated-image.png"
+    client = FakeAtlasClient(
+        poll_results=[{"data": {"status": "completed", "url": image_url}}],
+        assets={image_url: b"image-bytes"},
+    )
+    provider = _provider_with_client(client)
+    mc = FakeModelConfig("atlas/flux/text-to-image")
+    mc.constraints = {"size_param_family": "ratio"}
+    provider._get_model_config = AsyncMock(return_value=mc)
+
+    await provider.generate_image(
+        prompt="city skyline at sunset",
+        model="atlas/flux/text-to-image",
+        aspect_ratio="16:9",
+    )
+
+    payload = _get_post_payload(client)
+    assert payload["aspect_ratio"] == "16:9"
+
+
+@pytest.mark.asyncio
+async def test_edit_model_uses_images_array(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Edit models send 'images' array instead of 'image_url' string."""
+    import base64
+    from pathlib import Path
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.providers.atlascloud.asyncio.sleep", _no_sleep)
+
+    # Create a fake reference image
+    ref_dir = tmp_path / "media"
+    ref_dir.mkdir()
+    ref_file = ref_dir / "ref.png"
+    ref_file.write_bytes(b"fake-image-data")
+
+    # Mock get_settings to use tmp_path as storage_path
+    class FakeSettings:
+        storage_path = str(tmp_path)
+
+    monkeypatch.setattr(
+        "app.config.get_settings",
+        lambda: FakeSettings(),
+    )
+
+    image_url = "https://cdn.test/generated-image.png"
+    client = FakeAtlasClient(
+        poll_results=[{"data": {"status": "completed", "url": image_url}}],
+        assets={image_url: b"image-bytes"},
+    )
+    provider = _provider_with_client(client)
+    mc = FakeModelConfig("qwen/qwen-image-2.0/edit")
+    mc.constraints = {"size_param_family": "pixel_star"}
+    provider._get_model_config = AsyncMock(return_value=mc)
+
+    await provider.generate_image(
+        prompt="edit this image",
+        model="qwen/qwen-image-2.0/edit",
+        aspect_ratio="3:2",
+        image_path="media/ref.png",
+    )
+
+    payload = _get_post_payload(client)
+    assert "images" in payload, f"Expected 'images' in payload, got keys: {list(payload.keys())}"
+    assert isinstance(payload["images"], list)
+    assert len(payload["images"]) == 1
+    expected_b64 = base64.b64encode(b"fake-image-data").decode("ascii")
+    assert payload["images"][0] == f"data:image/png;base64,{expected_b64}"
+
+
+@pytest.mark.asyncio
+async def test_non_edit_model_uses_image_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Non-edit models keep using 'image_url' string."""
+    import base64
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.providers.atlascloud.asyncio.sleep", _no_sleep)
+
+    ref_dir = tmp_path / "media"
+    ref_dir.mkdir()
+    ref_file = ref_dir / "ref.png"
+    ref_file.write_bytes(b"non-edit-ref-data")
+
+    class FakeSettings:
+        storage_path = str(tmp_path)
+
+    monkeypatch.setattr(
+        "app.config.get_settings",
+        lambda: FakeSettings(),
+    )
+
+    image_url = "https://cdn.test/generated-image.png"
+    client = FakeAtlasClient(
+        poll_results=[{"data": {"status": "completed", "url": image_url}}],
+        assets={image_url: b"image-bytes"},
+    )
+    provider = _provider_with_client(client)
+    mc = FakeModelConfig("atlas/flux/image-to-image")
+    mc.constraints = {"size_param_family": "ratio"}
+    provider._get_model_config = AsyncMock(return_value=mc)
+
+    await provider.generate_image(
+        prompt="img2img prompt",
+        model="atlas/flux/image-to-image",
+        aspect_ratio="1:1",
+        image_path="media/ref.png",
+    )
+
+    payload = _get_post_payload(client)
+    assert "image_url" in payload, f"Expected image_url, got keys: {list(payload.keys())}"
+    assert "images" not in payload, "Non-edit models should not have 'images' key"
+    expected_b64 = base64.b64encode(b"non-edit-ref-data").decode("ascii")
+    assert payload["image_url"] == f"data:image/png;base64,{expected_b64}"
