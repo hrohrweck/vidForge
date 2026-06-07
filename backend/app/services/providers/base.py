@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from app.services.llm_service import LLMChunk
+from app.services.model_capabilities import ModelCapability
 
 
 @dataclass
@@ -31,6 +32,7 @@ class ProviderCapabilities:
     supports_video: bool = False
     supports_llm: bool = False
     supports_model_sync: bool = False
+    capabilities: list[ModelCapability] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
