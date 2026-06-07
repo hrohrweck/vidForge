@@ -382,6 +382,9 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         if not client:
             raise RuntimeError("Provider not initialized")
 
+        # Read reference image from kwargs (provider-agnostic interface)
+        image_path: str | None = kwargs.get("image_path")
+
         model_config = await self._get_model_config(model)
         if model_config is None:
             raise LLMError(
@@ -410,6 +413,28 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
 
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
+
+        # Handle reference image for img2img models
+        if image_path:
+            try:
+                from pathlib import Path
+
+                from app.config import get_settings
+                import base64
+
+                settings = get_settings()
+                full_path = Path(settings.storage_path) / image_path
+                if full_path.exists():
+                    image_bytes = full_path.read_bytes()
+                    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+                    if image_path.startswith("http://") or image_path.startswith("https://"):
+                        payload["image_url"] = image_path
+                    else:
+                        payload["image_url"] = f"data:image/png;base64,{image_b64}"
+                else:
+                    logger.warning("Reference image not found: %s", image_path)
+            except Exception as e:
+                logger.warning("Failed to process reference image for AtlasCloud: %s", e)
 
         # Submit
         resp = await client.post(
