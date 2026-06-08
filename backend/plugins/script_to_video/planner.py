@@ -150,7 +150,7 @@ async def plan_scenes_from_script(
             )
 
             result = _parse_response(response, duration, original_segments=segments)
-            if result.get("scenes") and result["scenes"][0].get("visual_description") != "Scene 1":
+            if not result.get("_is_fallback"):
                 return result
             logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
             user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
@@ -247,7 +247,7 @@ def _clean_llm_response(response: str) -> str:
 
 def _fallback_result(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     scenes = _fallback_scenes(segments_count, original_segments)
-    return {"scenes": scenes, "object_selections": []}
+    return {"scenes": scenes, "object_selections": [], "_is_fallback": True}
 
 
 def _fallback_scenes(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:

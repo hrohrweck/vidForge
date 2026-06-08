@@ -142,7 +142,7 @@ async def plan_scenes_from_prompt(
                 provider=provider,
             )
             result = _parse_response(response, duration, original_prompt=prompt)
-            if result.get("scenes") and result["scenes"][0].get("visual_description") != "Scene 1":
+            if not result.get("_is_fallback"):
                 return result
             logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
             user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
@@ -251,7 +251,7 @@ def _extract_by_brace_matching(text: str) -> dict | None:
 
 def _fallback_result(duration: float, original_prompt: str | None = None) -> dict[str, Any]:
     scenes = _fallback_scenes(duration, original_prompt)
-    return {"scenes": scenes, "object_selections": []}
+    return {"scenes": scenes, "object_selections": [], "_is_fallback": True}
 
 
 def _fallback_scenes(duration: float, original_prompt: str | None = None) -> list[dict[str, Any]]:
