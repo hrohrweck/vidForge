@@ -103,9 +103,9 @@ export function ScriptToVideoPanel({ job, jobId, scenes, planningMode }: Props) 
 
             <Button
               onClick={() => planScenesMutation.mutate()}
-              disabled={planScenesMutation.isPending || !script.trim()}
+              disabled={planScenesMutation.isPending || !script.trim() || job?.stage === 'planning'}
             >
-              {planScenesMutation.isPending ? 'Planning Scenes...' : 'Generate Scene Plan'}
+              {job?.stage === 'planning' ? 'Planning in Progress...' : planScenesMutation.isPending ? 'Planning Scenes...' : 'Generate Scene Plan'}
             </Button>
 
             {job?.stage === 'planning' && scenes && scenes.length > 0 && (

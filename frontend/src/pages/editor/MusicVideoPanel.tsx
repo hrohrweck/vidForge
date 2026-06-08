@@ -170,9 +170,9 @@ export function MusicVideoPanel({ job, jobId, scenes, planningMode }: Props) {
                 {!!job?.input_data?.lyrics && (
                   <Button
                     onClick={() => planScenesMutation.mutate()}
-                    disabled={planScenesMutation.isPending}
+                    disabled={planScenesMutation.isPending || job?.stage === 'planning'}
                   >
-                    {planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
+                    {job?.stage === 'planning' ? 'Planning in Progress...' : planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
                   </Button>
                 )}
               </div>
@@ -192,9 +192,9 @@ export function MusicVideoPanel({ job, jobId, scenes, planningMode }: Props) {
                   {!!job?.input_data?.lyrics && (
                     <Button
                       onClick={() => planScenesMutation.mutate()}
-                      disabled={planScenesMutation.isPending}
+                      disabled={planScenesMutation.isPending || job?.stage === 'planning'}
                     >
-                      {planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
+                      {job?.stage === 'planning' ? 'Planning in Progress...' : planScenesMutation.isPending ? 'Planning...' : 'Generate Scene Plan'}
                     </Button>
                   )}
                 </div>
