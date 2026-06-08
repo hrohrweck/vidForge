@@ -452,11 +452,19 @@ Output only the enhanced prompt, nothing else."""
 
         enhanced = enhanced.strip()
 
-        # Strip any thinking tags that survived the LLMClient cleanup
-        # (defense-in-depth: garbled enhanced prompts poison downstream scene planners)
         import re
         enhanced = re.sub(r"<think>.*?</think>", "", enhanced, flags=re.DOTALL).strip()
         enhanced = re.sub(r"【thinking】.*?【/thinking】", "", enhanced, flags=re.DOTALL).strip()
+        
+        enhanced = re.sub(r"^(Here's|Here is).*?(prompt|enhanced|version)[:\s]*", "", enhanced, flags=re.IGNORECASE).strip()
+        enhanced = re.sub(r"^\d+\.\s*\*\*.*?\*\*[:\s]*", "", enhanced, flags=re.MULTILINE).strip()
+        
+        lines = [line.strip() for line in enhanced.split('\n') if line.strip() and not line.strip().startswith('-') and not re.match(r'^\d+\.', line.strip())]
+        if len(lines) > 1:
+            for line in reversed(lines):
+                if len(line) > 20 and not line.startswith('**') and not line.startswith('#'):
+                    enhanced = line
+                    break
 
         if enhanced.startswith('"') and enhanced.endswith('"'):
             enhanced = enhanced[1:-1]
