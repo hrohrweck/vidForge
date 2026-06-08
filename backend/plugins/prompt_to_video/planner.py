@@ -195,7 +195,13 @@ def _parse_response(response: str, target_duration: float, original_prompt: str 
         return _fallback_result(target_duration, original_prompt)
 
     scenes = parsed["scenes"]
-    if not scenes:
+    if not scenes or not isinstance(scenes, list):
+        logger.warning("LLM response has invalid scenes list, falling back")
+        return _fallback_result(target_duration, original_prompt)
+    
+    # Validate each scene is a dictionary
+    if not all(isinstance(scene, dict) for scene in scenes):
+        logger.warning("LLM response contains non-dict scenes, falling back")
         return _fallback_result(target_duration, original_prompt)
 
     # Extract object selections if present
