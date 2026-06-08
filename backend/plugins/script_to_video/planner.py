@@ -138,35 +138,41 @@ async def plan_scenes_from_script(
         if model_capabilities_context:
             user_prompt += f"\n{model_capabilities_context}\n\n"
         user_prompt += f"\nScript segments:{seg_text}"
+        result: dict[str, Any] = {}
 
-        response = await llm.generate(
-            prompt=user_prompt,
-            system=SYSTEM_PROMPT,
-            max_tokens=4096,
-            temperature=0.7,
-            provider=provider,
-        )
+        for attempt in range(2):
+            response = await llm.generate(
+                prompt=user_prompt,
+                system=SYSTEM_PROMPT,
+                max_tokens=4096,
+                temperature=0.7,
+                provider=provider,
+            )
 
-        return _parse_response(response, duration)
+            result = _parse_response(response, duration, original_segments=segments)
+            if result.get("scenes") and result["scenes"][0].get("visual_description") != "Scene 1":
+                return result
+            logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
+            user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
+
+        return result
     finally:
         await llm.close()
         if provider is not None and hasattr(provider, "shutdown"):
             await provider.shutdown()
 
 
-def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
+def _parse_response(response: str, target_duration: float, original_segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Parse LLM response into a dict with ``scenes`` and ``object_selections`` keys."""
-    response = response.strip()
-
-    if response.startswith("```"):
-        parts = response.split("```")
-        for part in parts:
-            if "scenes" in part:
-                response = part.replace("json", "", 1).strip()
-                break
+    cleaned = _clean_llm_response(response)
 
     parsed = None
-    for candidate in [response, response.replace("```json", "").replace("```", "")]:
+    candidates = [
+        cleaned,
+        cleaned.replace("```json", "").replace("```", ""),
+        re.sub(r'\*\*.*?\*\*', '', cleaned),
+    ]
+    for candidate in candidates:
         candidate = candidate.strip()
         if candidate.startswith("{") and "scenes" in candidate:
             try:
@@ -176,7 +182,7 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
                 pass
 
     if not parsed:
-        m = re.search(r'\{.*?"scenes".*?\}', response, re.DOTALL)
+        m = re.search(r'\{[^{}]*"scenes"[^{}]*(?:\[[^\]]*\][^{}]*)*\}', cleaned, re.DOTALL)
         if m:
             try:
                 parsed = json.loads(m.group(0))
@@ -185,11 +191,13 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
 
     if not parsed:
         logger.warning("Could not parse LLM scene plan, using fallback")
-        return _fallback_result(segments_count=max(1, int(target_duration / 5)))
+        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
+        return _fallback_result(segments_count, original_segments)
 
     scenes = parsed.get("scenes", [])
     if not scenes:
-        return _fallback_result(max(1, int(target_duration / 5)))
+        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
+        return _fallback_result(segments_count, original_segments)
 
     # Extract object selections if present
     object_selections = parsed.get("object_selections", [])
@@ -212,19 +220,51 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
     return {"scenes": scenes, "object_selections": object_selections}
 
 
-def _fallback_result(segments_count: int) -> dict[str, Any]:
-    scenes = _fallback_scenes(segments_count)
+def _clean_llm_response(response: str) -> str:
+    """Remove common LLM artifacts (thinking tags, markdown fences, etc.)."""
+    text = response.strip()
+
+    if text.startswith("```"):
+        start = text.find("\n", 3) if text.startswith("```") else 0
+        if start > 0:
+            lang_tag = text[3:start].strip().lower()
+            if lang_tag in ("json", "", "javascript"):
+                end = text.find("```", start + 1)
+                if end != -1:
+                    text = text[start:end].strip()
+                else:
+                    text = text[start:].strip()
+
+    text = re.sub(r'【\w+】.*?【/\w+】', '', text, flags=re.DOTALL)
+    text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL)
+
+    text = text.strip()
+    text = re.sub(r'^(Here is|Here are|Okay,|Sure,|Certainly,).*?\n', '', text, flags=re.IGNORECASE)
+
+    return text.strip()
+
+
+def _fallback_result(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    scenes = _fallback_scenes(segments_count, original_segments)
     return {"scenes": scenes, "object_selections": []}
 
 
-def _fallback_scenes(segments_count: int) -> list[dict[str, Any]]:
+def _fallback_scenes(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    def _seg_desc(i: int) -> str:
+        if original_segments and i < len(original_segments):
+            narration = original_segments[i].get("narration", "").strip()
+            if narration:
+                return narration if len(narration) <= 100 else narration[:100] + "..."
+        return f"Scene {i + 1}"
+
     return [
         {
             "start_time": i * 5.0,
             "end_time": (i + 1) * 5.0,
-            "narration": "",
-            "visual_description": f"Scene {i + 1}",
-            "image_prompt": f"Visual scene {i + 1}",
+            "narration": original_segments[i].get("narration", "") if original_segments and i < len(original_segments) else "",
+            "visual_description": _seg_desc(i),
+            "image_prompt": f"Visual scene {i + 1}: {_seg_desc(i)}",
             "mood": "neutral",
             "camera_movement": "static",
         }

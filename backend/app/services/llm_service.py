@@ -284,7 +284,7 @@ class LLMClient:
 
                 import re
 
-                clean = re.sub(r" <think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                clean = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                 clean = re.sub(r"【thinking】.*?【/thinking】", "", clean, flags=re.DOTALL).strip()
                 if clean:
                     content = clean
@@ -332,7 +332,7 @@ class LLMClient:
 
                 import re
 
-                clean = re.sub(r" <think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                clean = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                 clean = re.sub(r"【thinking】.*?【/thinking】", "", clean, flags=re.DOTALL).strip()
                 if clean:
                     content = clean
@@ -451,6 +451,13 @@ Output only the enhanced prompt, nothing else."""
         )
 
         enhanced = enhanced.strip()
+
+        # Strip any thinking tags that survived the LLMClient cleanup
+        # (defense-in-depth: garbled enhanced prompts poison downstream scene planners)
+        import re
+        enhanced = re.sub(r"<think>.*?</think>", "", enhanced, flags=re.DOTALL).strip()
+        enhanced = re.sub(r"【thinking】.*?【/thinking】", "", enhanced, flags=re.DOTALL).strip()
+
         if enhanced.startswith('"') and enhanced.endswith('"'):
             enhanced = enhanced[1:-1]
 

@@ -131,36 +131,44 @@ async def plan_scenes_from_prompt(
         if model_capabilities_context:
             user_prompt += f"\n{model_capabilities_context}\n\n"
         user_prompt += f"Prompt: {prompt}"
-        response = await llm.generate(
-            prompt=user_prompt,
-            system=SYSTEM_PROMPT,
-            max_tokens=4096,
-            temperature=0.7,
-            provider=provider,
-        )
-        return _parse_response(response, duration)
+        result: dict[str, Any] = {}
+
+        for attempt in range(2):
+            response = await llm.generate(
+                prompt=user_prompt,
+                system=SYSTEM_PROMPT,
+                max_tokens=4096,
+                temperature=0.7,
+                provider=provider,
+            )
+            result = _parse_response(response, duration, original_prompt=prompt)
+            if result.get("scenes") and result["scenes"][0].get("visual_description") != "Scene 1":
+                return result
+            logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
+            user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
+
+        return result
     finally:
         await llm.close()
         if provider is not None and hasattr(provider, "shutdown"):
             await provider.shutdown()
 
 
-def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
+def _parse_response(response: str, target_duration: float, original_prompt: str | None = None) -> dict[str, Any]:
     """Parse LLM response into a dict with ``scenes`` and ``object_selections`` keys."""
-    response = response.strip()
-
-    # Strip code fences
-    if response.startswith("```"):
-        parts = response.split("```")
-        for part in parts:
-            if "scenes" in part:
-                response = part.replace("json", "", 1).strip()
-                break
+    cleaned = _clean_llm_response(response)
 
     parsed: dict | None = None
 
-    # Try direct JSON parse
-    for candidate in [response, response.replace("```json", "").replace("```", "")]:
+    # Try direct JSON parse on progressively cleaned candidates
+    candidates = [
+        cleaned,
+        cleaned.replace("```json", "").replace("```", ""),
+        re.sub(r'<think>.*?</think>', '', cleaned, flags=re.DOTALL),
+        re.sub(r'【.*?】', '', cleaned),
+        re.sub(r'\*\*.*?\*\*', '', cleaned),
+    ]
+    for candidate in candidates:
         candidate = candidate.strip()
         if candidate.startswith("{") and "scenes" in candidate:
             try:
@@ -169,9 +177,9 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
             except json.JSONDecodeError:
                 pass
 
-    # Try regex extraction
+    # Try regex extraction with a more robust pattern
     if not parsed:
-        m = re.search(r'\{.*?"scenes".*?\}', response, re.DOTALL)
+        m = re.search(r'\{[^{}]*"scenes"[^{}]*(?:\[[^\]]*\][^{}]*)*\}', cleaned, re.DOTALL)
         if m:
             try:
                 parsed = json.loads(m.group(0))
@@ -180,15 +188,15 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
 
     # Try brace-matching (handles truncated JSON)
     if not parsed:
-        parsed = _extract_by_brace_matching(response)
+        parsed = _extract_by_brace_matching(cleaned)
 
     if not parsed or "scenes" not in parsed:
         logger.warning("LLM response could not be parsed, falling back to single scene")
-        return _fallback_result(target_duration)
+        return _fallback_result(target_duration, original_prompt)
 
     scenes = parsed["scenes"]
     if not scenes:
-        return _fallback_result(target_duration)
+        return _fallback_result(target_duration, original_prompt)
 
     # Extract object selections if present
     object_selections = parsed.get("object_selections", [])
@@ -197,6 +205,34 @@ def _parse_response(response: str, target_duration: float) -> dict[str, Any]:
     scenes = _fix_scene_timing(scenes, target_duration)
 
     return {"scenes": scenes, "object_selections": object_selections}
+
+
+def _clean_llm_response(response: str) -> str:
+    """Remove common LLM artifacts (thinking tags, markdown fences, etc.)."""
+    text = response.strip()
+
+    # Strip markdown code fences with optional language tag
+    if text.startswith("```"):
+        # Find the first ``` and the matching closing ```
+        start = text.find("\n", 3) if text.startswith("```") else 0
+        if start > 0:
+            lang_tag = text[3:start].strip().lower()
+            if lang_tag in ("json", "", "javascript"):
+                end = text.find("```", start + 1)
+                if end != -1:
+                    text = text[start:end].strip()
+                else:
+                    text = text[start:].strip()
+
+    text = re.sub(r'【\w+】.*?【/\w+】', '', text, flags=re.DOTALL)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL)
+
+    text = text.strip()
+    text = re.sub(r'^(Here is|Here are|Okay,|Sure,|Certainly,).*?\n', '', text, flags=re.IGNORECASE)
+
+    return text.strip()
 
 
 def _extract_by_brace_matching(text: str) -> dict | None:
@@ -213,23 +249,27 @@ def _extract_by_brace_matching(text: str) -> dict | None:
     return None
 
 
-def _fallback_result(duration: float) -> dict[str, Any]:
-    scenes = _fallback_scenes(duration)
+def _fallback_result(duration: float, original_prompt: str | None = None) -> dict[str, Any]:
+    scenes = _fallback_scenes(duration, original_prompt)
     return {"scenes": scenes, "object_selections": []}
 
 
-def _fallback_scenes(duration: float) -> list[dict[str, Any]]:
+def _fallback_scenes(duration: float, original_prompt: str | None = None) -> list[dict[str, Any]]:
     """Create simple evenly-spaced scenes as a fallback."""
     clip_duration = min(5.0, duration)
     num_scenes = max(1, int(duration / clip_duration))
     actual_duration = duration / num_scenes
 
+    base_description = (original_prompt or "Scene").strip()
+    if len(base_description) > 100:
+        base_description = base_description[:100] + "..."
+
     return [
         {
             "start_time": round(i * actual_duration, 2),
             "end_time": round((i + 1) * actual_duration, 2),
-            "visual_description": f"Scene {i + 1}",
-            "image_prompt": f"Visual representation of scene {i + 1}",
+            "visual_description": f"{base_description} — segment {i + 1} of {num_scenes}",
+            "image_prompt": f"Visual scene {i + 1} of {num_scenes}: {base_description}",
             "mood": "neutral",
             "camera_movement": "static",
         }
