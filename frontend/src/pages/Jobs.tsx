@@ -173,11 +173,7 @@ export default function Jobs() {
                         onClick={(e) => {
                           e.stopPropagation()
                           if (window.confirm('Are you sure you want to delete this job?')) {
-                            deleteMutation.mutate(job.id, {
-                              onSuccess: () => {
-                                queryClient.invalidateQueries({ queryKey: ['jobs', status] })
-                              },
-                            })
+                            deleteMutation.mutate(job.id)
                           }
                         }}
                         disabled={deleteMutation.isPending}
