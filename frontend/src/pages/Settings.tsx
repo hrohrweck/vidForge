@@ -165,29 +165,32 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="h-full flex flex-col w-full px-2.5">
+      <div className="shrink-0 pt-4 pb-2">
         <h1 className="text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground">Manage your account and preferences</p>
       </div>
 
-      <div className="flex gap-2 border-b">
-        {(['account', 'appearance', 'storage', 'styles', 'models', 'logs'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
-              activeTab === tab
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {tab === 'models' ? 'AI Models' : tab === 'logs' ? 'Error Logs' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
+      <div className="shrink-0 sticky top-0 bg-background/50 backdrop-blur-sm z-10">
+        <div className="flex gap-2 border-b">
+          {(['account', 'appearance', 'storage', 'styles', 'models', 'logs'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
+                activeTab === tab
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab === 'models' ? 'AI Models' : tab === 'logs' ? 'Error Logs' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {activeTab === 'account' && (
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {activeTab === 'account' && (
         <div className="space-y-6">
           <div className="border rounded-lg p-6">
             <h2 className="text-lg font-semibold mb-4">Account Information</h2>
@@ -700,6 +703,7 @@ export default function Settings() {
       )}
 
       {activeTab === 'logs' && <SettingsLogs />}
+      </div>
     </div>
   )
 }
