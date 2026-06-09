@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
@@ -46,6 +47,29 @@ SYSTEM_PROMPT = (
     "Here is my answer to your question."
 )
 StreamEvent = tuple[str, dict[str, Any]]
+
+# ---------------------------------------------------------------------------
+# Thinking-tag stripping (defense-in-depth for chat streaming)
+# ---------------------------------------------------------------------------
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_THINK_OPEN_RE = re.compile(r"<think>.*", re.DOTALL)
+_CJK_THINK_RE = re.compile(r"【thinking】.*?【/thinking】", re.DOTALL)
+_CJK_THINK_OPEN_RE = re.compile(r"【thinking】.*", re.DOTALL)
+
+
+def _strip_thinking(content: str) -> str:
+    """Remove <think>…</think> and 【thinking】…【/thinking】 blocks.
+
+    Handles partial (unclosed) tags by stripping from the opening tag to
+    end-of-string so the frontend never sees raw thinking markup.
+    """
+    # Full blocks first
+    content = _THINK_RE.sub("", content)
+    content = _CJK_THINK_RE.sub("", content)
+    # Partial / unclosed tags
+    content = _THINK_OPEN_RE.sub("", content)
+    content = _CJK_THINK_OPEN_RE.sub("", content)
+    return content.strip()
 
 
 class ChatLLM(Protocol):
@@ -154,17 +178,14 @@ class ConversationService:
         await self.get(user_id, conv_id)
         stmt = select(Message).where(Message.conversation_id == conv_id)
         if before is not None:
-            subq = (
-                select(Message.created_at)
-                .where(Message.id == before)
-                .scalar_subquery()
-            )
+            subq = select(Message.created_at).where(Message.id == before).scalar_subquery()
             stmt = stmt.where(Message.created_at < subq)
         stmt = stmt.order_by(Message.created_at.asc(), Message.id.asc())
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
+
 
 class TokenUsageService:
     """Records and aggregates token usage for chat conversations."""
@@ -246,7 +267,12 @@ class TokenUsageService:
             for r in rows:
                 day_key = r.recorded_at.strftime("%Y-%m-%d")
                 if day_key not in grouped:
-                    grouped[day_key] = {"day": day_key, "total_tokens_in": 0, "total_tokens_out": 0, "request_count": 0}
+                    grouped[day_key] = {
+                        "day": day_key,
+                        "total_tokens_in": 0,
+                        "total_tokens_out": 0,
+                        "request_count": 0,
+                    }
                 grouped[day_key]["total_tokens_in"] += r.tokens_in
                 grouped[day_key]["total_tokens_out"] += r.tokens_out
                 grouped[day_key]["request_count"] += 1
@@ -263,9 +289,7 @@ class TokenUsageService:
         tokens_in: int,
         tokens_out: int,
     ) -> None:
-        asyncio.create_task(
-            self._record(user_id, model_id, conversation_id, tokens_in, tokens_out)
-        )
+        asyncio.create_task(self._record(user_id, model_id, conversation_id, tokens_in, tokens_out))
 
     async def _record(
         self,
@@ -276,6 +300,7 @@ class TokenUsageService:
         tokens_out: int,
     ) -> None:
         from app.database import async_session
+
         async with async_session() as db:
             await self.record(db, user_id, model_id, conversation_id, tokens_in, tokens_out)
 
@@ -332,7 +357,9 @@ class ChatOrchestrator:
             if config and config.provider:
                 provider = config.provider
                 instance = await registry.create(
-                    provider.provider_type, provider.id, provider.config,
+                    provider.provider_type,
+                    provider.id,
+                    provider.config,
                 )
                 if isinstance(instance, LLMProvider):
                     return instance
@@ -376,9 +403,12 @@ class ChatOrchestrator:
                     or model_config.capabilities.get("accepts_image") is True
                 )
             )
-            if model_config else False
+            if model_config
+            else False
         )
-        history = await self._load_history(user_id, conversation_id, supports_vision=supports_vision)
+        history = await self._load_history(
+            user_id, conversation_id, supports_vision=supports_vision
+        )
         tools = await self._compose_tools(model_id)
         tokens_in = 0
         tokens_out = 0
@@ -408,7 +438,7 @@ class ChatOrchestrator:
             async for chunk in llm.chat_stream(history, model=actual_model, tools=tools):
                 if chunk.type == "text" and chunk.content:
                     text_parts.append(chunk.content)
-                    yield (SSEEventType.TOKEN.value, {"content": chunk.content})
+                    yield (SSEEventType.TOKEN.value, {"content": _strip_thinking(chunk.content)})
                 elif chunk.type == "tool_call" and chunk.tool_calls:
                     tool_calls.extend(chunk.tool_calls)
                 elif chunk.type == "usage":
@@ -487,7 +517,9 @@ class ChatOrchestrator:
                         break
 
                 if should_pause:
-                    await self._record_usage(user_id, model_id, conversation_id, tokens_in, tokens_out)
+                    await self._record_usage(
+                        user_id, model_id, conversation_id, tokens_in, tokens_out
+                    )
                     yield self._usage_event(tokens_in, tokens_out)
                     yield self._done_event()
                     return
@@ -523,7 +555,12 @@ class ChatOrchestrator:
         supports_vision: bool = False,
     ) -> list[dict[str, Any]]:
         messages = await self.conversations.list_messages(user_id, conversation_id)
-        history = await asyncio.gather(*[self._message_to_llm(message, supports_vision=supports_vision) for message in messages])
+        history = await asyncio.gather(
+            *[
+                self._message_to_llm(message, supports_vision=supports_vision)
+                for message in messages
+            ]
+        )
         return self._trim_messages(history)
 
     async def _compose_tools(self, model_id: str | None = None) -> list[dict[str, Any]]:
@@ -548,7 +585,12 @@ class ChatOrchestrator:
         # so we also check the resolved provider type via _resolve_llm.
         if model_id is not None and len(tools) > 10:
             is_poe = model_id.startswith("poe:")
-            if not is_poe and model_id and not model_id.startswith("atlascloud:") and not model_id.startswith("ollama:"):
+            if (
+                not is_poe
+                and model_id
+                and not model_id.startswith("atlascloud:")
+                and not model_id.startswith("ollama:")
+            ):
                 # Bare model_id — check if it resolves to a Poe provider
                 try:
                     from sqlalchemy.orm import selectinload
@@ -561,7 +603,11 @@ class ChatOrchestrator:
                         .where(ModelConfig.model_id == model_id, ModelConfig.is_active.is_(True))
                     )
                     config = result.scalar_one_or_none()
-                    is_poe = config is not None and config.provider is not None and "poe" in config.provider.provider_type
+                    is_poe = (
+                        config is not None
+                        and config.provider is not None
+                        and "poe" in config.provider.provider_type
+                    )
                 except Exception:
                     pass
             if is_poe:
@@ -605,7 +651,9 @@ class ChatOrchestrator:
         tokens_out: int,
     ) -> None:
         if tokens_in or tokens_out:
-            await self.token_usage.record(self.db, user_id, model_id, conversation_id, tokens_in, tokens_out)
+            await self.token_usage.record(
+                self.db, user_id, model_id, conversation_id, tokens_in, tokens_out
+            )
 
     def _trim_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         trimmed = list(messages)
@@ -613,7 +661,9 @@ class ChatOrchestrator:
             trimmed.pop(0)
         return [{"role": "system", "content": SYSTEM_PROMPT}, *trimmed]
 
-    async def _message_to_llm(self, message: Message, supports_vision: bool = False) -> dict[str, Any]:
+    async def _message_to_llm(
+        self, message: Message, supports_vision: bool = False
+    ) -> dict[str, Any]:
         data: dict[str, Any] = {"role": message.role, "content": message.content}
         if message.tool_calls:
             tool_calls = message.tool_calls.get("tool_calls", message.tool_calls)
@@ -623,15 +673,19 @@ class ChatOrchestrator:
                     api_tool_calls.append(tc)
                 else:
                     arguments = tc.get("arguments", {})
-                    arguments_str = arguments if isinstance(arguments, str) else json.dumps(arguments)
-                    api_tool_calls.append({
-                        "id": tc.get("id", ""),
-                        "type": "function",
-                        "function": {
-                            "name": tc.get("name", ""),
-                            "arguments": arguments_str,
-                        },
-                    })
+                    arguments_str = (
+                        arguments if isinstance(arguments, str) else json.dumps(arguments)
+                    )
+                    api_tool_calls.append(
+                        {
+                            "id": tc.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name", ""),
+                                "arguments": arguments_str,
+                            },
+                        }
+                    )
             data["tool_calls"] = api_tool_calls
         if message.tool_call_id:
             data["tool_call_id"] = message.tool_call_id
@@ -644,23 +698,36 @@ class ChatOrchestrator:
                 if kind == "image" and supports_vision:
                     resolved_url = await self._resolve_image_url(url, attachment.get("mime_type"))
                     if resolved_url:
-                        content_parts.append({"type": "image_url", "image_url": {"url": resolved_url}})
-                        content_parts.append({"type": "text", "text": f"[Image attachment URL: {url}]"})
+                        content_parts.append(
+                            {"type": "image_url", "image_url": {"url": resolved_url}}
+                        )
+                        content_parts.append(
+                            {"type": "text", "text": f"[Image attachment URL: {url}]"}
+                        )
                     else:
                         content_parts.append(
                             {"type": "text", "text": "[Image attachment: too large to process]"}
                         )
                 elif kind == "image" and not supports_vision:
                     content_parts.append(
-                        {"type": "text", "text": "[Image attachment: model does not support vision]"}
+                        {
+                            "type": "text",
+                            "text": "[Image attachment: model does not support vision]",
+                        }
                     )
                 elif kind == "script":
                     text_snippet = url[:200] if url else "[Script content not processed in v1]"
-                    content_parts.append({"type": "text", "text": f"[Script attachment: {text_snippet}]"})
+                    content_parts.append(
+                        {"type": "text", "text": f"[Script attachment: {text_snippet}]"}
+                    )
                 elif kind == "audio":
-                    content_parts.append({"type": "text", "text": "[Audio attachment: not processed in v1]"})
+                    content_parts.append(
+                        {"type": "text", "text": "[Audio attachment: not processed in v1]"}
+                    )
                 else:
-                    content_parts.append({"type": "text", "text": f"[Unsupported attachment: {kind}]"})
+                    content_parts.append(
+                        {"type": "text", "text": f"[Unsupported attachment: {kind}]"}
+                    )
             data["content"] = content_parts
 
         return data
@@ -712,7 +779,9 @@ class ChatOrchestrator:
                             inferred = "image/jpeg"
                         logger.info(
                             "Recompressed image: dim=%s, size=%d bytes, fmt=%s",
-                            img.size, len(data), inferred,
+                            img.size,
+                            len(data),
+                            inferred,
                         )
             except Exception as e:
                 logger.warning("Image recompress failed, sending original: %s", e)
@@ -800,8 +869,8 @@ class ChatOrchestrator:
             title = first_message.strip()[:60]
             title = title.strip().strip('"').strip("'")
             # If still looks like garbage, take the last non-empty line
-            if len(title) > 60 or title.lower().startswith(('thinking', 'here', 'i ', 'the user')):
-                lines = [line.strip() for line in title.split('\n') if line.strip()]
+            if len(title) > 60 or title.lower().startswith(("thinking", "here", "i ", "the user")):
+                lines = [line.strip() for line in title.split("\n") if line.strip()]
                 title = lines[-1] if lines else title
             title = title[:60]
             if title:

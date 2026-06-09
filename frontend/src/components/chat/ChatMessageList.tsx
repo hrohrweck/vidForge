@@ -31,7 +31,7 @@ function TypingIndicator() {
  *   - Qwen: 【thinking】...【/thinking】
  *   - GLM / Poe inline: "Thinking...\n[analysis]\nGenerate Response...\n[answer]"
  */
-function parseThinking(content: string): { thinking: string; answer: string } {
+export function parseThinking(content: string): { thinking: string; answer: string } {
   // <think>...</think> (DeepSeek / Ollama format)
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
   if (thinkMatch) {
@@ -88,6 +88,17 @@ function parseThinking(content: string): { thinking: string; answer: string } {
       }
     }
     if (splitIdx > 0 && splitIdx < lines.length) {
+      // If the split line is a known answer marker, include it in thinking
+      const splitLine = lines[splitIdx].trim()
+      const answerMarkerPatterns = [
+        /^Generate\s+(?:Final\s+)?Response/i,
+        /^Final\s+Answer/i,
+        /^Actual\s+Answer/i,
+        /^Answer:/i,
+      ]
+      if (answerMarkerPatterns.some(re => re.test(splitLine))) {
+        splitIdx++
+      }
       const thinking = lines.slice(0, splitIdx).join('\n').trim()
       const answer = lines.slice(splitIdx).join('\n').trim()
       if (thinking.length > 10 && answer.length > 0) {
@@ -107,6 +118,7 @@ function parseThinking(content: string): { thinking: string; answer: string } {
     "Generate Response.",
     "\nFinal Answer",
     "\nActual Answer",
+    "\nAnswer:",
   ]
   for (const marker of inlineMarkers) {
     const idx = content.indexOf(marker)
@@ -235,9 +247,83 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
               }`}
             >
               {isUser ? (
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                <>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {msg.attachments.map((att, i) => {
+                        const isImage = (att.type ?? att.mime_type ?? '').startsWith('image') || att.kind === 'image'
+                        const isVideo = (att.type ?? att.mime_type ?? '').startsWith('video') || att.kind === 'video'
+                        const isAudio = (att.type ?? att.mime_type ?? '').startsWith('audio') || att.kind === 'audio'
+                        return isImage ? (
+                          <img
+                            key={i}
+                            src={att.url}
+                            alt={att.name || 'attachment'}
+                            className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer"
+                            onClick={() => window.open(att.url, '_blank')}
+                          />
+                        ) : isVideo ? (
+                          <video
+                            key={i}
+                            src={att.url}
+                            controls
+                            className="max-w-[200px] max-h-[200px] rounded-lg"
+                          />
+                        ) : isAudio ? (
+                          <audio
+                            key={i}
+                            src={att.url}
+                            controls
+                            className="w-full"
+                          />
+                        ) : (
+                          <a
+                            key={i}
+                            href={att.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            download
+                            className="text-sm underline"
+                          >
+                            {att.name || (att.type ?? att.kind ?? att.mime_type) || 'Attachment'}
+                          </a>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                </>
               ) : (
-                <AssistantMessage content={msg.content} streaming={streaming} />
+                <>
+                  <AssistantMessage content={msg.content} streaming={streaming} />
+                  {msg.mediaResult && (
+                    <div className="mt-2">
+                      {msg.mediaResult.kind === 'image' ? (
+                        <img
+                          src={msg.mediaResult.url}
+                          alt="Generated"
+                          className="max-w-[300px] max-h-[300px] rounded-lg object-cover cursor-pointer"
+                          onClick={() => window.open(msg.mediaResult?.url, '_blank')}
+                        />
+                      ) : msg.mediaResult.kind === 'video' ? (
+                        <video
+                          src={msg.mediaResult.url}
+                          controls
+                          className="max-w-[300px] max-h-[300px] rounded-lg"
+                        />
+                      ) : (
+                        <a
+                          href={msg.mediaResult.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline text-sm"
+                        >
+                          View media
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
