@@ -176,3 +176,124 @@ class TestListMessages:
         with pytest.raises(HTTPException) as exc:
             await svc.list_messages(regular_user.id, conv.id)
         assert exc.value.status_code == 404
+
+
+class TestCreateModelFallback:
+    """Test the model_id fallback chain in create()."""
+
+    async def test_create_with_explicit_model_id(self, svc, regular_user):
+        """When model_id is provided, use it directly."""
+        conv = await svc.create(regular_user.id, "Test", "custom-model")
+        assert conv.model_id == "custom-model"
+
+    async def test_create_with_user_default_chat_model(self, svc, regular_user, db_session):
+        """When no model_id provided, use user's default_chat_model from preferences."""
+        from app.database import UserSettings
+        
+        # Set user's default chat model
+        settings = UserSettings(
+            user_id=regular_user.id,
+            preferences={"default_chat_model": "user-default-model"}
+        )
+        db_session.add(settings)
+        await db_session.commit()
+        
+        conv = await svc.create(regular_user.id, "Test")
+        assert conv.model_id == "user-default-model"
+
+    async def test_create_fallback_to_first_chat_model(self, svc, regular_user, db_session):
+        """When no user default, use first chat-enabled model."""
+        from app.database import ModelConfig, Provider
+        from uuid import uuid4
+        
+        # Create a provider
+        provider = Provider(
+            id=uuid4(),
+            name="test-provider",
+            provider_type="ollama",
+            config={}
+        )
+        db_session.add(provider)
+        await db_session.commit()
+        
+        # Create chat-enabled models
+        model1 = ModelConfig(
+            provider_id=provider.id,
+            model_id="chat-model-1",
+            provider_model_id="chat-model-1",
+            display_name="Chat Model 1",
+            modality="text",
+            endpoint_type="chat",
+            is_active=True,
+            is_chat_enabled=True
+        )
+        model2 = ModelConfig(
+            provider_id=provider.id,
+            model_id="chat-model-2",
+            provider_model_id="chat-model-2",
+            display_name="Chat Model 2",
+            modality="text",
+            endpoint_type="chat",
+            is_active=True,
+            is_chat_enabled=True
+        )
+        db_session.add_all([model1, model2])
+        await db_session.commit()
+        
+        conv = await svc.create(regular_user.id, "Test")
+        # Should use one of the chat-enabled models (order may vary)
+        assert conv.model_id in ["chat-model-1", "chat-model-2"]
+
+    async def test_create_fallback_to_default_string(self, svc, regular_user, db_session):
+        """When no chat-enabled models exist, fallback to 'default'."""
+        # Ensure no chat-enabled models exist (clean state)
+        from app.database import ModelConfig
+        from sqlalchemy import delete
+        await db_session.execute(delete(ModelConfig))
+        await db_session.commit()
+        
+        conv = await svc.create(regular_user.id, "Test")
+        assert conv.model_id == "default"
+
+    async def test_create_ignores_non_chat_models(self, svc, regular_user, db_session):
+        """Should skip models where is_chat_enabled=False."""
+        from app.database import ModelConfig, Provider
+        from uuid import uuid4
+        
+        # Create a provider
+        provider = Provider(
+            id=uuid4(),
+            name="test-provider",
+            provider_type="ollama",
+            config={}
+        )
+        db_session.add(provider)
+        await db_session.commit()
+        
+        # Create a non-chat model
+        non_chat_model = ModelConfig(
+            provider_id=provider.id,
+            model_id="non-chat-model",
+            provider_model_id="non-chat-model",
+            display_name="Non-Chat Model",
+            modality="text",
+            endpoint_type="completion",
+            is_active=True,
+            is_chat_enabled=False
+        )
+        # Create a chat model
+        chat_model = ModelConfig(
+            provider_id=provider.id,
+            model_id="chat-model",
+            provider_model_id="chat-model",
+            display_name="Chat Model",
+            modality="text",
+            endpoint_type="chat",
+            is_active=True,
+            is_chat_enabled=True
+        )
+        db_session.add_all([non_chat_model, chat_model])
+        await db_session.commit()
+        
+        conv = await svc.create(regular_user.id, "Test")
+        assert conv.model_id == "chat-model"
