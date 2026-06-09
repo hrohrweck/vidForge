@@ -14,7 +14,7 @@ import {
   Box,
   Tag,
   ImageOff,
-
+  Check,
 } from 'lucide-react'
 import {
   avatarsApi,
@@ -25,7 +25,7 @@ import {
   type Avatar as AvatarType,
   type AvatarImage,
 } from '../api/avatars'
-import { objectsApi, type ObjectRef } from '../api/objects'
+import { objectsApi, type ObjectRef, type CreateObjectRefRequest } from '../api/objects'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
@@ -50,6 +50,7 @@ import {
 import { AssetPickerModal } from '../components/media/AssetPickerModal'
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
 import type { MediaAsset } from '../api/types/media'
+import { toast } from '../hooks/use-toast'
 
 // ─── Display label helpers ───────────────────────────────────────────
 
@@ -95,6 +96,12 @@ const LORA_STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'outline' |
   failed: 'destructive',
 }
 
+// ─── Streaming URL helper ────────────────────────────────────────────
+
+function getImageUrl(image: { thumbnailUrl?: string; storagePath: string }): string {
+  return image.thumbnailUrl || `/api/uploads/stream/${image.storagePath}`
+}
+
 // ─── Selected file tracking ──────────────────────────────────────────
 
 interface SelectedFile {
@@ -129,9 +136,9 @@ function AvatarCard({
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-muted relative overflow-hidden">
-        {primaryImage?.thumbnailUrl ? (
+        {primaryImage?.storagePath ? (
           <img
-            src={primaryImage.thumbnailUrl}
+            src={getImageUrl(primaryImage)}
             alt={avatar.name}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
           />
@@ -196,8 +203,8 @@ function ObjectCard({
   object: ObjectRef
   onDelete: () => void
 }) {
-  const primaryImage = object.images?.find((img) => img.is_primary)
-  const hasImage = primaryImage?.storage_path != null
+  const primaryImage = object.images?.find((img) => img.isPrimary)
+  const hasImage = primaryImage?.storagePath != null
 
   return (
     <Card className="group overflow-hidden transition-shadow hover:shadow-md">
@@ -205,7 +212,7 @@ function ObjectCard({
       <div className="aspect-square bg-muted relative overflow-hidden">
         {hasImage ? (
           <img
-            src={`/api/uploads/stream/${primaryImage!.storage_path}`}
+            src={getImageUrl(primaryImage!)}
             alt={object.name}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
           />
@@ -254,9 +261,9 @@ function ObjectCard({
         )}
 
         {/* Job count */}
-        {object.job_count > 0 && (
+        {object.jobCount > 0 && (
           <p className="text-xs text-muted-foreground">
-            Used in {object.job_count} job{object.job_count !== 1 ? 's' : ''}
+            Used in {object.jobCount} job{object.jobCount !== 1 ? 's' : ''}
           </p>
         )}
 
@@ -301,6 +308,8 @@ function EditAvatarModal({
   const [editBio, setEditBio] = useState(avatar.bio || '')
   const [editStrategy, setEditStrategy] = useState<ConsistencyStrategy>(avatar.consistencyStrategy)
   const [newFiles, setNewFiles] = useState<SelectedFile[]>([])
+  const [posesQueued, setPosesQueued] = useState(false)
+  const posesQueuedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Mutations ───────────────────────────────────────────────────
   const updateMutation = useMutation({
@@ -352,6 +361,15 @@ function EditAvatarModal({
     mutationFn: () => avatarsApi.generatePoses(avatar.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['avatars'] })
+      toast('Reference poses queued for generation', 'success')
+      // Show "Queued!" on button for 3 seconds
+      if (posesQueuedTimer.current) clearTimeout(posesQueuedTimer.current)
+      setPosesQueued(true)
+      posesQueuedTimer.current = setTimeout(() => setPosesQueued(false), 3000)
+    },
+    onError: (error: unknown) => {
+      const msg = error instanceof Error ? error.message : 'Failed to generate reference poses.'
+      toast(msg, 'error')
     },
   })
 
@@ -617,10 +635,12 @@ function EditAvatarModal({
                 >
                   {generatePosesMutation.isPending ? (
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : posesQueued ? (
+                    <Check className="h-4 w-4 mr-2 text-green-600" />
                   ) : (
                     <Wand2 className="h-4 w-4 mr-2" />
                   )}
-                  Generate Reference Poses
+                  {posesQueued ? 'Queued!' : 'Generate Reference Poses'}
                 </Button>
               )}
 
@@ -736,9 +756,9 @@ function ImageThumbnail({
 }) {
   return (
     <div className="relative aspect-square rounded-md overflow-hidden bg-muted group">
-      {image.thumbnailUrl ? (
+      {image.storagePath ? (
         <img
-          src={image.thumbnailUrl}
+          src={getImageUrl(image)}
           alt="Reference"
           className="h-full w-full object-cover"
         />
@@ -806,6 +826,15 @@ export default function Avatars() {
   // ── Object state ───────────────────────────────────────────────
   const [selectedObject, setSelectedObject] = useState<ObjectRef | null>(null)
   const [showObjectDeleteConfirm, setShowObjectDeleteConfirm] = useState(false)
+
+  // ── Object create state ──────────────────────────────────────────
+  const [showCreateObject, setShowCreateObject] = useState(false)
+  const [objectName, setObjectName] = useState('')
+  const [objectDescription, setObjectDescription] = useState('')
+  const [objectCategory, setObjectCategory] = useState('')
+  const [objectFiles, setObjectFiles] = useState<SelectedFile[]>([])
+  const objectFileInputRef = useRef<HTMLInputElement>(null)
+  const [showObjectAssetPicker, setShowObjectAssetPicker] = useState(false)
 
   // ── Create form state ───────────────────────────────────────────
   const [name, setName] = useState('')
@@ -886,6 +915,35 @@ export default function Avatars() {
     },
   })
 
+  // ── Object create mutation ──────────────────────────────────────
+  const createObjectMutation = useMutation({
+    mutationFn: async () => {
+      const payload: CreateObjectRefRequest = {
+        name: objectName.trim(),
+        description: objectDescription.trim() || undefined,
+        category: objectCategory.trim() || undefined,
+      }
+      const obj = await objectsApi.create(payload)
+      for (const sf of objectFiles) {
+        if (sf.file) {
+          await objectsApi.uploadImage(obj.id, sf.file)
+        } else if (sf.asset) {
+          const blob = await fetch(sf.asset.preview_path || sf.asset.file_path).then((r) =>
+            r.blob(),
+          )
+          const fetchedFile = new File([blob], sf.asset.name, { type: blob.type })
+          await objectsApi.uploadImage(obj.id, fetchedFile)
+        }
+      }
+      return obj
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['objects'] })
+      resetObjectCreateForm()
+      setShowCreateObject(false)
+    },
+  })
+
   // ── Create form helpers ─────────────────────────────────────────
   const resetCreateForm = () => {
     setName('')
@@ -902,6 +960,76 @@ export default function Avatars() {
       resetCreateForm()
       setShowCreate(false)
     }
+  }
+
+  // ── Object create form helpers ──────────────────────────────────
+  const resetObjectCreateForm = () => {
+    setObjectName('')
+    setObjectDescription('')
+    setObjectCategory('')
+    objectFiles.forEach((sf) => URL.revokeObjectURL(sf.previewUrl))
+    setObjectFiles([])
+    createObjectMutation.reset()
+  }
+
+  const handleObjectCreateDialogClose = () => {
+    if (!createObjectMutation.isPending) {
+      resetObjectCreateForm()
+      setShowCreateObject(false)
+    }
+  }
+
+  const addObjectFiles = useCallback((files: FileList | File[]) => {
+    const newFilesArr: SelectedFile[] = Array.from(files)
+      .filter((f) => f.type.startsWith('image/'))
+      .map((file) => ({
+        file,
+        previewUrl: URL.createObjectURL(file),
+      }))
+    setObjectFiles((prev) => [...prev, ...newFilesArr])
+  }, [])
+
+  const handleObjectDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      addObjectFiles(e.dataTransfer.files)
+    },
+    [addObjectFiles],
+  )
+
+  const handleObjectFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files?.length) {
+        addObjectFiles(e.target.files)
+      }
+      e.target.value = ''
+    },
+    [addObjectFiles],
+  )
+
+  const handleObjectAssetSelect = useCallback((asset: MediaAsset) => {
+    const previewUrl = asset.preview_path || asset.file_path
+    setObjectFiles((prev) => [...prev, { asset, previewUrl }])
+    setShowObjectAssetPicker(false)
+  }, [])
+
+  const removeObjectFile = useCallback((index: number) => {
+    setObjectFiles((prev) => {
+      const file = prev[index]
+      if (file && file.file) {
+        URL.revokeObjectURL(file.previewUrl)
+      }
+      return prev.filter((_, i) => i !== index)
+    })
+  }, [])
+
+  const canSubmitObject =
+    objectName.trim().length > 0 && objectName.trim().length <= 255 && !createObjectMutation.isPending
+
+  const handleObjectSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmitObject) return
+    createObjectMutation.mutate()
   }
 
   // ── Edit handlers ───────────────────────────────────────────────
@@ -979,37 +1107,37 @@ export default function Avatars() {
 
   // ── Render ─────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      {/* Tab Navigation */}
-      <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
-        <button
-          onClick={() => setActiveTab('avatars')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'avatars'
-              ? 'bg-background shadow-sm text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <User className="h-4 w-4 inline mr-1.5" />
-          Avatars
-        </button>
-        <button
-          onClick={() => setActiveTab('objects')}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            activeTab === 'objects'
-              ? 'bg-background shadow-sm text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Box className="h-4 w-4 inline mr-1.5" />
-          Objects
-        </button>
-      </div>
+    <div className="h-full flex flex-col gap-2.5 p-2.5">
+      {/* ── Sticky header: tabs + page title ─────────────────────── */}
+      <div className="shrink-0 flex flex-col gap-2.5">
+        {/* Tab Navigation */}
+        <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setActiveTab('avatars')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'avatars'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <User className="h-4 w-4 inline mr-1.5" />
+            Avatars
+          </button>
+          <button
+            onClick={() => setActiveTab('objects')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'objects'
+                ? 'bg-background shadow-sm text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Box className="h-4 w-4 inline mr-1.5" />
+            Objects
+          </button>
+        </div>
 
-      {/* ── Avatars Tab ─────────────────────────────────────────── */}
-      {activeTab === 'avatars' && (
-        <>
-          {/* Header */}
+        {/* Avatars Header */}
+        {activeTab === 'avatars' && (
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold">Avatars</h1>
@@ -1022,49 +1150,10 @@ export default function Avatars() {
               Create Avatar
             </Button>
           </div>
+        )}
 
-          {/* Loading */}
-          {isLoading && (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          )}
-
-          {/* Empty state */}
-          {!isLoading && avatars.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <User className="h-16 w-16 text-muted-foreground/40 mb-4" />
-              <h2 className="text-xl font-semibold mb-2">No avatars yet</h2>
-              <p className="text-muted-foreground max-w-sm mb-6">
-                Create your first avatar to add consistent characters to your
-                videos.
-              </p>
-              <Button onClick={() => setShowCreate(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Avatar
-              </Button>
-            </div>
-          )}
-
-          {/* Avatar grid */}
-          {!isLoading && avatars.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {avatars.map((avatar) => (
-                <AvatarCard
-                  key={avatar.id}
-                  avatar={avatar}
-                  onClick={handleCardClick}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── Objects Tab ─────────────────────────────────────────── */}
-      {activeTab === 'objects' && (
-        <>
-          {/* Header */}
+        {/* Objects Header */}
+        {activeTab === 'objects' && (
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold">Objects</h1>
@@ -1072,44 +1161,97 @@ export default function Avatars() {
                 Objects auto-detected from your scenes
               </p>
             </div>
+            <Button onClick={() => setShowCreateObject(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Object
+            </Button>
           </div>
+        )}
+      </div>
 
-          {/* Loading */}
-          {objectsLoading && (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          )}
+      {/* ── Scrollable content area ──────────────────────────────── */}
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2.5">
+        {/* ── Avatars Tab ───────────────────────────────────────── */}
+        {activeTab === 'avatars' && (
+          <>
+            {/* Loading */}
+            {isLoading && (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            )}
 
-          {/* Empty state */}
-          {!objectsLoading && objects.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <Box className="h-16 w-16 text-muted-foreground/40 mb-4" />
-              <h2 className="text-xl font-semibold mb-2">No objects yet</h2>
-              <p className="text-muted-foreground max-w-sm mb-6">
-                Objects are automatically detected when you create scenes.
-                They will appear here once detected.
-              </p>
-            </div>
-          )}
+            {/* Empty state */}
+            {!isLoading && avatars.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <User className="h-16 w-16 text-muted-foreground/40 mb-4" />
+                <h2 className="text-xl font-semibold mb-2">No avatars yet</h2>
+                <p className="text-muted-foreground max-w-sm mb-6">
+                  Create your first avatar to add consistent characters to your
+                  videos.
+                </p>
+                <Button onClick={() => setShowCreate(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create Avatar
+                </Button>
+              </div>
+            )}
 
-          {/* Object grid */}
-          {!objectsLoading && objects.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {objects.map((obj) => (
-                <ObjectCard
-                  key={obj.id}
-                  object={obj}
-                  onDelete={() => {
-                    setSelectedObject(obj)
-                    setShowObjectDeleteConfirm(true)
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )}
+            {/* Avatar grid */}
+            {!isLoading && avatars.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {avatars.map((avatar) => (
+                  <AvatarCard
+                    key={avatar.id}
+                    avatar={avatar}
+                    onClick={handleCardClick}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Objects Tab ───────────────────────────────────────── */}
+        {activeTab === 'objects' && (
+          <>
+            {/* Loading */}
+            {objectsLoading && (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!objectsLoading && objects.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <Box className="h-16 w-16 text-muted-foreground/40 mb-4" />
+                <h2 className="text-xl font-semibold mb-2">No objects yet</h2>
+                <p className="text-muted-foreground max-w-sm mb-6">
+                  Objects are automatically detected when you create scenes.
+                  They will appear here once detected.
+                </p>
+              </div>
+            )}
+
+            {/* Object grid */}
+            {!objectsLoading && objects.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                {objects.map((obj) => (
+                  <ObjectCard
+                    key={obj.id}
+                    object={obj}
+                    onDelete={() => {
+                      setSelectedObject(obj)
+                      setShowObjectDeleteConfirm(true)
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* ── Create Modal ──────────────────────────────────────────── */}
       <Dialog
@@ -1294,6 +1436,162 @@ export default function Avatars() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Create Object Modal ───────────────────────────────────── */}
+      <Dialog
+        open={showCreateObject}
+        onOpenChange={(open) => {
+          if (!open) handleObjectCreateDialogClose()
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Object</DialogTitle>
+          </DialogHeader>
+
+          <form onSubmit={handleObjectSubmit} className="space-y-4">
+            {/* Name */}
+            <div className="space-y-2">
+              <Label htmlFor="object-name">Name *</Label>
+              <Input
+                id="object-name"
+                value={objectName}
+                onChange={(e) => setObjectName(e.target.value)}
+                placeholder="Enter object name"
+                maxLength={255}
+                required
+              />
+              <p className="text-xs text-muted-foreground">{objectName.length}/255</p>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-2">
+              <Label htmlFor="object-description">Description</Label>
+              <Textarea
+                id="object-description"
+                value={objectDescription}
+                onChange={(e) => setObjectDescription(e.target.value)}
+                placeholder="Describe the object's appearance or purpose..."
+                maxLength={2000}
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground">
+                {objectDescription.length}/2000 (optional)
+              </p>
+            </div>
+
+            {/* Category */}
+            <div className="space-y-2">
+              <Label htmlFor="object-category">Category</Label>
+              <Input
+                id="object-category"
+                value={objectCategory}
+                onChange={(e) => setObjectCategory(e.target.value)}
+                placeholder="e.g., vehicle, weapon, furniture"
+                maxLength={100}
+              />
+              <p className="text-xs text-muted-foreground">(optional)</p>
+            </div>
+
+            {/* Image upload area */}
+            <div className="space-y-2">
+              <Label>Reference Images</Label>
+              <p className="text-xs text-muted-foreground">
+                Upload images of the object to improve recognition.
+              </p>
+
+              {/* Drop zone */}
+              <div
+                onDrop={handleObjectDrop}
+                onDragOver={(e) => e.preventDefault()}
+                className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/25 p-6 text-center transition-colors hover:border-muted-foreground/50 cursor-pointer"
+                onClick={() => objectFileInputRef.current?.click()}
+              >
+                <Upload className="h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  Drag & drop images here, or click to browse
+                </p>
+                <input
+                  ref={objectFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleObjectFileInputChange}
+                />
+              </div>
+
+              {/* From Media Library button */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setShowObjectAssetPicker(true)}
+              >
+                <FolderOpen className="h-4 w-4 mr-2" />
+                From Media Library
+              </Button>
+
+              {/* Previews */}
+              {objectFiles.length > 0 && (
+                <div className="grid grid-cols-4 gap-2 mt-2">
+                  {objectFiles.map((sf, i) => (
+                    <div
+                      key={i}
+                      className="relative aspect-square rounded-md overflow-hidden bg-muted group"
+                    >
+                      <img
+                        src={sf.previewUrl}
+                        alt={`Reference ${i + 1}`}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeObjectFile(i)}
+                        className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <span className="text-white text-xs font-medium">
+                          Remove
+                        </span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Error display */}
+            {createObjectMutation.isError && (
+              <p className="text-sm text-destructive">
+                {(createObjectMutation.error as Error)?.message ||
+                  'Failed to create object. Please try again.'}
+              </p>
+            )}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleObjectCreateDialogClose}
+                disabled={createObjectMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!canSubmitObject}>
+                {createObjectMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  'Create Object'
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Edit Modal ────────────────────────────────────────────── */}
       {selectedAvatar && (
         <EditAvatarModal
@@ -1337,6 +1635,13 @@ export default function Avatars() {
         isOpen={showAssetPicker}
         onClose={() => setShowAssetPicker(false)}
         onSelect={handleAssetSelect}
+      />
+
+      {/* Object asset picker modal */}
+      <AssetPickerModal
+        isOpen={showObjectAssetPicker}
+        onClose={() => setShowObjectAssetPicker(false)}
+        onSelect={handleObjectAssetSelect}
       />
     </div>
   )
