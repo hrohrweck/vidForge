@@ -1,19 +1,27 @@
 import logging
+import uuid as uuid_mod
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from PIL import Image as PILImage
 from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
-from app.database import ObjectRef, User, get_db
+from app.config import get_settings
+from app.database import ObjectRef, ObjectRefImage, User, get_db
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +30,7 @@ router = APIRouter()
 
 
 class ObjectRefImageResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
 
     id: UUID
     storage_path: str
@@ -33,7 +41,7 @@ class ObjectRefImageResponse(BaseModel):
 
 
 class ObjectRefResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
 
     id: UUID
     user_id: UUID
@@ -50,6 +58,26 @@ class ObjectRefResponse(BaseModel):
 class ObjectRefListResponse(BaseModel):
     objects: list[ObjectRefResponse]
     total: int
+
+
+class ObjectRefCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    name: str
+    description: str | None = None
+    category: str | None = None
+    visual_properties: dict | None = None
+
+
+class ObjectRefImageUploadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    id: UUID
+    storage_path: str
+    is_primary: bool
+    sort_order: int
+    width: int | None = None
+    height: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +111,7 @@ def _object_ref_to_response(obj: ObjectRef) -> ObjectRefResponse:
     )
 
 
-async def _get_object_ref_or_404(
-    object_ref_id: UUID, user_id: UUID, db: AsyncSession
-) -> ObjectRef:
+async def _get_object_ref_or_404(object_ref_id: UUID, user_id: UUID, db: AsyncSession) -> ObjectRef:
     """Fetch an object ref by id + owner, raising 404 if not found."""
     result = await db.execute(
         select(ObjectRef)
@@ -100,6 +126,32 @@ async def _get_object_ref_or_404(
     if not obj:
         raise HTTPException(status_code=404, detail="Object not found")
     return obj
+
+
+def _get_image_dimensions(content: bytes) -> tuple[int, int]:
+    from io import BytesIO
+
+    with PILImage.open(BytesIO(content)) as img:
+        return img.size
+
+
+async def _save_image_file(object_ref_id: UUID, content: bytes, extension: str) -> str:
+    settings = get_settings()
+    base_dir = Path(settings.storage_path) / "objects" / str(object_ref_id)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid_mod.uuid4().hex}.{extension}"
+    file_path = base_dir / filename
+    file_path.write_bytes(content)
+    return f"objects/{object_ref_id}/{filename}"
+
+
+async def _get_max_sort_order(db: AsyncSession, object_ref_id: UUID) -> int:
+    result = await db.execute(
+        select(func.coalesce(func.max(ObjectRefImage.sort_order), 0)).where(
+            ObjectRefImage.object_ref_id == object_ref_id
+        )
+    )
+    return result.scalar() or 0
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +196,25 @@ async def list_objects(
     )
 
 
+@router.post("", response_model=ObjectRefResponse, status_code=status.HTTP_201_CREATED)
+async def create_object_ref(
+    data: ObjectRefCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ObjectRefResponse:
+    obj = ObjectRef(
+        user_id=current_user.id,
+        name=data.name,
+        description=data.description,
+        category=data.category,
+        visual_properties=data.visual_properties,
+    )
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj, attribute_names=["images", "job_assignments"])
+    return _object_ref_to_response(obj)
+
+
 @router.get("/{object_ref_id}", response_model=ObjectRefResponse)
 async def get_object_ref(
     object_ref_id: UUID,
@@ -155,6 +226,71 @@ async def get_object_ref(
     return _object_ref_to_response(obj)
 
 
+@router.post(
+    "/{object_ref_id}/images",
+    response_model=ObjectRefImageUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_object_ref_image(
+    object_ref_id: UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ObjectRefImageUploadResponse:
+    obj = await _get_object_ref_or_404(object_ref_id, current_user.id, db)
+
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported file type: {content_type}. Allowed: {', '.join(ALLOWED_CONTENT_TYPES)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=422,
+            detail=f"File too large: {len(content)} bytes. Maximum: {MAX_IMAGE_SIZE} bytes",
+        )
+
+    try:
+        width, height = _get_image_dimensions(content)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not read image dimensions: {exc}",
+        )
+
+    ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+    extension = ext_map.get(content_type, "bin")
+
+    storage_path = await _save_image_file(object_ref_id, content, extension)
+
+    is_first = len(obj.images) == 0
+    next_sort = await _get_max_sort_order(db, object_ref_id) + 1
+
+    image = ObjectRefImage(
+        object_ref_id=object_ref_id,
+        storage_path=storage_path,
+        is_primary=is_first,
+        sort_order=next_sort,
+        width=width,
+        height=height,
+    )
+    db.add(image)
+    await db.commit()
+    await db.refresh(image)
+
+    return ObjectRefImageUploadResponse(
+        id=image.id,
+        storage_path=image.storage_path,
+        is_primary=image.is_primary,
+        sort_order=image.sort_order,
+        width=image.width,
+        height=image.height,
+    )
+
+
 @router.delete("/{object_ref_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_object_ref(
     object_ref_id: UUID,
@@ -164,7 +300,6 @@ async def delete_object_ref(
     """Soft-delete an object ref. Preserves job references."""
     obj = await _get_object_ref_or_404(object_ref_id, current_user.id, db)
 
-    # Log if object has job references
     if obj.job_assignments:
         logger.warning(
             "Soft-deleting object ref %s with %d job references",
