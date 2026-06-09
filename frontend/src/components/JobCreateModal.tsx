@@ -49,6 +49,9 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
   const [selectedTextModel, setSelectedTextModel] = useState('')
   const [selectedImageModel, setSelectedImageModel] = useState('')
   const [selectedVideoModel, setSelectedVideoModel] = useState('')
+  const [modelsInitialized, setModelsInitialized] = useState(false)
+
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
   const [selectedAvatars, setSelectedAvatars] = useState<JobAvatarAssignment[]>([])
   const [avatarSectionOpen, setAvatarSectionOpen] = useState(false)
@@ -64,6 +67,11 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     queryFn: () => modelsApi.getAvailableModels(),
   })
 
+  const { data: modelPreferences } = useQuery({
+    queryKey: ['modelPreferences'],
+    queryFn: () => modelsApi.getModelPreferences(),
+  })
+
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
@@ -74,18 +82,24 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     queryFn: () => avatarsApi.list(),
   })
 
-  // Set defaults from global preferences
   useEffect(() => {
-    if (availableModels) {
-      const findDefault = (models: ModelOption[], provider: string) => {
-        const match = models.find((m) => m.provider === provider || m.id.includes(provider))
-        return match?.id || ''
-      }
-      setSelectedTextModel(findDefault(availableModels.text_models || [], 'local'))
-      setSelectedImageModel(findDefault(availableModels.image_models || [], 'local'))
-      setSelectedVideoModel(findDefault(availableModels.video_models || [], 'local'))
-    }
-  }, [availableModels])
+    if (modelsInitialized || !availableModels || !modelPreferences) return
+    const findById = (models: { id: string }[] | undefined, id: string) =>
+      models?.find((m) => m.id === id)?.id || models?.[0]?.id || ''
+    setSelectedVideoModel(findById(
+      availableModels.video_models,
+      modelPreferences.image_to_video_model || modelPreferences.video_model || '',
+    ))
+    setSelectedImageModel(findById(
+      availableModels.image_models,
+      modelPreferences.text_to_image_model || modelPreferences.image_model || '',
+    ))
+    setSelectedTextModel(findById(
+      availableModels.text_models,
+      modelPreferences.text_model || '',
+    ))
+    setModelsInitialized(true)
+  }, [availableModels, modelPreferences, modelsInitialized])
 
   const selectedTemplate = templates?.data?.find(
     (t: Template) => t.id === selectedTemplateId
@@ -102,6 +116,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
         }
       })
       setInputValues(defaults)
+      setValidationErrors({})
     }
   }, [selectedTemplateId, templateInputs])
 
@@ -144,6 +159,12 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
 
   const handleInputChange = (name: string, value: unknown) => {
     setInputValues((prev) => ({ ...prev, [name]: value }))
+    setValidationErrors((prev) => {
+      if (!prev[name]) return prev
+      const next = { ...prev }
+      delete next[name]
+      return next
+    })
   }
 
   const handleFileUpload = async (name: string, file: File, type: string) => {
@@ -181,8 +202,46 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     )
   }
 
+  const validateInputs = (): boolean => {
+    const errors: Record<string, string> = {}
+    for (const input of templateInputs) {
+      const value = inputValues[input.name]
+      if (input.required) {
+        if (input.type === 'text' && (!value || (value as string).trim() === '')) {
+          errors[input.name] = `${input.name} is required.`
+          continue
+        }
+        if (input.type === 'file' && !uploadedFiles[input.name]) {
+          errors[input.name] = `${input.name} is required.`
+          continue
+        }
+        if (input.type === 'number' && (value === undefined || value === null || value === '')) {
+          errors[input.name] = `${input.name} is required.`
+          continue
+        }
+      }
+      if (input.type === 'number' && value !== undefined && value !== null && value !== '') {
+        const num = Number(value)
+        if (isNaN(num)) {
+          errors[input.name] = `${input.name} must be a number.`
+        } else if (input.min !== undefined && num < input.min) {
+          errors[input.name] = input.max !== undefined
+            ? `Must be between ${input.min} and ${input.max}.`
+            : `Must be at least ${input.min}.`
+        } else if (input.max !== undefined && num > input.max) {
+          errors[input.name] = input.min !== undefined
+            ? `Must be between ${input.min} and ${input.max}.`
+            : `Must be at most ${input.max}.`
+        }
+      }
+    }
+    setValidationErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
   const handleSubmit = () => {
     if (!title.trim()) return
+    if (!validateInputs()) return
     createMutation.mutate({
       title: title.trim(),
       template_id: selectedTemplateId || undefined,
@@ -208,25 +267,48 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     switch (input.type) {
       case 'text':
         return (
-          <textarea
-            id={input.name}
-            className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            value={(value as string) || ''}
-            onChange={(e) => handleInputChange(input.name, e.target.value)}
-            placeholder={input.description}
-          />
+          <>
+            <textarea
+              id={input.name}
+              className={`flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm${validationErrors[input.name] ? ' border-destructive' : ''}`}
+              value={(value as string) || ''}
+              onChange={(e) => handleInputChange(input.name, e.target.value)}
+              placeholder={input.description}
+            />
+            {validationErrors[input.name] && (
+              <p className="text-xs text-destructive mt-1">{validationErrors[input.name]}</p>
+            )}
+          </>
         )
 
       case 'number':
         return (
-          <Input
-            type="number"
-            id={input.name}
-            value={(value as number) || ''}
-            onChange={(e) => handleInputChange(input.name, parseFloat(e.target.value))}
-            min={input.min}
-            max={input.max}
-          />
+          <>
+            <Input
+              type="number"
+              id={input.name}
+              className={validationErrors[input.name] ? 'border-destructive' : ''}
+              value={(value as number) ?? ''}
+              onChange={(e) => {
+                const raw = e.target.value
+                handleInputChange(input.name, raw === '' ? '' : parseFloat(raw))
+              }}
+              min={input.min}
+              max={input.max}
+            />
+            {(input.min !== undefined || input.max !== undefined) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {input.min !== undefined && input.max !== undefined
+                  ? `Allowed range: ${input.min} – ${input.max}`
+                  : input.min !== undefined
+                  ? `Minimum: ${input.min}`
+                  : `Maximum: ${input.max}`}
+              </p>
+            )}
+            {validationErrors[input.name] && (
+              <p className="text-xs text-destructive mt-1">{validationErrors[input.name]}</p>
+            )}
+          </>
         )
 
       case 'select':
@@ -290,6 +372,9 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
               <p className="text-sm text-primary">
                 Uploaded: {uploadedFiles[input.name]}
               </p>
+            )}
+            {validationErrors[input.name] && (
+              <p className="text-xs text-destructive mt-1">{validationErrors[input.name]}</p>
             )}
           </div>
         )
@@ -472,7 +557,7 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
                     {input.required && <span className="text-destructive ml-1">*</span>}
                   </Label>
                   {renderInput(input)}
-                  {input.description && input.type !== 'boolean' && (
+                  {input.description && input.type !== 'boolean' && input.type !== 'number' && (
                     <p className="text-xs text-muted-foreground">{input.description}</p>
                   )}
                 </div>
