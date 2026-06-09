@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from PIL import Image as PILImage
 from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic.alias_generators import to_camel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -30,6 +31,8 @@ MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 class AvatarCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     name: str
     gender: Literal["Male", "Female", "Non-binary", "Other"]
     bio: str | None = None
@@ -44,6 +47,8 @@ class AvatarCreate(BaseModel):
 
 
 class AvatarUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     name: str | None = None
     gender: Literal["Male", "Female", "Non-binary", "Other"] | None = None
     bio: str | None = None
@@ -59,7 +64,7 @@ class AvatarUpdate(BaseModel):
 
 
 class AvatarImageResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
 
     id: UUID
     storage_path: str
@@ -71,7 +76,7 @@ class AvatarImageResponse(BaseModel):
 
 
 class AvatarResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
 
     id: UUID
     user_id: UUID
@@ -93,6 +98,8 @@ class AvatarListResponse(BaseModel):
 
 
 class AvatarImageUploadResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     id: UUID
     storage_path: str
     is_primary: bool
@@ -102,7 +109,9 @@ class AvatarImageUploadResponse(BaseModel):
 class JobAvatarAssignment(BaseModel):
     avatar_id: UUID
     role: str | None = None
-    consistency_strategy_override: Literal["ip_adapter", "face_swap", "lora", "prompt_only"] | None = None
+    consistency_strategy_override: (
+        Literal["ip_adapter", "face_swap", "lora", "prompt_only"] | None
+    ) = None
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +138,7 @@ def _avatar_to_response(avatar: Avatar) -> AvatarResponse:
                 sort_order=img.sort_order,
                 width=img.width,
                 height=img.height,
-                thumbnail_url=None,
+                thumbnail_url=getattr(img, "thumbnail_url", None),
             )
             for img in avatar.images
         ],
@@ -140,9 +149,7 @@ def _avatar_to_response(avatar: Avatar) -> AvatarResponse:
     )
 
 
-async def _get_avatar_or_404(
-    avatar_id: UUID, user_id: UUID, db: AsyncSession
-) -> Avatar:
+async def _get_avatar_or_404(avatar_id: UUID, user_id: UUID, db: AsyncSession) -> Avatar:
     """Fetch an avatar by id + owner, raising 404 if not found."""
     result = await db.execute(
         select(Avatar)
@@ -374,9 +381,7 @@ async def upload_avatar_image(
     )
 
 
-@router.delete(
-    "/{avatar_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/{avatar_id}/images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_avatar_image(
     avatar_id: UUID,
     image_id: UUID,
@@ -388,9 +393,7 @@ async def delete_avatar_image(
 
     # Find the image
     result = await db.execute(
-        select(AvatarImage).where(
-            AvatarImage.id == image_id, AvatarImage.avatar_id == avatar_id
-        )
+        select(AvatarImage).where(AvatarImage.id == image_id, AvatarImage.avatar_id == avatar_id)
     )
     image = result.scalar_one_or_none()
     if not image:
@@ -427,9 +430,7 @@ async def delete_avatar_image(
         await db.commit()
 
 
-@router.put(
-    "/{avatar_id}/images/{image_id}/primary", response_model=AvatarResponse
-)
+@router.put("/{avatar_id}/images/{image_id}/primary", response_model=AvatarResponse)
 async def set_primary_image(
     avatar_id: UUID,
     image_id: UUID,
@@ -441,9 +442,7 @@ async def set_primary_image(
 
     # Find and validate the target image
     result = await db.execute(
-        select(AvatarImage).where(
-            AvatarImage.id == image_id, AvatarImage.avatar_id == avatar_id
-        )
+        select(AvatarImage).where(AvatarImage.id == image_id, AvatarImage.avatar_id == avatar_id)
     )
     target_image = result.scalar_one_or_none()
     if not target_image:
@@ -471,9 +470,7 @@ async def train_avatar_lora(
     if not avatar or avatar.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Avatar not found")
     if avatar.lora_training_status == "training":
-        raise HTTPException(
-            status_code=409, detail="LoRA training already in progress"
-        )
+        raise HTTPException(status_code=409, detail="LoRA training already in progress")
 
     from app.workers.tasks import train_avatar_lora as train_lora_task
 
@@ -504,9 +501,7 @@ async def generate_avatar_poses(
     r = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
         if await r.get(f"avatar:poses:generating:{avatar_id}"):
-            raise HTTPException(
-                status_code=409, detail="Pose generation already in progress"
-            )
+            raise HTTPException(status_code=409, detail="Pose generation already in progress")
     finally:
         await r.close()
 
