@@ -358,7 +358,7 @@ class ChatOrchestrator:
     """Drive one chatbot turn through LLM streaming and serial tool execution."""
 
     max_iterations = 8
-    max_wall_seconds = 300.0
+    max_wall_seconds = 900.0
     default_context_limit = 8192
 
     def __init__(
@@ -903,7 +903,7 @@ class ChatOrchestrator:
         if reason == "wall_clock_limit_exceeded":
             return (SSEEventType.ERROR.value, {
                 "reason": reason,
-                "message": "The conversation timed out (5 minutes). Please try a shorter message or split your request into smaller parts.",
+                "message": "The conversation timed out (15 minutes). Please try a shorter message or split your request into smaller parts.",
             })
         return (SSEEventType.ERROR.value, {"reason": reason})
 
