@@ -108,7 +108,7 @@ class PromptToVideoPlugin(PluginBase):
         input_data = job.input_data or {}
         prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
         style = input_data.get("style", "realistic")
-        duration = input_data.get("duration", 10)
+        duration = input_data.get("duration", 30)
         text_model = input_data.get("text_model")
         video_model = input_data.get("video_model")
         image_model = input_data.get("image_model")

@@ -13,9 +13,9 @@ inputs:
     description: "Visual style for the generated video"
   - name: duration
     type: number
-    default: 5
+    default: 30
     min: 2
-    max: 30
+    max: 600
     required: false
     description: "Video duration in seconds"
   - name: aspect_ratio

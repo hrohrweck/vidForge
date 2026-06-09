@@ -671,6 +671,7 @@ class ModelConfigResponse(BaseModel):
     cost_config: dict | None = None
     comfyui_workflow: str | None = None
     is_active: bool
+    is_chat_enabled: bool
     is_deprecated: bool
     last_synced_at: datetime | None = None
     created_at: datetime
@@ -691,6 +692,7 @@ class ModelConfigCreate(BaseModel):
     constraints: dict | None = None
     cost_config: dict | None = None
     comfyui_workflow: str | None = None
+    is_chat_enabled: bool | None = None
 
 
 class ModelConfigUpdate(BaseModel):
@@ -706,6 +708,7 @@ class ModelConfigUpdate(BaseModel):
     comfyui_workflow: str | None = None
     is_active: bool | None = None
     is_deprecated: bool | None = None
+    is_chat_enabled: bool | None = None
 
 
 @router.get("/model-configs", response_model=list[ModelConfigResponse])
@@ -714,6 +717,7 @@ async def list_model_configs(
     modality: str | None = None,
     capability: str | None = None,
     is_active: bool | None = None,
+    chat_enabled: bool | None = None,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> list[ModelConfig]:
@@ -725,17 +729,18 @@ async def list_model_configs(
         stmt = stmt.where(ModelConfig.modality == modality)
     if is_active is not None:
         stmt = stmt.where(ModelConfig.is_active == is_active)
+    if chat_enabled is not None:
+        stmt = stmt.where(ModelConfig.is_chat_enabled == chat_enabled)
 
-    stmt = stmt.options(selectinload(ModelConfig.provider)).order_by(ModelConfig.modality, ModelConfig.display_name)
+    stmt = stmt.options(selectinload(ModelConfig.provider)).order_by(
+        ModelConfig.modality, ModelConfig.display_name
+    )
     result = await db.execute(stmt)
     configs = list(result.scalars().all())
 
     # Filter by capability in Python (capabilities is JSONB, not directly filterable in SQL)
     if capability:
-        configs = [
-            c for c in configs
-            if c.capabilities and c.capabilities.get(capability) is True
-        ]
+        configs = [c for c in configs if c.capabilities and c.capabilities.get(capability) is True]
 
     return configs
 
@@ -766,9 +771,7 @@ async def update_model_config(
         raise HTTPException(status_code=404, detail="Model config not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    config = await ModelConfigService.update(
-        db, config.model_id, config.provider_id, update_data
-    )
+    config = await ModelConfigService.update(db, config.model_id, config.provider_id, update_data)
     await db.commit()
     await db.refresh(config)
     return config

@@ -19,9 +19,7 @@ class ModelConfigService:
     """
 
     @staticmethod
-    async def get_by_id(
-        db: AsyncSession, model_id: str, provider_id: UUID
-    ) -> ModelConfig | None:
+    async def get_by_id(db: AsyncSession, model_id: str, provider_id: UUID) -> ModelConfig | None:
         from sqlalchemy.orm import selectinload
 
         result = await db.execute(
@@ -51,6 +49,21 @@ class ModelConfigService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_chat_models(db: AsyncSession) -> list[ModelConfig]:
+        """Return all active, chat-enabled model configs."""
+        from sqlalchemy.orm import selectinload
+
+        result = await db.execute(
+            select(ModelConfig)
+            .options(selectinload(ModelConfig.provider))
+            .where(
+                ModelConfig.is_active == True,  # noqa: E712
+                ModelConfig.is_chat_enabled == True,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def resolve_model_config(
         db: AsyncSession,
         model_id: str,
@@ -63,9 +76,7 @@ class ModelConfigService:
         Uses the ModelConfig table as the single source of truth, searching
         by model_id, provider_model_id, and suffix match in sequence.
         """
-        config = await ModelConfigService._find_by_model_id(
-            db, model_id, provider_id, modality
-        )
+        config = await ModelConfigService._find_by_model_id(db, model_id, provider_id, modality)
         if config:
             return config
 
@@ -217,9 +228,7 @@ class ModelConfigService:
         return config
 
     @staticmethod
-    async def update(
-        db: AsyncSession, model_id: str, provider_id: UUID, data: dict
-    ) -> ModelConfig:
+    async def update(db: AsyncSession, model_id: str, provider_id: UUID, data: dict) -> ModelConfig:
         config = await ModelConfigService.get_by_id(db, model_id, provider_id)
         if config is None:
             raise ValueError(
@@ -232,9 +241,7 @@ class ModelConfigService:
         return config
 
     @staticmethod
-    async def delete(
-        db: AsyncSession, model_id: str, provider_id: UUID
-    ) -> None:
+    async def delete(db: AsyncSession, model_id: str, provider_id: UUID) -> None:
         config = await ModelConfigService.get_by_id(db, model_id, provider_id)
         if config is not None:
             config.is_active = False
@@ -252,7 +259,8 @@ class ModelConfigService:
             if config.is_deprecated:
                 logger.warning(
                     "Using deprecated model config: model_id=%s provider_id=%s",
-                    model_id, provider_id,
+                    model_id,
+                    provider_id,
                 )
             return config
 
@@ -266,8 +274,12 @@ class ModelConfigService:
             "endpoint_type": defaults.get("endpoint_type", "comfyui"),
         }
         for key in (
-            "prompt_format", "parameter_map", "extra_params",
-            "capabilities", "constraints", "cost_config",
+            "prompt_format",
+            "parameter_map",
+            "extra_params",
+            "capabilities",
+            "constraints",
+            "cost_config",
             "comfyui_workflow",
         ):
             if key in defaults:
@@ -276,9 +288,7 @@ class ModelConfigService:
         return await ModelConfigService.create(db, create_data)
 
     @staticmethod
-    async def mark_deprecated(
-        db: AsyncSession, model_id: str, provider_id: UUID
-    ) -> None:
+    async def mark_deprecated(db: AsyncSession, model_id: str, provider_id: UUID) -> None:
         config = await ModelConfigService.get_by_id(db, model_id, provider_id)
         if config is None:
             raise ValueError(
@@ -289,13 +299,12 @@ class ModelConfigService:
         await db.flush()
         logger.info(
             "Model config deprecated: model_id=%s provider_id=%s",
-            model_id, provider_id,
+            model_id,
+            provider_id,
         )
 
     @staticmethod
-    async def set_last_synced(
-        db: AsyncSession, model_id: str, provider_id: UUID
-    ) -> None:
+    async def set_last_synced(db: AsyncSession, model_id: str, provider_id: UUID) -> None:
         from datetime import datetime
 
         config = await ModelConfigService.get_by_id(db, model_id, provider_id)

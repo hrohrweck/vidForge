@@ -30,12 +30,13 @@ export function ScriptToVideoPanel({ job, jobId, scenes, planningMode }: Props) 
   const [voice, setVoice] = useState(
     (job?.input_data?.voice as string) || 'default',
   )
+  const duration = (job?.input_data?.duration as number) || 30
 
   const planScenesMutation = useMutation({
     mutationFn: async () => {
       return scenesApi.planScenes(jobId, {
         lyrics_data: { full_text: script },
-        duration: 30,
+        duration,
         style,
       })
     },

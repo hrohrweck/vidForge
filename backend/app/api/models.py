@@ -131,9 +131,7 @@ async def get_default_model_preferences(db: AsyncSession) -> dict[str, str]:
 # ── Validation ─────────────────────────────────────────────────────
 
 
-async def validate_model_preferences(
-    db: AsyncSession, prefs: dict[str, str]
-) -> dict[str, str]:
+async def validate_model_preferences(db: AsyncSession, prefs: dict[str, str]) -> dict[str, str]:
     """Validate model preferences by resolving each (model, provider_id) pair.
 
     Keeps resolvable values; falls back to defaults with a warning when
@@ -221,6 +219,16 @@ async def get_available_models(db: AsyncSession) -> dict[str, list[dict[str, Any
     return groups
 
 
+async def get_chat_models(db: AsyncSession) -> list[dict[str, Any]]:
+    """Return chat-enabled text models."""
+    all_configs = await _list_active_configs(db)
+    return [
+        _model_config_to_dict(m)
+        for m in all_configs
+        if m.modality == "text" and getattr(m, "is_chat_enabled", False)
+    ]
+
+
 async def get_all_models(db: AsyncSession) -> list[dict[str, Any]]:
     """Return all active models as dicts."""
     configs = await _list_active_configs(db)
@@ -243,15 +251,11 @@ async def get_model(db: AsyncSession, model_id: str) -> dict[str, Any] | None:
     return _model_config_to_dict(cfg)
 
 
-async def get_models_by_capability(
-    db: AsyncSession, capability: str
-) -> list[dict[str, Any]]:
+async def get_models_by_capability(db: AsyncSession, capability: str) -> list[dict[str, Any]]:
     """Return all active models that include the given capability."""
     configs = await _list_active_configs(db)
     return [
-        _model_config_to_dict(m)
-        for m in configs
-        if m.capabilities and capability in m.capabilities
+        _model_config_to_dict(m) for m in configs if m.capabilities and capability in m.capabilities
     ]
 
 
@@ -288,14 +292,20 @@ async def get_available_models_endpoint(
     return await get_available_models(db)
 
 
+@router.get("/chat")
+async def get_chat_models_endpoint(
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Return chat-enabled text models."""
+    return await get_chat_models(db)
+
+
 @router.get("/preferences")
 async def get_model_preferences(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
-    )
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = result.scalar_one_or_none()
 
     if not settings or not settings.preferences:
@@ -311,9 +321,7 @@ async def update_model_preferences(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == current_user.id)
-    )
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
     settings = result.scalar_one_or_none()
 
     if not settings:
@@ -351,9 +359,9 @@ async def list_models(
     models = await get_all_models(db)
     if capability:
         models = [
-            m for m in models
-            if isinstance(m.get("capabilities"), dict)
-            and m["capabilities"].get(capability) is True
+            m
+            for m in models
+            if isinstance(m.get("capabilities"), dict) and m["capabilities"].get(capability) is True
         ]
     # Include only the fields the frontend expects
     return [

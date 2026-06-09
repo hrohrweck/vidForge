@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import UserResponse, get_current_user
-from app.database import User, UserSettings, get_db
+from app.database import ModelConfig, User, UserSettings, get_db
 
 router = APIRouter()
 
@@ -82,3 +82,68 @@ async def update_user_settings(
     await db.refresh(settings)
 
     return settings
+
+
+class ChatModelRequest(BaseModel):
+    default_chat_model: str
+
+
+class ChatModelResponse(BaseModel):
+    default_chat_model: str | None = None
+
+
+@router.get("/settings/chat-model", response_model=ChatModelResponse)
+async def get_chat_model(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChatModelResponse:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+
+    if not settings or not settings.preferences:
+        return ChatModelResponse(default_chat_model=None)
+
+    return ChatModelResponse(default_chat_model=settings.preferences.get("default_chat_model"))
+
+
+@router.put("/settings/chat-model", response_model=ChatModelResponse)
+async def update_chat_model(
+    data: ChatModelRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChatModelResponse:
+    from sqlalchemy.orm import selectinload
+
+    # Validate the model exists and is chat-enabled
+    result = await db.execute(
+        select(ModelConfig)
+        .options(selectinload(ModelConfig.provider))
+        .where(
+            ModelConfig.model_id == data.default_chat_model,
+            ModelConfig.is_active == True,  # noqa: E712
+            ModelConfig.is_chat_enabled == True,  # noqa: E712
+        )
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{data.default_chat_model}' is not a valid chat-enabled model",
+        )
+
+    # Get or create user settings
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=current_user.id)
+        db.add(settings)
+
+    # Store in preferences
+    current_prefs = dict(settings.preferences) if settings.preferences else {}
+    current_prefs["default_chat_model"] = data.default_chat_model
+    settings.preferences = current_prefs
+
+    await db.commit()
+    return ChatModelResponse(default_chat_model=data.default_chat_model)

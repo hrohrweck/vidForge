@@ -27,7 +27,7 @@ export function PromptToVideoPanel({ job, jobId, scenes, planningMode }: Props) 
     (job?.input_data?.prompt as string) || '',
   )
   const [duration, setDuration] = useState(
-    (job?.input_data?.duration as number) || 10,
+    (job?.input_data?.duration as number) || 30,
   )
   const [style, setStyle] = useState(
     (job?.input_data?.style as string) || 'realistic',
@@ -78,8 +78,8 @@ export function PromptToVideoPanel({ job, jobId, scenes, planningMode }: Props) 
                   type="number"
                   value={duration}
                   onChange={(e) => setDuration(Number(e.target.value))}
-                  min={3}
-                  max={60}
+                  min={2}
+                  max={600}
                 />
               </div>
               <div className="space-y-2">

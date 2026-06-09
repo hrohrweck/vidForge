@@ -253,6 +253,13 @@ async def plan_scenes(
         if lyrics_duration and lyrics_duration > 30 and duration <= 30:
             duration = lyrics_duration
 
+    # Persist the resolved duration back to job.input_data so downstream
+    # stages (image gen, video gen, render) see the correct value.
+    if job.input_data is None:
+        job.input_data = {}
+    if job.input_data.get("duration") != duration:
+        job.input_data = {**job.input_data, "duration": duration}
+
     from app.services.llm_service import resolve_llm
 
     text_model = job.input_data.get("text_model") if job.input_data else None
