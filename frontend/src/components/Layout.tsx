@@ -78,7 +78,7 @@ export default function Layout() {
   const { user, logout } = useAuthStore()
   const location = useLocation()
   const isChatPage = location.pathname === '/chat'
-  const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/') || location.pathname.startsWith('/editor/') || location.pathname === '/settings' || location.pathname === '/jobs'
+  const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/') || location.pathname.startsWith('/editor/') || location.pathname === '/settings' || location.pathname === '/jobs' || location.pathname === '/avatars'
   const navEntries = getNavEntries(user?.is_superuser || false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -231,7 +231,7 @@ export default function Layout() {
         </aside>
 
         <main className="flex-1 min-h-0 overflow-hidden bg-background/50">
-          <div className={isFullPage ? 'h-full w-full p-0' : 'container mx-auto p-6 max-w-6xl'}>
+          <div className={isFullPage ? 'h-full w-full p-0' : 'h-full w-full overflow-y-auto p-6'}>
             <Outlet />
           </div>
         </main>
