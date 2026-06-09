@@ -72,6 +72,19 @@ def _strip_thinking(content: str) -> str:
     return content.strip()
 
 
+def _strip_thinking_no_trim(content: str) -> str:
+    """Same as _strip_thinking but preserves leading/trailing whitespace.
+
+    Used during streaming where individual tokens may contain spaces that
+    must not be stripped (e.g. " hello" or "world ").
+    """
+    content = _THINK_RE.sub("", content)
+    content = _CJK_THINK_RE.sub("", content)
+    content = _THINK_OPEN_RE.sub("", content)
+    content = _CJK_THINK_OPEN_RE.sub("", content)
+    return content
+
+
 class ChatLLM(Protocol):
     def chat_stream(
         self,
@@ -345,7 +358,7 @@ class ChatOrchestrator:
     """Drive one chatbot turn through LLM streaming and serial tool execution."""
 
     max_iterations = 8
-    max_wall_seconds = 120.0
+    max_wall_seconds = 300.0
     default_context_limit = 8192
 
     def __init__(
@@ -474,7 +487,7 @@ class ChatOrchestrator:
             async for chunk in llm.chat_stream(history, model=actual_model, tools=tools):
                 if chunk.type == "text" and chunk.content:
                     text_parts.append(chunk.content)
-                    yield (SSEEventType.TOKEN.value, {"content": _strip_thinking(chunk.content)})
+                    yield (SSEEventType.TOKEN.value, {"content": _strip_thinking_no_trim(chunk.content)})
                 elif chunk.type == "tool_call" and chunk.tool_calls:
                     tool_calls.extend(chunk.tool_calls)
                 elif chunk.type == "usage":
@@ -887,6 +900,11 @@ class ChatOrchestrator:
         )
 
     def _error_event(self, reason: str) -> StreamEvent:
+        if reason == "wall_clock_limit_exceeded":
+            return (SSEEventType.ERROR.value, {
+                "reason": reason,
+                "message": "The conversation timed out (5 minutes). Please try a shorter message or split your request into smaller parts.",
+            })
         return (SSEEventType.ERROR.value, {"reason": reason})
 
     def _done_event(self) -> StreamEvent:

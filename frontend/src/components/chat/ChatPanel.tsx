@@ -220,7 +220,10 @@ export function ChatPanel() {
             updateMessage(selectedConversationId, assistantMsg.id, { jobId })
           }
         } else if (event.event === 'error') {
-          setStreamError((eventData.reason as string) ?? (eventData.error as string) ?? 'Stream error')
+          const userMessage = eventData.message as string | undefined
+          const reason = eventData.reason as string | undefined
+          const error = eventData.error as string | undefined
+          setStreamError(userMessage ?? reason ?? error ?? 'Stream error')
         }
       }
     } catch (err) {
