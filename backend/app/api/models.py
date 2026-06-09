@@ -296,7 +296,13 @@ async def get_available_models_endpoint(
 async def get_chat_models_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """Return chat-enabled text models."""
+    return await get_chat_models(db)
+
+
+@router.get("/chat-models")
+async def get_chat_models_endpoint_v2(
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
     return await get_chat_models(db)
 
 
