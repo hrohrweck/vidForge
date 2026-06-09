@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { usersApi } from '../api/client'
 
 export interface Message {
   id: string
@@ -32,6 +33,7 @@ interface ChatState {
   panelOpen: boolean
   selectedConversationId: string | null
   selectedModelId: string
+  defaultModelId: string | null
   conversations: Conversation[]
   messages: Record<string, Message[]>
   streaming: boolean
@@ -43,6 +45,8 @@ interface ChatState {
   togglePanel: () => void
   selectConversation: (id: string) => void
   setModel: (id: string) => void
+  fetchDefaultModel: () => Promise<void>
+  setDefaultModel: (id: string) => Promise<void>
   appendMessage: (convId: string, msg: Message) => void
   setMessages: (convId: string, msgs: Message[]) => void
   updateMessage: (convId: string, msgId: string, patch: Partial<Message>) => void
@@ -62,6 +66,7 @@ export const useChatStore = create<ChatState>()(
       panelOpen: false,
       selectedConversationId: null,
       selectedModelId: 'qwen',
+      defaultModelId: null,
       conversations: [],
       messages: {},
       streaming: false,
@@ -76,6 +81,27 @@ export const useChatStore = create<ChatState>()(
       selectConversation: (id) => set({ selectedConversationId: id }),
 
       setModel: (id) => set({ selectedModelId: id }),
+
+      fetchDefaultModel: async () => {
+        try {
+          const data = await usersApi.getDefaultChatModel()
+          if (data.default_chat_model) {
+            set({ defaultModelId: data.default_chat_model })
+          }
+        } catch {
+          // Silently fail - default model is optional
+        }
+      },
+
+      setDefaultModel: async (id) => {
+        try {
+          await usersApi.setDefaultChatModel(id)
+          set({ defaultModelId: id })
+        } catch (err) {
+          console.error('Failed to set default model:', err)
+          throw err
+        }
+      },
 
 appendMessage: (convId, msg) =>
     set((state) => ({
@@ -145,6 +171,7 @@ appendMessage: (convId, msg) =>
       name: 'chat-storage',
       partialize: (state) => ({
         selectedModelId: state.selectedModelId,
+        defaultModelId: state.defaultModelId,
         panelOpen: state.panelOpen,
       }),
     }

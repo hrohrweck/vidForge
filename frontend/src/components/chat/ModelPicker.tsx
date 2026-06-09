@@ -13,27 +13,42 @@ interface TextModel {
 
 export function ModelPicker() {
   const selectedModelId = useChatStore((s) => s.selectedModelId)
+  const defaultModelId = useChatStore((s) => s.defaultModelId)
   const setModel = useChatStore((s) => s.setModel)
+  const fetchDefaultModel = useChatStore((s) => s.fetchDefaultModel)
+  const setDefaultModel = useChatStore((s) => s.setDefaultModel)
   const [models, setModels] = useState<TextModel[]>([])
   const [loading, setLoading] = useState(true)
   const [customMode, setCustomMode] = useState(false)
   const [customValue, setCustomValue] = useState('')
+  const [settingDefault, setSettingDefault] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     const fetchModels = async () => {
       try {
-        const data = await modelsApi.getAvailableModels()
+        // Fetch default model from server
+        await fetchDefaultModel()
+
+        // Try the dedicated chat models endpoint first
+        let chatModels: TextModel[]
+        try {
+          chatModels = await modelsApi.getChatModels() as TextModel[]
+        } catch {
+          // Fallback: use /available and filter client-side
+          const data = await modelsApi.getAvailableModels()
+          const textModels: TextModel[] = data.text_models || []
+          chatModels = textModels.filter(m => {
+            const c = m.capabilities
+            if (!c || Array.isArray(c)) return false
+            return c.accepts_text === true && c.accepts_image === true && c.outputs_text === true
+          })
+        }
         if (cancelled) return
-        const textModels: TextModel[] = data.text_models || []
-        setModels(textModels.filter(m => {
-          const c = m.capabilities
-          if (!c || Array.isArray(c)) return false
-          return c.accepts_text === true && c.accepts_image === true && c.outputs_text === true
-        }))
-        if (textModels.length > 0) {
+        setModels(chatModels)
+        if (chatModels.length > 0) {
           const current = useChatStore.getState().selectedModelId
-          if (!textModels.find((m) => m.id === current) && current) {
+          if (!chatModels.find((m) => m.id === current) && current) {
             // Unknown model — switch to custom mode
             setCustomMode(true)
             setCustomValue(current)
@@ -47,7 +62,7 @@ export function ModelPicker() {
     }
     fetchModels()
     return () => { cancelled = true }
-  }, [])
+  }, [fetchDefaultModel])
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value
@@ -76,6 +91,18 @@ export function ModelPicker() {
     }
   }
 
+  const handleSetDefault = async () => {
+    if (!selectedModelId || settingDefault) return
+    setSettingDefault(true)
+    try {
+      await setDefaultModel(selectedModelId)
+    } catch {
+      // Error already logged in store
+    } finally {
+      setSettingDefault(false)
+    }
+  }
+
   // Group by provider type
   const grouped = models.reduce<Record<string, TextModel[]>>((acc, m) => {
     const group = m.provider_type === 'ollama' ? 'Ollama (Local)' :
@@ -98,9 +125,10 @@ export function ModelPicker() {
       </option>
     )
     for (const m of groupModels) {
+      const isDefault = m.id === defaultModelId
       options.push(
         <option key={m.id} value={m.id}>
-          {m.name}
+          {m.name}{isDefault ? ' ★' : ''}
         </option>
       )
     }
@@ -135,20 +163,36 @@ export function ModelPicker() {
     )
   }
 
+  const isCurrentDefault = selectedModelId === defaultModelId
+
   return (
-    <select
-      value={selectedModelId}
-      onChange={handleSelectChange}
-      className="w-full rounded-[8px] border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-      disabled={loading}
-    >
-      {loading ? (
-        <option value="">Loading models...</option>
-      ) : options.length === 0 ? (
-        <option value="">No models available</option>
-      ) : (
-        options
-      )}
-    </select>
+    <div className="flex gap-1 items-center">
+      <select
+        value={selectedModelId}
+        onChange={handleSelectChange}
+        className="flex-1 rounded-[8px] border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        disabled={loading}
+      >
+        {loading ? (
+          <option value="">Loading models...</option>
+        ) : options.length === 0 ? (
+          <option value="">No models available</option>
+        ) : (
+          options
+        )}
+      </select>
+      <button
+        onClick={handleSetDefault}
+        disabled={loading || settingDefault || isCurrentDefault || !selectedModelId}
+        className={`shrink-0 rounded-[8px] border px-2 py-2 text-sm transition-colors ${
+          isCurrentDefault
+            ? 'text-yellow-500 border-yellow-500 bg-yellow-50 dark:bg-yellow-950/20'
+            : 'text-muted-foreground hover:text-yellow-500 hover:border-yellow-500'
+        } disabled:opacity-50 disabled:cursor-not-allowed`}
+        title={isCurrentDefault ? 'Current default model' : 'Set as default model'}
+      >
+        {settingDefault ? '⏳' : '★'}
+      </button>
+    </div>
   )
 }

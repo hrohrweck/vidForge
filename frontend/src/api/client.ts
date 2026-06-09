@@ -472,6 +472,10 @@ export const modelsApi = {
     const response = await api.get<{ image_models: ModelConfig[]; video_models: ModelConfig[]; text_models: ModelConfig[] }>('/models/available')
     return response.data
   },
+  getChatModels: async () => {
+    const response = await api.get<ModelConfig[]>('/models/chat')
+    return response.data
+  },
   getModelPreferences: async () => {
     const response = await api.get<ModelPreferences>('/models/preferences')
     return response.data
@@ -485,6 +489,16 @@ export const modelsApi = {
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
+  getDefaultChatModel: async () => {
+    const response = await api.get<{ default_chat_model: string | null }>('/users/settings/chat-model')
+    return response.data
+  },
+  setDefaultChatModel: async (modelId: string) => {
+    const response = await api.put<{ default_chat_model: string | null }>('/users/settings/chat-model', {
+      default_chat_model: modelId,
+    })
+    return response.data
+  },
 }
 
 export const healthApi = {
@@ -897,6 +911,8 @@ export interface ModelConfig {
   license: string
   provider: string
   provider_id?: string
+  provider_type?: string
+  modality?: string
   default: boolean
   capabilities?: Record<string, boolean>
   cost_config?: Record<string, unknown> | null
