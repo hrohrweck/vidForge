@@ -77,9 +77,7 @@ def _verify_image_magic_bytes(content: bytes, declared_mime: str) -> bool:
     return False
 
 
-def _resolve_kind_and_validate(
-    file: UploadFile, content: bytes
-) -> tuple[str, int]:
+def _resolve_kind_and_validate(file: UploadFile, content: bytes) -> tuple[str, int]:
     content_type = file.content_type or "application/octet-stream"
     filename = (file.filename or "").lower()
     ext = os.path.splitext(filename)[1]
@@ -218,14 +216,16 @@ async def get_token_usage(
                 to_date,
             ):
                 continue
-        items.append(TokenUsageAggregationItem(
-            model_id=row.get("model_id", ""),
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=prompt + completion,
-            estimated_cost=None,
-            message_count=row.get("request_count", 0),
-        ))
+        items.append(
+            TokenUsageAggregationItem(
+                model_id=row.get("model_id", ""),
+                prompt_tokens=prompt,
+                completion_tokens=completion,
+                total_tokens=prompt + completion,
+                estimated_cost=None,
+                message_count=row.get("request_count", 0),
+            )
+        )
     items.sort(key=lambda x: (-x.total_tokens, x.model_id))
 
     return TokenUsageAggregationResponse(items=items)
@@ -254,7 +254,7 @@ async def create_conversation(
     conversation = await service.create(
         user_id=current_user.id,
         title=title,
-        model_id="default",
+        model_id=data.model_id,
     )
     return ConversationOut.model_validate(conversation)
 
@@ -307,9 +307,7 @@ async def list_messages(
         limit=limit,
         before=before,
     )
-    return MessageListResponse(
-        items=[MessageOut.model_validate(m) for m in messages]
-    )
+    return MessageListResponse(items=[MessageOut.model_validate(m) for m in messages])
 
 
 @router.post("/conversations/{conversation_id}/messages")

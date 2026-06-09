@@ -62,6 +62,7 @@ class ToolCall(BaseModel):
                 if isinstance(raw_args, str):
                     try:
                         import json
+
                         data["arguments"] = json.loads(raw_args)
                     except json.JSONDecodeError:
                         data["arguments"] = {"raw": raw_args}
@@ -80,6 +81,7 @@ class ToolResult(BaseModel):
 
 class ConversationCreate(BaseModel):
     title: str | None = None
+    model_id: str | None = None
 
 
 class ConversationOut(BaseModel):

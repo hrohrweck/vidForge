@@ -101,7 +101,43 @@ class ConversationService:
         )
         return list(result.scalars().all())
 
-    async def create(self, user_id: UUID, title: str, model_id: str) -> Conversation:
+    async def create(self, user_id: UUID, title: str, model_id: str | None = None) -> Conversation:
+        # Resolve model_id with fallback chain
+        if model_id is None:
+            # Try user's default chat model from preferences
+            from sqlalchemy import select
+
+            from app.database import UserSettings
+
+            result = await self.db.execute(
+                select(UserSettings).where(UserSettings.user_id == user_id)
+            )
+            settings = result.scalar_one_or_none()
+
+            if settings and settings.preferences:
+                model_id = settings.preferences.get("default_chat_model")
+
+            # If no default, use first chat-enabled model
+            if model_id is None:
+                from app.database import ModelConfig
+
+                result = await self.db.execute(
+                    select(ModelConfig.model_id)
+                    .where(
+                        ModelConfig.modality == "text",
+                        ModelConfig.is_active == True,  # noqa: E712
+                        ModelConfig.is_chat_enabled == True,  # noqa: E712
+                    )
+                    .limit(1)
+                )
+                first_chat_model = result.scalar_one_or_none()
+                if first_chat_model:
+                    model_id = first_chat_model
+
+            # Final fallback to "default" for backward compatibility
+            if model_id is None:
+                model_id = "default"
+
         conversation = Conversation(
             id=uuid4(),
             user_id=user_id,
