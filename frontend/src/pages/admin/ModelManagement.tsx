@@ -111,6 +111,7 @@ interface ModelFormState {
   costConfig: string
   comfyuiWorkflow: string
   isActive: boolean
+  isChatEnabled: boolean
   isDeprecated: boolean
 }
 
@@ -129,6 +130,7 @@ const configToFormState = (c: ModelConfig): ModelFormState => ({
   costConfig: jsonToPretty(c.costConfig as Record<string, unknown> | undefined),
   comfyuiWorkflow: c.comfyuiWorkflow ?? '',
   isActive: c.isActive,
+  isChatEnabled: c.isChatEnabled,
   isDeprecated: c.isDeprecated,
 })
 
@@ -147,6 +149,7 @@ const defaultFormState: ModelFormState = {
   costConfig: '',
   comfyuiWorkflow: '',
   isActive: true,
+  isChatEnabled: true,
   isDeprecated: false,
 }
 
@@ -438,6 +441,7 @@ export default function ModelManagement() {
         constraints: parseOrUndef(formState.constraints),
         costConfig: parseOrUndef(formState.costConfig),
         comfyuiWorkflow: formState.comfyuiWorkflow || undefined,
+        isChatEnabled: formState.isChatEnabled,
       }
       createMutation.mutate(payload, { onSettled: () => setFormBusy(false) })
     } else if (editingConfig) {
@@ -453,6 +457,7 @@ export default function ModelManagement() {
         costConfig: parseOrUndef(formState.costConfig),
         comfyuiWorkflow: formState.comfyuiWorkflow || undefined,
         isActive: formState.isActive,
+        isChatEnabled: formState.isChatEnabled,
         isDeprecated: formState.isDeprecated,
       }
       updateMutation.mutate(
@@ -479,7 +484,7 @@ export default function ModelManagement() {
     })
   }
 
-  const handleToggle = (config: ModelConfig, field: 'isActive' | 'isDeprecated') => {
+  const handleToggle = (config: ModelConfig, field: 'isActive' | 'isChatEnabled' | 'isDeprecated') => {
     toggleMutation.mutate({
       id: config.id,
       data: { [field]: !config[field] },
@@ -652,6 +657,7 @@ export default function ModelManagement() {
               <TableHead>Display Name</TableHead>
               <TableHead>Modality</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Chat</TableHead>
               <TableHead>Last Synced</TableHead>
               <TableHead className="w-[140px]">Actions</TableHead>
             </TableRow>
@@ -714,6 +720,19 @@ export default function ModelManagement() {
                         <Badge variant="destructive">Deprecated</Badge>
                       )}
                     </div>
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Switch
+                      checked={config.isChatEnabled}
+                      onCheckedChange={() =>
+                        handleToggle(config, 'isChatEnabled')
+                      }
+                      aria-label={
+                        config.isChatEnabled
+                          ? 'Disable chat for model'
+                          : 'Enable chat for model'
+                      }
+                    />
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {config.lastSyncedAt
@@ -973,8 +992,8 @@ export default function ModelManagement() {
               </div>
             </div>
 
-            {!isCreate && (
-              <div className="flex items-center gap-6">
+            <div className="flex items-center gap-6">
+              {!isCreate && (
                 <div className="flex items-center gap-2">
                   <Switch
                     id="isActive"
@@ -985,6 +1004,18 @@ export default function ModelManagement() {
                   />
                   <Label htmlFor="isActive">Active</Label>
                 </div>
+              )}
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="isChatEnabled"
+                  checked={formState.isChatEnabled}
+                  onCheckedChange={(v) =>
+                    setFormState({ ...formState, isChatEnabled: v })
+                  }
+                />
+                <Label htmlFor="isChatEnabled">Chat Enabled</Label>
+              </div>
+              {!isCreate && (
                 <div className="flex items-center gap-2">
                   <Switch
                     id="isDeprecated"
@@ -995,8 +1026,8 @@ export default function ModelManagement() {
                   />
                   <Label htmlFor="isDeprecated">Deprecated</Label>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <JsonField
               label="Parameter Map"

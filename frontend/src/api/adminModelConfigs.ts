@@ -16,6 +16,7 @@ export interface ModelConfig {
   costConfig?: Record<string, unknown>
   comfyuiWorkflow?: string
   isActive: boolean
+  isChatEnabled: boolean
   isDeprecated: boolean
   lastSyncedAt?: string
   createdAt: string
@@ -36,6 +37,7 @@ export interface CreateModelConfigRequest {
   constraints?: Record<string, unknown>
   costConfig?: Record<string, unknown>
   comfyuiWorkflow?: string
+  isChatEnabled?: boolean
 }
 
 export interface UpdateModelConfigRequest {
@@ -50,6 +52,7 @@ export interface UpdateModelConfigRequest {
   costConfig?: Record<string, unknown>
   comfyuiWorkflow?: string
   isActive?: boolean
+  isChatEnabled?: boolean
   isDeprecated?: boolean
 }
 
@@ -58,6 +61,7 @@ export interface ListModelConfigsParams {
   modality?: string
   capability?: string
   isActive?: boolean
+  chatEnabled?: boolean
 }
 
 export interface SyncResult {
@@ -72,6 +76,7 @@ export const adminModelConfigsApi = {
     if (params?.modality) queryParams.modality = params.modality
     if (params?.capability) queryParams.capability = params.capability
     if (params?.isActive !== undefined) queryParams.is_active = String(params.isActive)
+    if (params?.chatEnabled !== undefined) queryParams.chat_enabled = String(params.chatEnabled)
 
     const response = await api.get<ModelConfig[]>('/admin/model-configs', {
       params: queryParams,
@@ -100,6 +105,7 @@ export const adminModelConfigsApi = {
       constraints: data.constraints,
       cost_config: data.costConfig,
       comfyui_workflow: data.comfyuiWorkflow,
+      is_chat_enabled: data.isChatEnabled,
     }
     const response = await api.post<ModelConfig>('/admin/model-configs', payload)
     return response.data
@@ -119,6 +125,7 @@ export const adminModelConfigsApi = {
     if (data.costConfig !== undefined) payload.cost_config = data.costConfig
     if (data.comfyuiWorkflow !== undefined) payload.comfyui_workflow = data.comfyuiWorkflow
     if (data.isActive !== undefined) payload.is_active = data.isActive
+    if (data.isChatEnabled !== undefined) payload.is_chat_enabled = data.isChatEnabled
     if (data.isDeprecated !== undefined) payload.is_deprecated = data.isDeprecated
 
     const response = await api.put<ModelConfig>(`/admin/model-configs/${id}`, payload)
