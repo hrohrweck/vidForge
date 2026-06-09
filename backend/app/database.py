@@ -361,10 +361,10 @@ class Job(Base):
         back_populates="job", cascade="all, delete-orphan"
     )
     avatar_assignments: Mapped[list["JobAvatar"]] = relationship(
-        back_populates="job", lazy="selectin"
+        back_populates="job", lazy="selectin", cascade="all, delete-orphan"
     )
     object_ref_assignments: Mapped[list["JobObjectRef"]] = relationship(
-        back_populates="job"
+        back_populates="job", cascade="all, delete-orphan"
     )
 
 
@@ -516,6 +516,7 @@ class ModelConfig(Base):
     cost_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     comfyui_workflow: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_chat_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_deprecated: Mapped[bool] = mapped_column(Boolean, default=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
