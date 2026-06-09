@@ -29,7 +29,17 @@ vi.mock('../../api/objects', () => ({
     list: vi.fn(),
     get: vi.fn(),
     delete: vi.fn(),
+    create: vi.fn(),
+    uploadImage: vi.fn(),
   },
+}))
+
+
+// ─── Mock toast module ────────────────────────────────────────────────
+
+const mockToast = vi.fn()
+vi.mock('../../hooks/use-toast', () => ({
+  toast: (...args: unknown[]) => mockToast(...args),
 }))
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -65,24 +75,24 @@ function mockAvatar(overrides: Partial<Avatar> = {}): Avatar {
 function mockObject(overrides: Partial<ObjectRef> = {}): ObjectRef {
   return {
     id: 'obj-1',
-    user_id: 'user-1',
+    userId: 'user-1',
     name: 'Red Car',
     description: 'A fast red sports car',
     category: 'vehicle',
-    visual_properties: { color: 'red' },
+    visualProperties: { color: 'red' },
     images: [
       {
         id: 'objimg-1',
-        storage_path: '/objects/car/front.png',
-        is_primary: true,
-        sort_order: 0,
+        storagePath: '/objects/car/front.png',
+        isPrimary: true,
+        sortOrder: 0,
         width: 1024,
         height: 768,
       },
     ],
-    job_count: 2,
-    created_at: '2024-05-01T00:00:00Z',
-    updated_at: '2024-05-01T00:00:00Z',
+    jobCount: 2,
+    createdAt: '2024-05-01T00:00:00Z',
+    updatedAt: '2024-05-01T00:00:00Z',
     ...overrides,
   }
 }
@@ -293,6 +303,133 @@ describe('Avatars Page', () => {
     })
   })
 
+
+  // ── Bug Fix Tests ──────────────────────────────────────────────
+
+  // 9. test_image_streaming_fallback
+  it('uses streaming URL fallback when thumbnailUrl is null', async () => {
+    vi.mocked(avatarsApi.list).mockResolvedValue({
+      avatars: [
+        mockAvatar({
+          name: 'StreamTest',
+          images: [
+            {
+              id: 'img-stream',
+              storagePath: '/avatars/stream-test.png',
+              isPrimary: true,
+              sortOrder: 0,
+              width: 512,
+              height: 512,
+              thumbnailUrl: null as unknown as undefined,
+            },
+          ],
+        }),
+      ],
+      total: 1,
+    })
+
+    renderWithProviders(<Avatars />)
+
+    await waitFor(() => {
+      expect(screen.getByText('StreamTest')).toBeInTheDocument()
+    })
+
+    const img = screen.getByAltText('StreamTest') as HTMLImageElement
+    expect(img).toBeInTheDocument()
+    // storagePath starts with / so URL is /api/uploads/stream//avatars/...
+    expect(img.src).toContain('/api/uploads/stream/')
+    expect(img.src).toContain('avatars/stream-test.png')
+  })
+
+  // 10. test_consistency_strategy_preserved_in_edit
+  it('preserves consistency strategy when opening edit modal', async () => {
+    vi.mocked(avatarsApi.list).mockResolvedValue({
+      avatars: [mockAvatar({ name: 'FaceSwapChar', consistencyStrategy: 'face_swap' })],
+      total: 1,
+    })
+
+    const user = userEvent.setup()
+    renderWithProviders(<Avatars />)
+
+    await waitFor(() => {
+      expect(screen.getByText('FaceSwapChar')).toBeInTheDocument()
+    })
+
+    // Click the card to open edit modal
+    const card = screen.getByRole('button', { name: /faceswapchar/i })
+    await user.click(card)
+
+    await waitFor(() => {
+      expect(screen.getByText('Edit Avatar')).toBeInTheDocument()
+    })
+
+    // The strategy select trigger should show "Face-swap", not the placeholder
+    // Radix Select renders the selected value text inside the trigger button
+    // Use getAllByText since "Face-swap" also appears in the Badge on the card
+    const faceSwapElements = screen.getAllByText('Face-swap')
+    expect(faceSwapElements.length).toBeGreaterThanOrEqual(1)
+    // At least one should be inside a button (the Select trigger)
+    const inButton = faceSwapElements.some((el) => el.closest('button') !== null)
+    expect(inButton).toBe(true)
+  })
+
+  // 11. test_generate_poses_calls_api_and_shows_feedback
+  it('calls generatePoses API and shows queued feedback', async () => {
+    vi.mocked(avatarsApi.generatePoses).mockResolvedValue(undefined)
+    vi.mocked(avatarsApi.list).mockResolvedValue({
+      avatars: [
+        mockAvatar({
+          name: 'PoseChar',
+          images: [
+            {
+              id: 'img-pose',
+              storagePath: '/avatars/pose.png',
+              isPrimary: true,
+              sortOrder: 0,
+              width: 512,
+              height: 512,
+              thumbnailUrl: '/thumbnails/pose.jpg',
+            },
+          ],
+        }),
+      ],
+      total: 1,
+    })
+
+    const user = userEvent.setup()
+    renderWithProviders(<Avatars />)
+
+    await waitFor(() => {
+      expect(screen.getByText('PoseChar')).toBeInTheDocument()
+    })
+
+    // Open edit modal
+    const card = screen.getByRole('button', { name: /posechar/i })
+    await user.click(card)
+
+    await waitFor(() => {
+      expect(screen.getByText('Edit Avatar')).toBeInTheDocument()
+    })
+
+    // Click Generate Reference Poses button
+    const generatePosesBtn = screen.getByRole('button', { name: /generate reference poses/i })
+    expect(generatePosesBtn).toBeInTheDocument()
+    await user.click(generatePosesBtn)
+
+    // Assert API was called
+    await waitFor(() => {
+      expect(avatarsApi.generatePoses).toHaveBeenCalledWith('avatar-1')
+    })
+
+    // Assert toast feedback was triggered
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith(
+        'Reference poses queued for generation',
+        'success',
+      )
+    })
+  })
+
   // ── Objects Tab Tests ─────────────────────────────────────────
 
   describe('Objects Tab', () => {
@@ -329,7 +466,7 @@ describe('Avatars Page', () => {
             description: 'A ceramic vase',
             category: 'decor',
             images: [],
-            job_count: 0,
+            jobCount: 0,
           }),
         ],
         total: 2,
@@ -435,5 +572,61 @@ describe('Avatars Page', () => {
         expect(objectsApi.delete).toHaveBeenCalledWith('obj-1')
       })
     })
+
+    // 12. test_create_object_flow
+    it('creates an object via the Create Object modal', async () => {
+      vi.mocked(objectsApi.create).mockResolvedValue(
+        mockObject({ id: 'obj-new', name: 'New Object' }),
+      )
+      vi.mocked(objectsApi.uploadImage).mockResolvedValue({
+        image: {
+          id: 'objimg-new',
+          storagePath: '/objects/new.png',
+          isPrimary: true,
+          sortOrder: 0,
+          width: 512,
+          height: 512,
+        },
+        object: mockObject({ id: 'obj-new', name: 'New Object' }),
+      })
+
+      const user = userEvent.setup()
+      renderWithProviders(<Avatars />)
+
+      // Switch to Objects tab
+      const objectsTab = screen.getByRole('button', { name: /objects/i })
+      await user.click(objectsTab)
+
+      await waitFor(() => {
+        expect(screen.getByText('No objects yet')).toBeInTheDocument()
+      })
+
+      // Click Create Object button
+      const createObjButtons = screen.getAllByRole('button', { name: /create object/i })
+      await user.click(createObjButtons[0])
+
+      // Dialog should open
+      const dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByRole('heading', { name: 'Create Object' })).toBeInTheDocument()
+
+      // Fill in the name
+      const nameInput = screen.getByLabelText('Name *')
+      await user.type(nameInput, 'Test Object')
+
+      // Submit
+      const submitButton = within(dialog).getByRole('button', { name: /create object/i })
+      expect(submitButton).not.toBeDisabled()
+      await user.click(submitButton)
+
+      // Assert API was called
+      await waitFor(() => {
+        expect(objectsApi.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'Test Object',
+          }),
+        )
+      })
+    })
+
   })
 })

@@ -64,7 +64,7 @@ async def test_create_avatar_success(authenticated_client):
         "name": "Test Avatar",
         "gender": "Female",
         "bio": "A test bio",
-        "consistency_strategy": "face_swap",
+        "consistencyStrategy": "face_swap",
     }
     response = await authenticated_client.post("/api/avatars", json=payload)
     assert response.status_code == 201
@@ -73,13 +73,13 @@ async def test_create_avatar_success(authenticated_client):
     assert data["name"] == "Test Avatar"
     assert data["gender"] == "Female"
     assert data["bio"] == "A test bio"
-    assert data["consistency_strategy"] == "face_swap"
+    assert data["consistencyStrategy"] == "face_swap"
     assert "id" in data
-    assert "user_id" in data
+    assert "userId" in data
     assert "images" in data
     assert data["images"] == []
-    assert "created_at" in data
-    assert "updated_at" in data
+    assert "createdAt" in data
+    assert "updatedAt" in data
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_create_avatar_default_strategy(authenticated_client):
     payload = {"name": "Default Avatar", "gender": "Male"}
     response = await authenticated_client.post("/api/avatars", json=payload)
     assert response.status_code == 201
-    assert response.json()["consistency_strategy"] == "ip_adapter"
+    assert response.json()["consistencyStrategy"] == "ip_adapter"
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_create_avatar_invalid_consistency_strategy(authenticated_client):
     payload = {
         "name": "Bad Strategy",
         "gender": "Male",
-        "consistency_strategy": "invalid_strategy",
+        "consistencyStrategy": "invalid_strategy",
     }
     response = await authenticated_client.post("/api/avatars", json=payload)
     assert response.status_code == 422
@@ -384,9 +384,9 @@ async def test_upload_image_success(authenticated_client):
     assert response.status_code == 201
     data = response.json()
     assert "id" in data
-    assert data["storage_path"].startswith("avatars/")
-    assert data["is_primary"] is True  # first image is primary
-    assert data["sort_order"] >= 1
+    assert data["storagePath"].startswith("avatars/")
+    assert data["isPrimary"] is True  # first image is primary
+    assert data["sortOrder"] >= 1
 
 
 @pytest.mark.asyncio
@@ -449,14 +449,14 @@ async def test_set_primary_image_success(authenticated_client):
         files={"file": ("img1.png", _make_png(), "image/png")},
     )
     img1_id = img1.json()["id"]
-    assert img1.json()["is_primary"] is True  # first is auto-primary
+    assert img1.json()["isPrimary"] is True  # first is auto-primary
 
     img2 = await authenticated_client.post(
         f"/api/avatars/{avatar_id}/images",
         files={"file": ("img2.png", _make_png(2, 2), "image/png")},
     )
     img2_id = img2.json()["id"]
-    assert img2.json()["is_primary"] is False  # second is not
+    assert img2.json()["isPrimary"] is False  # second is not
 
     # Set img2 as primary
     response = await authenticated_client.put(
@@ -467,9 +467,9 @@ async def test_set_primary_image_success(authenticated_client):
 
     # Verify img2 is now primary in the response
     imgs = {img["id"]: img for img in data["images"]}
-    assert imgs[img2_id]["is_primary"] is True
-    assert imgs[img1_id]["is_primary"] is False
-    assert data["primary_image_id"] == img2_id
+    assert imgs[img2_id]["isPrimary"] is True
+    assert imgs[img1_id]["isPrimary"] is False
+    assert data["primaryImageId"] == img2_id
 
 
 @pytest.mark.asyncio
@@ -598,7 +598,7 @@ async def test_create_avatar_minimal_fields(authenticated_client):
     assert response.status_code == 201
     data = response.json()
     assert data["bio"] is None
-    assert data["consistency_strategy"] == "ip_adapter"
+    assert data["consistencyStrategy"] == "ip_adapter"
 
 
 @pytest.mark.asyncio
