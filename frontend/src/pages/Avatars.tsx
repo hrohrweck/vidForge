@@ -100,12 +100,13 @@ const LORA_STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'outline' |
 
 function getImageUrl(
   image: { thumbnailUrl?: string; storagePath: string },
-  avatarId?: string
+  entityId?: string,
+  entityType: 'avatar' | 'object' = 'avatar'
 ): string {
   if (image.thumbnailUrl) return image.thumbnailUrl
-  if (avatarId) {
+  if (entityId) {
     const filename = image.storagePath.split('/').pop()
-    return `/api/avatars/${avatarId}/stream/${filename}`
+    return `/api/${entityType}s/${entityId}/stream/${filename}`
   }
   return `/api/uploads/stream/${image.storagePath}`
 }
@@ -220,7 +221,7 @@ function ObjectCard({
       <div className="aspect-square bg-muted relative overflow-hidden">
         {hasImage ? (
           <img
-            src={getImageUrl(primaryImage!)}
+            src={getImageUrl(primaryImage!, object.id, 'object')}
             alt={object.name}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
           />

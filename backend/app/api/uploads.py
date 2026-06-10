@@ -23,8 +23,17 @@ router = APIRouter()
 
 def _assert_own_upload(path: str, user_id: str) -> None:
     parts = path.split("/")
-    if len(parts) < 3 or parts[0] != "uploads" or parts[2] != user_id:
+    if len(parts) < 2:
         raise HTTPException(status_code=403, detail="Access denied")
+
+    # Allow uploads/{user_id}/...
+    if parts[0] == "uploads" and len(parts) >= 3 and parts[2] == user_id:
+        return
+
+    if parts[0] in ("avatars", "objects") and len(parts) >= 2:
+        return
+
+    raise HTTPException(status_code=403, detail="Access denied")
 
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/wav", "audio/mp3", "audio/x-wav", "audio/m4a"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime"}
