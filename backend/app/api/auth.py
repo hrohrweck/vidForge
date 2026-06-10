@@ -317,7 +317,7 @@ async def logout(response: Response) -> dict:
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
     response: Response,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> Token:
     token = create_access_token(data={"sub": str(current_user.id)})
     response.set_cookie(
