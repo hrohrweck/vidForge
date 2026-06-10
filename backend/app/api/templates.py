@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, require_admin
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie, require_admin
 from app.database import Template, User, get_db
 
 router = APIRouter()
@@ -25,7 +25,7 @@ class PluginInfo(BaseModel):
 
 @router.get("/plugins/list", response_model=list[PluginInfo])
 async def list_plugins(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> list[PluginInfo]:
     from app.plugins.registry import get_all_plugins
     return [
@@ -58,7 +58,7 @@ class TemplateResponse(BaseModel):
 
 @router.get("", response_model=list[TemplateResponse])
 async def list_templates(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> list[Template]:
     result = await db.execute(select(Template).order_by(Template.name))
@@ -86,7 +86,7 @@ async def create_template(
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
     template_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Template:
     result = await db.execute(select(Template).where(Template.id == template_id))

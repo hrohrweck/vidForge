@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, require_admin
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie, require_admin
 from app.database import ModelConfig, Provider, User, get_db
 from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
@@ -162,7 +162,7 @@ class SyncModelsResponse(BaseModel):
 
 @router.get("/status", response_model=list[ProviderStatusResponse])
 async def list_providers_status(
-    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user_from_bearer_or_cookie)
 ):
     router = JobRouter(db)
     statuses = await router.get_all_providers_status()
@@ -198,7 +198,7 @@ async def list_providers_status(
 
 @router.get("", response_model=list[ProviderResponse])
 async def list_providers(
-    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user_from_bearer_or_cookie)
 ):
     result = await db.execute(select(Provider).order_by(Provider.priority.desc()))
     return list(result.scalars().all())
@@ -238,7 +238,7 @@ async def create_provider(
 
 @router.get("/{provider_id}", response_model=ProviderResponse)
 async def get_provider(
-    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user_from_bearer_or_cookie)
 ):
     result = await db.execute(select(Provider).where(Provider.id == provider_id))
     provider = result.scalar_one_or_none()
@@ -309,7 +309,7 @@ async def delete_provider(
 
 @router.get("/{provider_id}/status", response_model=ProviderStatusResponse)
 async def get_provider_status(
-    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user_from_bearer_or_cookie)
 ):
     result = await db.execute(select(Provider).where(Provider.id == provider_id))
     provider = result.scalar_one_or_none()
@@ -338,7 +338,7 @@ async def get_provider_status(
 
 @router.get("/{provider_id}/workers", response_model=list[WorkerResponse])
 async def list_provider_workers(
-    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+    provider_id: UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user_from_bearer_or_cookie)
 ):
     registry_ = WorkerRegistry(db)
     workers = await registry_.get_all_workers(provider_id)
@@ -383,7 +383,7 @@ async def reset_provider_spend(
 async def list_provider_models(
     provider_id: UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_from_bearer_or_cookie),
 ):
     """List all model configurations for a provider."""
     result = await db.execute(select(Provider).where(Provider.id == provider_id))

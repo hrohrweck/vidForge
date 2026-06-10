@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.database import ModelConfig, Provider, User, UserSettings, get_db
 from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import get_family_variants, is_family_id
@@ -308,7 +308,7 @@ async def get_chat_models_endpoint_v2(
 
 @router.get("/preferences")
 async def get_model_preferences(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
@@ -324,7 +324,7 @@ async def get_model_preferences(
 @router.put("/preferences")
 async def update_model_preferences(
     prefs: ModelPreferences,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))

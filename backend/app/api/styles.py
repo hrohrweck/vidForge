@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, require_admin
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie, require_admin
 from app.database import Style, User, get_db
 
 router = APIRouter()
@@ -32,7 +32,7 @@ class StyleResponse(BaseModel):
 @router.get("", response_model=list[StyleResponse])
 async def list_styles(
     category: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> list[Style]:
     query = select(Style).order_by(Style.name)
@@ -68,7 +68,7 @@ async def create_style(
 @router.get("/{style_id}", response_model=StyleResponse)
 async def get_style(
     style_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Style:
     result = await db.execute(select(Style).where(Style.id == style_id))

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import ObjectRef, ObjectRefImage, User, get_db
 
@@ -163,7 +163,7 @@ async def _get_max_sort_order(db: AsyncSession, object_ref_id: UUID) -> int:
 async def list_objects(
     skip: int = 0,
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ObjectRefListResponse:
     """List current user's non-deleted object refs."""
@@ -199,7 +199,7 @@ async def list_objects(
 @router.post("", response_model=ObjectRefResponse, status_code=status.HTTP_201_CREATED)
 async def create_object_ref(
     data: ObjectRefCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ObjectRefResponse:
     obj = ObjectRef(
@@ -218,7 +218,7 @@ async def create_object_ref(
 @router.get("/{object_ref_id}", response_model=ObjectRefResponse)
 async def get_object_ref(
     object_ref_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ObjectRefResponse:
     """Get a single object ref by id."""
@@ -234,7 +234,7 @@ async def get_object_ref(
 async def upload_object_ref_image(
     object_ref_id: UUID,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ObjectRefImageUploadResponse:
     obj = await _get_object_ref_or_404(object_ref_id, current_user.id, db)
@@ -294,7 +294,7 @@ async def upload_object_ref_image(
 @router.delete("/{object_ref_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_object_ref(
     object_ref_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Soft-delete an object ref. Preserves job references."""

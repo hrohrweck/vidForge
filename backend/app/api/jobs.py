@@ -181,7 +181,7 @@ async def list_jobs(
     project_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> list[Job]:
     query = (
@@ -206,7 +206,7 @@ async def list_jobs(
 async def create_job(
     job_data: JobCreate,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
     _rate_limit: None = Depends(job_create_rate_limiter),
 ) -> Job:
@@ -319,7 +319,7 @@ async def create_job(
 @router.post("/{job_id}/start")
 async def start_job(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -340,7 +340,7 @@ async def start_job(
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     result = await db.execute(
@@ -363,7 +363,7 @@ class JobPatchRequest(BaseModel):
 async def patch_job(
     job_id: UUID,
     data: JobPatchRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -381,7 +381,7 @@ async def patch_job(
 @router.get("/{job_id}/objects", response_model=list[JobObjectDetail])
 async def get_job_objects(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> list[JobObjectDetail]:
     """Return object references assigned to a job with role/importance metadata."""
@@ -418,7 +418,7 @@ async def get_job_objects(
 @router.delete("/{job_id}")
 async def delete_job(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -434,7 +434,7 @@ async def delete_job(
 @router.post("/{job_id}/retry", response_model=JobResponse)
 async def retry_job(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -468,7 +468,7 @@ async def retry_job(
 @router.post("/batch", response_model=BatchJobResponse)
 async def create_batch_jobs(
     batch_data: BatchJobCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Template).where(Template.id == batch_data.template_id))
@@ -517,7 +517,7 @@ async def create_jobs_from_csv(
     auto_start: bool = True,
     provider_preference: str = "auto",
     model_preference: str | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Template).where(Template.id == template_id))

@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import User
 from app.storage import get_storage_backend
@@ -28,7 +28,7 @@ class FileListResponse(BaseModel):
 
 @router.get("/config", response_model=StorageConfigResponse, response_model_exclude_unset=True)
 async def get_storage_config(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> dict[str, Any]:
     if not current_user.is_superuser:
         return {"backend": settings.storage_backend}
@@ -52,7 +52,7 @@ async def get_storage_config(
 @router.get("/files", response_model=FileListResponse)
 async def list_files(
     prefix: str = "",
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> dict[str, list]:
     storage = get_storage_backend()
     files = await storage.list_files(f"users/{current_user.id}/{prefix}")
@@ -62,7 +62,7 @@ async def list_files(
 @router.delete("/files/{path:path}")
 async def delete_file(
     path: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> dict[str, str]:
     storage = get_storage_backend()
     full_path = f"users/{current_user.id}/{path}"

@@ -993,7 +993,7 @@ class QuickGenerateResponse(BaseModel):
 @router.post("/generate", status_code=202)
 async def quick_generate_media(
     req: QuickGenerateRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ):
     """Queue quick media generation. Media appears in library when done."""
     from app.workers.tasks import generate_quick_media

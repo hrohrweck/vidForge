@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import Avatar, AvatarImage, User, get_db
 
@@ -200,7 +200,7 @@ async def _get_max_sort_order(db: AsyncSession, avatar_id: UUID) -> int:
 async def list_avatars(
     skip: int = 0,
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarListResponse:
     """List current user's non-deleted avatars."""
@@ -232,7 +232,7 @@ async def list_avatars(
 @router.post("", response_model=AvatarResponse, status_code=status.HTTP_201_CREATED)
 async def create_avatar(
     data: AvatarCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarResponse:
     """Create a new avatar for the current user."""
@@ -252,7 +252,7 @@ async def create_avatar(
 @router.get("/{avatar_id}", response_model=AvatarResponse)
 async def get_avatar(
     avatar_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarResponse:
     """Get a single avatar by id."""
@@ -264,7 +264,7 @@ async def get_avatar(
 async def update_avatar(
     avatar_id: UUID,
     data: AvatarUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarResponse:
     """Update an avatar. Only provided fields are changed."""
@@ -283,7 +283,7 @@ async def update_avatar(
 @router.delete("/{avatar_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_avatar(
     avatar_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Soft-delete an avatar. Preserves job references."""
@@ -309,7 +309,7 @@ async def delete_avatar(
 async def upload_avatar_image(
     avatar_id: UUID,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarImageUploadResponse:
     """Upload an image for an avatar.  JPEG/PNG/WebP, max 10MB."""
@@ -385,7 +385,7 @@ async def upload_avatar_image(
 async def delete_avatar_image(
     avatar_id: UUID,
     image_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Delete an avatar image. Auto-assigns next primary if needed."""
@@ -434,7 +434,7 @@ async def delete_avatar_image(
 async def set_primary_image(
     avatar_id: UUID,
     image_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AvatarResponse:
     """Set an image as the primary for this avatar."""
@@ -463,7 +463,7 @@ async def set_primary_image(
 @router.post("/{avatar_id}/train-lora", status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def train_avatar_lora(
     avatar_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     avatar = await db.get(Avatar, avatar_id)
@@ -479,7 +479,7 @@ async def train_avatar_lora(
 @router.post("/{avatar_id}/generate-poses", status_code=status.HTTP_202_ACCEPTED)
 async def generate_avatar_poses(
     avatar_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

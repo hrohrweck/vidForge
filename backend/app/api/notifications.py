@@ -21,7 +21,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import require_admin
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.api.schemas.notifications import (
     ErrorEventListResponse,
     ErrorEventResponse,
@@ -45,7 +45,7 @@ async def list_notifications(
     unread_only: bool = Query(False),
     limit: int = Query(50, ge=1, le=_MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ErrorEventListResponse:
     """Return paginated error events for the authenticated user.
@@ -101,7 +101,7 @@ async def list_notifications(
 
 @router.get("/unread-count", response_model=dict[str, int])
 async def get_unread_count(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
     """Return the number of unread notifications for the current user."""
@@ -122,7 +122,7 @@ async def get_unread_count(
 @router.post("/{event_id}/read", response_model=MarkReadResponse)
 async def mark_notification_read(
     event_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> MarkReadResponse:
     """Mark a single notification as read.
@@ -150,7 +150,7 @@ async def mark_notification_read(
 
 @router.post("/mark-all-read", response_model=MarkReadResponse)
 async def mark_all_notifications_read(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> MarkReadResponse:
     """Mark all unread notifications as read for the current user."""

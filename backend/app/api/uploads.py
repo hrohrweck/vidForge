@@ -94,7 +94,7 @@ async def save_upload(file: UploadFile, category: str, user_id: str) -> UploadRe
 
 @router.post("/audio", response_model=UploadResponse)
 async def upload_audio(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
     file: Annotated[UploadFile, File(...)],
 ) -> UploadResponse:
     validate_file(file, ALLOWED_AUDIO_TYPES)
@@ -103,7 +103,7 @@ async def upload_audio(
 
 @router.post("/video", response_model=UploadResponse)
 async def upload_video(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
     file: Annotated[UploadFile, File(...)],
 ) -> UploadResponse:
     validate_file(file, ALLOWED_VIDEO_TYPES)
@@ -112,7 +112,7 @@ async def upload_video(
 
 @router.post("/image", response_model=UploadResponse)
 async def upload_image(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
     file: Annotated[UploadFile, File(...)],
 ) -> UploadResponse:
     validate_file(file, ALLOWED_IMAGE_TYPES)
@@ -121,7 +121,7 @@ async def upload_image(
 
 @router.post("/any", response_model=UploadResponse)
 async def upload_any(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
     file: Annotated[UploadFile, File(...)],
 ) -> UploadResponse:
     all_types = ALLOWED_AUDIO_TYPES | ALLOWED_VIDEO_TYPES | ALLOWED_IMAGE_TYPES
@@ -140,7 +140,7 @@ async def upload_any(
 @router.get("/download/{path:path}")
 async def download_file(
     path: str,
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
 ) -> Response:
     _assert_own_upload(path, str(current_user.id))
     storage = get_storage_backend()
@@ -226,7 +226,7 @@ async def get_video_thumbnail(
     timestamp: float = 0.0,
     width: int = 320,
     height: int = 180,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> Response:
     _assert_own_upload(path, str(current_user.id))
 
@@ -272,7 +272,7 @@ async def get_video_thumbnails(
     count: int = 5,
     width: int = 320,
     height: int = 180,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> ThumbnailResponse:
     _assert_own_upload(path, str(current_user.id))
 

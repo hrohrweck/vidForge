@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.api.schemas.chat import (
     ChatStreamMessageCreate,
     ConversationCreate,
@@ -106,7 +106,7 @@ def _resolve_kind_and_validate(file: UploadFile, content: bytes) -> tuple[str, i
 
 @router.post("/uploads", response_model=ChatUploadResponse)
 async def upload_chat_attachment(
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
     file: Annotated[UploadFile, File(...)],
 ) -> ChatUploadResponse:
     content = await file.read()
@@ -187,7 +187,7 @@ def _date_filter_in_range(
 async def get_token_usage(
     from_date: datetime | None = Query(None, description="Start date (ISO format)"),
     to_date: datetime | None = Query(None, description="End date (ISO format)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> TokenUsageAggregationResponse:
     service = TokenUsageService()
@@ -233,7 +233,7 @@ async def get_token_usage(
 
 @router.get("/conversations", response_model=ConversationListResponse)
 async def list_conversations(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationListResponse:
     service = ConversationService(db)
@@ -246,7 +246,7 @@ async def list_conversations(
 @router.post("/conversations", response_model=ConversationOut, status_code=201)
 async def create_conversation(
     data: ConversationCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationOut:
     service = ConversationService(db)
@@ -262,7 +262,7 @@ async def create_conversation(
 @router.get("/conversations/{conversation_id}", response_model=ConversationOut)
 async def get_conversation(
     conversation_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationOut:
     service = ConversationService(db)
@@ -274,7 +274,7 @@ async def get_conversation(
 async def rename_conversation(
     conversation_id: UUID,
     data: ConversationRename,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationOut:
     service = ConversationService(db)
@@ -285,7 +285,7 @@ async def rename_conversation(
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(
     conversation_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     service = ConversationService(db)
@@ -297,7 +297,7 @@ async def list_messages(
     conversation_id: UUID,
     limit: int = Query(50, ge=1, le=200),
     before: UUID | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> MessageListResponse:
     service = ConversationService(db)
@@ -314,7 +314,7 @@ async def list_messages(
 async def create_message_stream(
     conversation_id: UUID,
     data: ChatStreamMessageCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     service = ConversationService(db)
@@ -358,7 +358,7 @@ async def create_message_stream(
 async def search_chat(
     q: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ):
     result = await db.execute(
         select(Message, Conversation)

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.database import get_db
 
 router = APIRouter()
@@ -16,7 +16,7 @@ async def token_usage(
     to_date: date | None = Query(None, alias="to"),
     group_by: str = Query("day", pattern="^(month|day|hour)$"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_from_bearer_or_cookie),
 ):
     if not to_date:
         to_date = date.today()
@@ -59,7 +59,7 @@ async def dashboard_cost(
     to_date: date | None = Query(None, alias="to"),
     group_by: str = Query("day", pattern="^(month|day|hour)$"),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user_from_bearer_or_cookie),
 ):
     if not to_date:
         to_date = date.today()

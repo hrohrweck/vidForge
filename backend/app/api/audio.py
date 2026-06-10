@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import User
 from app.services.audio_generation import MusicGenService
@@ -40,7 +40,7 @@ class AudioCraftStatus(BaseModel):
 
 @router.get("/status", response_model=AudioCraftStatus)
 async def get_audiocraft_status(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> AudioCraftStatus:
     settings = get_settings()
     svc = MusicGenService()
@@ -53,7 +53,7 @@ async def get_audiocraft_status(
 @router.post("/generate-music", response_model=MusicGenResponse)
 async def generate_music(
     req: MusicGenRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
 ) -> MusicGenResponse:
     svc = MusicGenService()
     if not await svc.is_available():

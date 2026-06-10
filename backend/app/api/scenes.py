@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import Job, User, VideoScene, get_db
 from app.services.lyrics_extractor import LyricsExtractor, LyricsExtractorError
@@ -95,7 +95,7 @@ class AudioMetadataResponse(BaseModel):
 @router.get("/{job_id}/audio-metadata", response_model=AudioMetadataResponse)
 async def get_audio_metadata(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> AudioMetadataResponse:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -124,7 +124,7 @@ async def get_audio_metadata(
 async def extract_lyrics(
     job_id: UUID,
     request: LyricsExtractRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -157,7 +157,7 @@ async def extract_lyrics(
 async def set_manual_lyrics(
     job_id: UUID,
     request: ManualLyricsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -185,7 +185,7 @@ class UpdateLyricsRequest(BaseModel):
 async def update_lyrics(
     job_id: UUID,
     request: UpdateLyricsRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -253,7 +253,7 @@ async def update_lyrics(
 async def plan_scenes(
     job_id: UUID,
     request: ScenePlanRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -332,7 +332,7 @@ async def plan_scenes(
 @router.get("/{job_id}/scenes")
 async def get_scenes(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> list[SceneResponse]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -351,7 +351,7 @@ async def get_scenes(
 @router.post("/{job_id}/scenes", response_model=SceneResponse)
 async def create_scene(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> SceneResponse:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -397,7 +397,7 @@ async def update_scene(
     job_id: UUID,
     scene_id: UUID,
     updates: SceneUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> SceneResponse:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -439,7 +439,7 @@ async def update_scene(
 async def delete_scene(
     job_id: UUID,
     scene_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -464,7 +464,7 @@ async def delete_scene(
 async def reorder_scenes(
     job_id: UUID,
     scene_ids: list[UUID],
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -490,7 +490,7 @@ async def reorder_scenes(
 async def update_job_stage(
     job_id: UUID,
     updates: JobStageUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -507,7 +507,7 @@ async def update_job_stage(
 @router.post("/{job_id}/scenes/regenerate-prompts")
 async def regenerate_scene_prompts(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -579,7 +579,7 @@ async def generate_scene_image(
     job_id: UUID,
     scene_id: UUID,
     request: SceneGenerateRequest | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -612,7 +612,7 @@ async def generate_scene_video(
     job_id: UUID,
     scene_id: UUID,
     request: SceneGenerateRequest | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -643,7 +643,7 @@ async def generate_scene_video(
 @router.post("/{job_id}/scenes/regenerate-all")
 async def regenerate_all(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Full regeneration: re-plan scenes, then generate images + videos.
@@ -729,7 +729,7 @@ async def regenerate_all(
 async def generate_all_images(
     job_id: UUID,
     request: SceneGenerateRequest | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -754,7 +754,7 @@ async def generate_all_images(
 async def generate_all_videos(
     job_id: UUID,
     request: SceneGenerateRequest | None = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -779,7 +779,7 @@ async def generate_all_videos(
 async def export_job(
     job_id: UUID,
     request: ExportRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -808,7 +808,7 @@ async def export_job(
 @router.get("/{job_id}/export-options")
 async def get_export_options(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
@@ -842,7 +842,7 @@ async def get_export_options(
 @router.post("/{job_id}/cancel")
 async def cancel_job_operations(
     job_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Cancel all pending operations for a job.

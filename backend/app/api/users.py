@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import UserResponse, get_current_user
+from app.api.auth import UserResponse, get_current_user, get_current_user_from_bearer_or_cookie
 from app.database import ModelConfig, User, UserSettings, get_db
 
 router = APIRouter()
@@ -33,13 +33,13 @@ class UserSettingsUpdate(BaseModel):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_user_me(current_user: User = Depends(get_current_user)) -> User:
+async def get_user_me(current_user: User = Depends(get_current_user_from_bearer_or_cookie)) -> User:
     return current_user
 
 
 @router.get("/settings", response_model=UserSettingsResponse)
 async def get_user_settings(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> UserSettings:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
@@ -57,7 +57,7 @@ async def get_user_settings(
 @router.put("/settings", response_model=UserSettingsResponse)
 async def update_user_settings(
     settings_data: UserSettingsUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> UserSettings:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
@@ -94,7 +94,7 @@ class ChatModelResponse(BaseModel):
 
 @router.get("/settings/chat-model", response_model=ChatModelResponse)
 async def get_chat_model(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ChatModelResponse:
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
@@ -109,7 +109,7 @@ async def get_chat_model(
 @router.put("/settings/chat-model", response_model=ChatModelResponse)
 async def update_chat_model(
     data: ChatModelRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> ChatModelResponse:
     from sqlalchemy.orm import selectinload
