@@ -6,6 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from PIL import Image as PILImage
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic.alias_generators import to_camel
@@ -16,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import Avatar, AvatarImage, User, get_db
+from app.storage import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -507,3 +509,49 @@ async def generate_avatar_poses(
 
     generate_avatar_poses_task.delay(str(avatar_id))
     return {"status": "queued", "avatar_id": str(avatar_id)}
+
+
+@router.get("/{avatar_id}/stream/{filename}")
+async def stream_avatar_image(
+    avatar_id: UUID,
+    filename: str,
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    avatar = await _get_avatar_or_404(avatar_id, current_user.id, db)
+
+    result = await db.execute(
+        select(AvatarImage).where(
+            AvatarImage.avatar_id == avatar_id,
+            AvatarImage.storage_path.like(f"%/{filename}"),
+        )
+    )
+    image = result.scalar_one_or_none()
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    storage = get_storage_backend()
+    try:
+        content = await storage.download(image.storage_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = Path(filename).suffix.lower()
+    mime_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+    content_type = mime_types.get(ext, "application/octet-stream")
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(content)),
+            "Cache-Control": "public, max-age=3600",
+        },
+    )

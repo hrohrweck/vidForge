@@ -98,8 +98,16 @@ const LORA_STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'outline' |
 
 // ─── Streaming URL helper ────────────────────────────────────────────
 
-function getImageUrl(image: { thumbnailUrl?: string; storagePath: string }): string {
-  return image.thumbnailUrl || `/api/uploads/stream/${image.storagePath}`
+function getImageUrl(
+  image: { thumbnailUrl?: string; storagePath: string },
+  avatarId?: string
+): string {
+  if (image.thumbnailUrl) return image.thumbnailUrl
+  if (avatarId) {
+    const filename = image.storagePath.split('/').pop()
+    return `/api/avatars/${avatarId}/stream/${filename}`
+  }
+  return `/api/uploads/stream/${image.storagePath}`
 }
 
 // ─── Selected file tracking ──────────────────────────────────────────
@@ -138,7 +146,7 @@ function AvatarCard({
       <div className="aspect-square bg-muted relative overflow-hidden">
         {primaryImage?.storagePath ? (
           <img
-            src={getImageUrl(primaryImage)}
+            src={getImageUrl(primaryImage, avatar.id)}
             alt={avatar.name}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
           />
@@ -555,6 +563,7 @@ function EditAvatarModal({
                   <ImageThumbnail
                     key={img.id}
                     image={img}
+                    avatarId={avatar.id}
                     isPrimary={img.isPrimary}
                     onSetPrimary={() => setPrimaryMutation.mutate(img.id)}
                     onDelete={() => deleteImageMutation.mutate(img.id)}
@@ -743,12 +752,14 @@ function EditAvatarModal({
 
 function ImageThumbnail({
   image,
+  avatarId,
   isPrimary,
   onSetPrimary,
   onDelete,
   isBusy,
 }: {
   image: AvatarImage
+  avatarId: string
   isPrimary: boolean
   onSetPrimary: () => void
   onDelete: () => void
@@ -758,7 +769,7 @@ function ImageThumbnail({
     <div className="relative aspect-square rounded-md overflow-hidden bg-muted group">
       {image.storagePath ? (
         <img
-          src={getImageUrl(image)}
+          src={getImageUrl(image, avatarId)}
           alt="Reference"
           className="h-full w-full object-cover"
         />
