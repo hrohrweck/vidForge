@@ -9,16 +9,33 @@ const api = axios.create({
   withCredentials: true,
 })
 
+// Circuit breaker: prevents infinite refresh loops when /auth/refresh itself returns 401
+let isRefreshing = false
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const requestUrl: string = originalRequest?.url ?? ''
+
+    // Never attempt refresh for auth endpoints themselves — this is what caused
+    // the infinite loop: refresh returns 401 → interceptor fires → calls refresh
+    // again → ad infinitum.
+    const isAuthEndpoint =
+      requestUrl === '/auth/refresh' ||
+      requestUrl === '/auth/login' ||
+      requestUrl === '/auth/register'
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint && !isRefreshing) {
       originalRequest._retry = true
+      isRefreshing = true
       try {
         await api.post('/auth/refresh')
+        isRefreshing = false
         return api(originalRequest)
       } catch (refreshError) {
+        isRefreshing = false
+        // Refresh failed — stop retrying, clear auth, redirect to login
         useAuthStore.getState().logout()
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
