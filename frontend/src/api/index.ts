@@ -42,6 +42,9 @@ export interface User {
   id: string
   email: string
   is_active: boolean
+  is_superuser: boolean
+  groups: { id: string; name: string; description?: string }[]
+  permissions: string[]
 }
 
 export interface Job {

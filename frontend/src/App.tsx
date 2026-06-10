@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from './stores/auth'
+import { authApi } from './api'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Jobs from './pages/Jobs'
@@ -21,6 +23,7 @@ import AdminLogs from './pages/admin/AdminLogs'
 import { ThemeProvider } from './components/ThemeProvider'
 import { Toaster } from './components/ui/toaster'
 import { NotificationCenter } from './components/NotificationCenter'
+import { Loader2 } from 'lucide-react'
 
 function AppRoutes({ isAuthenticated }: { isAuthenticated: boolean }) {
   if (!isAuthenticated) {
@@ -58,7 +61,30 @@ function AppRoutes({ isAuthenticated }: { isAuthenticated: boolean }) {
 }
 
 function App() {
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, setAuth } = useAuthStore()
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    authApi
+      .getMe()
+      .then((response) => {
+        setAuth(response.data)
+      })
+      .catch(() => {
+        // no-op: user not authenticated
+      })
+      .finally(() => {
+        setIsLoading(false)
+      })
+  }, [setAuth])
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
     <ThemeProvider>
