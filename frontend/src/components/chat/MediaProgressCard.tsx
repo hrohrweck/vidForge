@@ -7,9 +7,9 @@ interface MediaProgressCardProps {
   onComplete?: (url: string) => void
 }
 
-export function MediaProgressCard({ taskId, onComplete: _onComplete }: MediaProgressCardProps) {
-  const [status, _setStatus] = useState<'generating' | 'completed' | 'failed'>('generating')
-  const [resultUrl, _setResultUrl] = useState<string | null>(null)
+export function MediaProgressCard({ taskId }: MediaProgressCardProps) {
+  const [status] = useState<'generating' | 'completed' | 'failed'>('generating')
+  const [resultUrl] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
 
   useEffect(() => {

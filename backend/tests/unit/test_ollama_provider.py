@@ -289,12 +289,12 @@ _PROVIDER_SQL_VALS = (
 _MODEL_CONFIG_SQL_COLS = (
     "id, provider_id, model_id, provider_model_id, display_name, "
     "modality, prompt_format, endpoint_type, is_active, is_deprecated, "
-    "created_at, updated_at"
+    "is_chat_enabled, created_at, updated_at"
 )
 _MODEL_CONFIG_SQL_VALS = (
     ":id, :pid, :mid, :mid, :mid, "
     ":modality, 'string', :endpoint, true, false, "
-    "datetime('now'), datetime('now')"
+    "false, datetime('now'), datetime('now')"
 )
 
 

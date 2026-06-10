@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test'
 import {
   registerTestUser,
-  loginTestUser,
   uniqueEmail,
   testPassword,
   ADMIN_EMAIL,

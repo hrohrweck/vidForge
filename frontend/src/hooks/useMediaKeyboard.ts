@@ -129,6 +129,7 @@ export function useMediaKeyboard({
       onDownload,
       onEscape,
       onNavigate,
+      selectedArray,
     ]
   )
 

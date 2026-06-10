@@ -4,6 +4,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "009"
@@ -52,7 +53,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "jobs",
-        sa.Column("export_options", sa.JSONB, nullable=True),
+        sa.Column("export_options", postgresql.JSONB, nullable=True),
     )
     op.add_column(
         "jobs",

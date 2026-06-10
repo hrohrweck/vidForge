@@ -16,6 +16,7 @@ from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import TOKEN_COOKIE_NAME
 from app.config import get_settings
 from app.database import User, get_db
 
@@ -45,6 +46,9 @@ async def authenticate_websocket(
     """
     if token is None:
         token = websocket.query_params.get("token")
+
+    if not token:
+        token = websocket.cookies.get(TOKEN_COOKIE_NAME)
 
     if not token:
         return None

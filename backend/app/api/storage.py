@@ -26,10 +26,13 @@ class FileListResponse(BaseModel):
     files: list[dict[str, Any]]
 
 
-@router.get("/config", response_model=StorageConfigResponse)
+@router.get("/config", response_model=StorageConfigResponse, response_model_exclude_unset=True)
 async def get_storage_config(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
+    if not current_user.is_superuser:
+        return {"backend": settings.storage_backend}
+
     return {
         "backend": settings.storage_backend,
         "config": {

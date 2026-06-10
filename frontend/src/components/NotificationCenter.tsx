@@ -29,15 +29,14 @@ export function NotificationCenter() {
   const navigate = useNavigate()
   const { toasts, dismiss } = useToastState()
   const { events, connected } = useNotificationFeed()
-  const token = useAuthStore((s) => s.token)
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
   const processedEventsRef = useRef<Set<string>>(new Set())
 
-  // Connect WebSocket when token is available
   useEffect(() => {
-    if (token && !connected) {
-      connect(token)
+    if (isAuthenticated && !connected) {
+      connect()
     }
-  }, [token, connected])
+  }, [isAuthenticated, connected])
 
   // Auto-fire notificationToast when new events arrive via WebSocket
   useEffect(() => {
@@ -98,6 +97,7 @@ function NotificationToastItem({ toast, onDismiss }: NotificationToastItemProps)
       toast.onClick()
     }
     onDismiss()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast.onClick, onDismiss])
 
   const handleDismissClick = useCallback(

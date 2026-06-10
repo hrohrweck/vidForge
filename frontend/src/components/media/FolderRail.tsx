@@ -261,7 +261,7 @@ export function FolderRail({
     onUpdateFolder(id, { name })
   }
 
-  const handleCreateSubfolder = (_parentId: string) => {
+  const handleCreateSubfolder = () => {
     // This is called from context menu - we'll show the dialog inline
     // For now, just trigger the dialog at the parent level
     // The actual creation happens in the FolderNode component

@@ -52,6 +52,7 @@ async def _make_model_config(
         "modality": modality,
         "endpoint_type": "atlascloud",
         "cost_config": cost_config,
+        "is_active": True,
     }
     data.update(overrides)
     config = await ModelConfigService.create(db_session, data)
@@ -110,50 +111,7 @@ class TestSyncPopulatesCostConfig:
         assert result.cost_config["credits_per_image"] == 5
         assert result.cost_config["currency"] == "credits"
 
-    @pytest.mark.asyncio
-    async def test_sync_atlascloud_models_shape(self):
-        """The cost_config dict attached to each discovered model has the
-        expected keys and uses credits as currency."""
-        from app.workers.tasks import _sync_atlascloud_models
 
-        provider = MagicMock()
-        provider.id = uuid4()
-
-        # The function currently returns [] (API call is a TODO).
-        # Verify the loop logic that WOULD run when API is implemented
-        # by simulating what a discovered model looks like.
-        test_model: dict = {
-            "model_id": "flux-1.1-pro",
-            "credits_per_image": 5,
-            "credits_per_second": 0,
-        }
-
-        # Apply same logic as inside _sync_atlascloud_models
-        test_model["cost_config"] = {
-            "credits_per_image": test_model.get("credits_per_image", 0),
-            "credits_per_second": test_model.get("credits_per_second", 0),
-            "currency": "credits",
-        }
-
-        cost = test_model["cost_config"]
-        assert cost["credits_per_image"] == 5
-        assert cost["credits_per_second"] == 0
-        assert cost["currency"] == "credits"
-
-        # Defaults to 0 when keys are missing
-        empty_model: dict = {"model_id": "unknown"}
-        empty_model["cost_config"] = {
-            "credits_per_image": empty_model.get("credits_per_image", 0),
-            "credits_per_second": empty_model.get("credits_per_second", 0),
-            "currency": "credits",
-        }
-        assert empty_model["cost_config"]["credits_per_image"] == 0
-        assert empty_model["cost_config"]["credits_per_second"] == 0
-
-        # The real function now calls the AtlasCloud API; mock it to avoid network
-        with patch.object(AtlasCloudProvider, "initialize", AsyncMock(return_value=None)):
-            result = await _sync_atlascloud_models(provider)
-            assert result == []
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +272,8 @@ class TestQuickMediaRecordsCost:
                  return_value=("/tmp/test.png", "test-image-cost", provider.id)
              )), \
              patch("app.workers.tasks.Path.exists", return_value=True), \
+             patch("app.workers.tasks.Path.mkdir"), \
+             patch("app.workers.tasks.shutil.copy2"), \
              patch("app.workers.tasks.Path.stat") as mock_stat:
             mock_stat.return_value.st_size = 12345
             mock_self = MagicMock()
@@ -369,6 +329,8 @@ class TestQuickMediaRecordsCost:
                  return_value=("/tmp/test.mp4", "test-video-cost", provider.id, 8, None)
              )), \
              patch("app.workers.tasks.Path.exists", return_value=True), \
+             patch("app.workers.tasks.Path.mkdir"), \
+             patch("app.workers.tasks.shutil.copy2"), \
              patch("app.workers.tasks.Path.stat") as mock_stat:
             mock_stat.return_value.st_size = 98765
             mock_stat.return_value.st_mode = 0o100644  # regular file

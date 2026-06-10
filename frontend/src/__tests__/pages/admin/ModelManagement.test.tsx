@@ -273,7 +273,6 @@ describe('ModelManagement Page', () => {
       defaultOptions: { queries: { retry: false } },
     })
     useAuthStore.setState({
-      token: 'superuser-token',
       user: {
         id: '1',
         email: 'admin@example.com',

@@ -36,9 +36,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
       const response = await fetch('/api/uploads/audio', {
         method: 'POST',
         body: formData,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
+        credentials: 'include',
       })
 
       if (!response.ok) throw new Error('Upload failed')

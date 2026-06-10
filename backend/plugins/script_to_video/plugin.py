@@ -44,6 +44,11 @@ class ScriptToVideoPlugin(PluginBase):
         template.setdefault("config", {})["workflow_type"] = "scene_based"
         return template
 
+    def get_input_schema(self) -> type[Any] | None:
+        from .schemas import ScriptToVideoInput
+
+        return ScriptToVideoInput
+
     # ------------------------------------------------------------------
     # enrich_inputs: parse script, generate narration
     # ------------------------------------------------------------------

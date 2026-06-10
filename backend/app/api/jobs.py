@@ -4,18 +4,21 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel, ConfigDict, field_validator
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user
-from app.config import get_settings
+from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
 from app.database import Avatar, Job, JobAvatar, JobObjectRef, ObjectRef, Template, User, get_db
+from app.dependencies.rate_limit import AuthenticatedRateLimiter
+from app.plugins.registry import get_plugin
 from app.workers.tasks import process_scene_video_job, process_video_job
 
 router = APIRouter()
+
+job_create_rate_limiter = AuthenticatedRateLimiter(times=30, seconds=60)
 
 
 class JobCreate(BaseModel):
@@ -81,6 +84,36 @@ def _normalize_provider_preference(value: str) -> str:
         return "auto"
 
     return "auto"
+
+
+def _validate_job_input(template: Template | None, input_data: dict[str, Any] | None) -> dict[str, Any]:
+    if template is None:
+        return input_data or {}
+
+    plugin_id = template.config.get("plugin_id") if template.config else None
+    if not plugin_id:
+        return input_data or {}
+
+    plugin = get_plugin(plugin_id)
+    if plugin is None:
+        return input_data or {}
+
+    schema_cls = plugin.get_input_schema()
+    if schema_cls is None:
+        return input_data or {}
+
+    try:
+        data = input_data if input_data is not None else {}
+        return schema_cls.model_validate(data).model_dump()
+    except ValidationError as exc:
+        errors = []
+        for err in exc.errors():
+            loc = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{loc}: {err['msg']}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"errors": errors},
+        )
 
 
 class JobAvatarDetail(BaseModel):
@@ -175,14 +208,24 @@ async def create_job(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(job_create_rate_limiter),
 ) -> Job:
     provider_preference = _normalize_provider_preference(job_data.provider_preference)
+
+    template: Template | None = None
+    if job_data.template_id:
+        result = await db.execute(select(Template).where(Template.id == job_data.template_id))
+        template = result.scalar_one_or_none()
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+    validated_input = _validate_job_input(template, job_data.input_data)
 
     job = Job(
         title=job_data.title,
         user_id=current_user.id,
         template_id=job_data.template_id,
-        input_data=job_data.input_data or {},
+        input_data=validated_input,
         provider_preference=provider_preference,
         model_preference=job_data.model_preference,
         project_id=job_data.project_id,
@@ -190,11 +233,7 @@ async def create_job(
         chat_message_id=job_data.chat_message_id,
     )
 
-    if job_data.template_id:
-        result = await db.execute(select(Template).where(Template.id == job_data.template_id))
-        template = result.scalar_one_or_none()
-        if not template:
-            raise HTTPException(status_code=404, detail="Template not found")
+    if template:
         workflow_type = template.config.get("workflow_type")
         if workflow_type == "scene_based":
             job.workflow_type = "scene_based"
@@ -444,10 +483,11 @@ async def create_batch_jobs(
     jobs = []
     job_ids = []
     for job_input in batch_data.jobs:
+        validated_input = _validate_job_input(template, job_input)
         job = Job(
             user_id=current_user.id,
             template_id=batch_data.template_id,
-            input_data=job_input,
+            input_data=validated_input,
             provider_preference=provider_preference,
             model_preference=batch_data.model_preference,
             project_id=batch_data.project_id,
@@ -505,10 +545,11 @@ async def create_jobs_from_csv(
     jobs = []
     job_ids = []
     for row in reader:
+        validated_input = _validate_job_input(template, dict(row))
         job = Job(
             user_id=current_user.id,
             template_id=template_id,
-            input_data=dict(row),
+            input_data=validated_input,
             provider_preference=provider_preference,
             model_preference=model_preference,
             workflow_type=workflow_type if is_scene_based else None,
@@ -533,35 +574,12 @@ async def create_jobs_from_csv(
 @router.get("/{job_id}/download")
 async def download_job_output(
     job_id: UUID,
-    token: str | None = None,
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ):
-    """Download the final exported video for a completed job.
-
-    Accepts auth via ``?token=`` query param for browser-initiated downloads.
-    """
     from pathlib import Path
 
     from fastapi.responses import FileResponse
-    from jose import jwt as pyjwt
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    settings = get_settings()
-    current_user: User | None = None
-
-    try:
-        payload = pyjwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        user_id = payload.get("sub")
-        if user_id:
-            result = await db.execute(select(User).where(User.id == UUID(user_id)))
-            current_user = result.scalar_one_or_none()
-    except Exception:
-        pass
-
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == current_user.id))
     job = result.scalar_one_or_none()
@@ -570,6 +588,8 @@ async def download_job_output(
     if not job.output_path:
         raise HTTPException(status_code=404, detail="Job has no output file")
 
+    from app.config import get_settings
+    settings = get_settings()
     file_path = Path(settings.storage_path) / job.output_path
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Output file not found on disk")

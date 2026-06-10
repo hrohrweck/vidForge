@@ -71,6 +71,48 @@ async def _load_scenes(db: AsyncSession, job: Job) -> list[VideoScene]:
     return list(result.scalars().all())
 
 
+def _validate_plan_scenes_result(result: Any) -> dict[str, Any]:
+    """Validate the minimal PluginBase.plan_scenes() return contract."""
+    if not isinstance(result, dict):
+        raise ValueError("plugin.plan_scenes() must return a dict")
+
+    scene_count = result.get("scene_count")
+    if scene_count is not None:
+        if not isinstance(scene_count, int) or isinstance(scene_count, bool) or scene_count < 0:
+            raise ValueError("plugin.plan_scenes() scene_count must be a non-negative int")
+
+    return result
+
+
+async def _mark_stage_failed(job_id: str, stage: str, exc: Exception) -> None:
+    """Persist stage failure details using a fresh short-lived session."""
+    async with ctx.session_factory() as db:
+        job, _plugin = await _load_job(db, job_id)
+        job.status = "failed"
+        job.error_message = str(exc)
+        await db.commit()
+
+        try:
+            from app.database import ErrorOrigin, ErrorSeverity
+            from app.services.error_capture import log_user_error
+
+            friendly = str(exc)
+            if len(friendly) > 200:
+                friendly = friendly[:200] + "..."
+            await log_user_error(
+                db,
+                user_id=job.user_id,
+                severity=ErrorSeverity.ERROR,
+                origin=ErrorOrigin.VIDEO_GENERATION,
+                message=f"Job failed during {stage}: {friendly}",
+                details={"stage": stage, "error": str(exc), "job_id": str(job.id)},
+                source_id=job.id,
+                source_type="job",
+            )
+        except Exception:
+            logger.warning("Failed to capture error for job %s", job_id, exc_info=True)
+
+
 async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
     """Run a single pipeline stage for a job via its plugin.
 
@@ -80,12 +122,12 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
       - ``generating_videos`` → plugin.generate_videos()
       - ``rendering``      → plugin.render()
     """
-    async with ctx.session_factory() as db:
-        job, plugin = await _load_job(db, job_id)
-        context: dict[str, Any] = {}
+    context: dict[str, Any] = {}
 
-        try:
-            if stage == "planning":
+    try:
+        if stage == "planning":
+            async with ctx.session_factory() as db:
+                job, plugin = await _load_job(db, job_id)
                 job.status = "processing"
                 job.stage = "planning"
                 await db.commit()
@@ -95,13 +137,17 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 await db.commit()
 
                 # Plan scenes
-                result = await plugin.plan_scenes(db, job, context)
+                result = _validate_plan_scenes_result(
+                    await plugin.plan_scenes(db, job, context)
+                )
                 job.stage = "planned"
                 job.progress = 15
                 await db.commit()
                 return {"status": "completed", "job_id": job_id, "stage": "planned", **result}
 
-            elif stage == "generating_images":
+        if stage == "generating_images":
+            async with ctx.session_factory() as db:
+                job, plugin = await _load_job(db, job_id)
                 job.stage = "generating_images"
                 job.progress = 20
                 await db.commit()
@@ -117,14 +163,16 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                     job.progress = 40
                     await db.commit()
                     return {"status": "completed", "job_id": job_id, "stage": "images_ready"}
-                else:
-                    job.status = "failed"
-                    job.stage = "generating_images"
-                    job.error_message = "All image scenes failed to generate"
-                    await db.commit()
-                    return {"status": "failed", "job_id": job_id, "stage": "generating_images"}
 
-            elif stage == "generating_videos":
+                job.status = "failed"
+                job.stage = "generating_images"
+                job.error_message = "All image scenes failed to generate"
+                await db.commit()
+                return {"status": "failed", "job_id": job_id, "stage": "generating_images"}
+
+        if stage == "generating_videos":
+            async with ctx.session_factory() as db:
+                job, plugin = await _load_job(db, job_id)
                 job.stage = "generating_videos"
                 job.progress = 45
                 await db.commit()
@@ -140,14 +188,16 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                     job.progress = 80
                     await db.commit()
                     return {"status": "completed", "job_id": job_id, "stage": "videos_ready"}
-                else:
-                    job.status = "failed"
-                    job.stage = "generating_videos"
-                    job.error_message = "All video scenes failed to generate"
-                    await db.commit()
-                    return {"status": "failed", "job_id": job_id, "stage": "generating_videos"}
 
-            elif stage == "rendering":
+                job.status = "failed"
+                job.stage = "generating_videos"
+                job.error_message = "All video scenes failed to generate"
+                await db.commit()
+                return {"status": "failed", "job_id": job_id, "stage": "generating_videos"}
+
+        if stage == "rendering":
+            async with ctx.session_factory() as db:
+                job, plugin = await _load_job(db, job_id)
                 job.stage = "rendering"
                 await db.commit()
 
@@ -166,6 +216,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                         from pathlib import Path
 
                         from app.config import get_settings
+
                         settings = get_settings()
                         storage = Path(settings.storage_path).resolve()
                         final_path = storage / render_result["output_path"]
@@ -191,6 +242,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 if render_result.get("preview_path"):
                     job.preview_path = render_result["preview_path"]
                 from datetime import datetime
+
                 job.completed_at = datetime.utcnow()
                 await db.commit()
 
@@ -208,34 +260,11 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
                 return {"status": "completed", "job_id": job_id, "stage": "completed", **render_result}
 
-            else:
-                raise ValueError(f"Unknown stage: {stage}")
+        raise ValueError(f"Unknown stage: {stage}")
 
-        except Exception as exc:
-            job.status = "failed"
-            job.error_message = str(exc)
-            await db.commit()
-
-            try:
-                from app.database import ErrorOrigin, ErrorSeverity
-                from app.services.error_capture import log_user_error
-                friendly = str(exc)
-                if len(friendly) > 200:
-                    friendly = friendly[:200] + "..."
-                await log_user_error(
-                    db,
-                    user_id=job.user_id,
-                    severity=ErrorSeverity.ERROR,
-                    origin=ErrorOrigin.VIDEO_GENERATION,
-                    message=f"Job failed during {stage}: {friendly}",
-                    details={"stage": stage, "error": str(exc), "job_id": str(job.id)},
-                    source_id=job.id,
-                    source_type="job",
-                )
-            except Exception:
-                logger.warning("Failed to capture error for job %s", job_id, exc_info=True)
-
-            raise
+    except Exception as exc:
+        await _mark_stage_failed(job_id, stage, exc)
+        raise
 
 
 async def dispatch_scene_rerender(

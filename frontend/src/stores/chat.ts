@@ -180,5 +180,5 @@ appendMessage: (convId, msg) =>
 // Expose store for E2E testing
 if (typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__chatStore = useChatStore
+  (window as any).__chatStore = useChatStore
 }

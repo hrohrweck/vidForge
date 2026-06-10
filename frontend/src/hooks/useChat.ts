@@ -164,7 +164,6 @@ export function useChat(conversationId: string | null): UseChatReturn {
       clearAttachments,
       setStreaming,
       setStreamError,
-      storeMessages,
     ]
   )
 

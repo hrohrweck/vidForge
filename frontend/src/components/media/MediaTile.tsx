@@ -126,7 +126,7 @@ export function MediaTile({
       // Fallback to simple onSelect
       onSelect(asset.id, !selected, e)
     }
-  }, [asset, asset.id, selected, onSelect, onSelectOnly, onToggle, onRange, onAssetClick])
+  }, [asset, selected, onSelect, onSelectOnly, onToggle, onRange, onAssetClick])
 
   const handleCheckboxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation()

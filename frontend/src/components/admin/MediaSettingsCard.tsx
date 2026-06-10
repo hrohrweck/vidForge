@@ -20,9 +20,7 @@ export function MediaSettingsCard() {
     queryKey: ['admin-media-settings'],
     queryFn: async () => {
       const response = await fetch('/api/admin/settings/media', {
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
-        },
+        credentials: 'include',
       })
       if (!response.ok) throw new Error('Failed to fetch media settings')
       return response.json()
@@ -42,8 +40,8 @@ export function MediaSettingsCard() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
         },
+        credentials: 'include',
         body: JSON.stringify({ max_folder_depth: newDepth }),
       })
       if (!response.ok) throw new Error('Failed to update media settings')

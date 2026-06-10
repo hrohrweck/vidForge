@@ -455,10 +455,10 @@ Output only the enhanced prompt, nothing else."""
         import re
         enhanced = re.sub(r"<think>.*?</think>", "", enhanced, flags=re.DOTALL).strip()
         enhanced = re.sub(r"【thinking】.*?【/thinking】", "", enhanced, flags=re.DOTALL).strip()
-        
+
         enhanced = re.sub(r"^(Here's|Here is).*?(prompt|enhanced|version)[:\s]*", "", enhanced, flags=re.IGNORECASE).strip()
         enhanced = re.sub(r"^\d+\.\s*\*\*.*?\*\*[:\s]*", "", enhanced, flags=re.MULTILINE).strip()
-        
+
         lines = [line.strip() for line in enhanced.split('\n') if line.strip() and not line.strip().startswith('-') and not re.match(r'^\d+\.', line.strip())]
         if len(lines) > 1:
             for line in reversed(lines):

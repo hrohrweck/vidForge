@@ -65,17 +65,20 @@ export function MediaToolbar({
         onQueryChange({ ...query, search: searchValue })
       } else {
         // Clear search when empty
-        const { search, ...rest } = query
+        const rest = { ...query }
+        delete (rest as Record<string, unknown>).search
         onQueryChange(rest as AssetListQuery)
       }
     }, 300)
 
     return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchValue])
 
   // Clear search when folder changes
   useEffect(() => {
     setSearchValue(query.search || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.folder_id])
 
   // Load view preference from localStorage on mount
@@ -84,6 +87,7 @@ export function MediaToolbar({
     if (savedView && savedView !== view) {
       onViewChange(savedView)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Persist view changes to localStorage

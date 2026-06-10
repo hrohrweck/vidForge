@@ -160,8 +160,9 @@ export default function Settings() {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
   }
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString()
+  const formatDate = (timestamp: number | string) => {
+    const num = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp
+    return new Date(num * 1000).toLocaleString()
   }
 
   return (
@@ -449,7 +450,7 @@ export default function Settings() {
               </div>
             ) : files?.data?.files && files.data.files.length > 0 ? (
               <div className="border rounded-lg divide-y">
-                {files.data.files.map((file: any, index: number) => (
+                {files.data.files.map((file: { name: string; path: string; size: number; modified: string; updated_at: string }, index: number) => (
                   <div
                     key={index}
                     className="p-3 flex items-center justify-between hover:bg-muted/50"

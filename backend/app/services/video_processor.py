@@ -1,8 +1,59 @@
 import asyncio
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from app.services.disk import ensure_disk_space
+
+
+def _estimated_output_bytes(*input_paths: str, multiplier: float = 1.5) -> int:
+    """Estimate required bytes for an output based on input file sizes."""
+    total = 0
+    for p in input_paths:
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            total += 1024 * 1024 * 100
+    return int(total * multiplier) + (1024 * 1024 * 100)
+
+
+FFMPEG_TIMEOUT_PROFILES: dict[str, float] = {
+    "METADATA": float(os.getenv("VIDFORGE_FFMPEG_TIMEOUT_METADATA", "60")),
+    "THUMBNAIL": float(os.getenv("VIDFORGE_FFMPEG_TIMEOUT_THUMBNAIL", "120")),
+    "ENCODE": float(os.getenv("VIDFORGE_FFMPEG_TIMEOUT_ENCODE", "600")),
+    "MERGE": float(os.getenv("VIDFORGE_FFMPEG_TIMEOUT_MERGE", "1800")),
+    "CHAIN": float(os.getenv("VIDFORGE_FFMPEG_TIMEOUT_CHAIN", "3600")),
+}
+
+
+async def _run_subprocess_with_timeout(
+    cmd: list[str],
+    *,
+    timeout: float,
+    check: bool = True,
+) -> tuple[bytes, bytes]:
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise TimeoutError(
+            f"Command timed out after {timeout}s: {' '.join(cmd[:8])}"
+        )
+    if check and proc.returncode != 0:
+        raise RuntimeError(
+            f"Command failed (rc={proc.returncode}): {stderr.decode() if stderr else 'Unknown error'}"
+        )
+    return stdout, stderr
 
 
 @dataclass
@@ -30,6 +81,21 @@ class VideoProcessor:
     """Video processing utilities using FFmpeg."""
 
     @staticmethod
+    async def convert_wav_to_mp3(wav_path: str, mp3_path: str) -> None:
+        """Convert a WAV file to MP3 format."""
+        ensure_disk_space(Path(mp3_path).parent, _estimated_output_bytes(wav_path))
+        cmd = [
+            "ffmpeg",
+            "-i",
+            wav_path,
+            "-y",
+            mp3_path,
+        ]
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
+        )
+
+    @staticmethod
     async def get_video_info(video_path: str) -> dict:
         """Get video metadata using ffprobe."""
         cmd = [
@@ -42,12 +108,9 @@ class VideoProcessor:
             "-show_streams",
             video_path,
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        stdout, _ = await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["METADATA"]
         )
-        stdout, _ = await proc.communicate()
         import json
 
         return json.loads(stdout.decode())
@@ -66,6 +129,7 @@ class VideoProcessor:
         target_aspect: str,
     ) -> str:
         """Pad video with black bars to match target aspect ratio."""
+        ensure_disk_space(Path(output_path).parent, _estimated_output_bytes(input_path))
         try:
             w_str, h_str = target_aspect.split(':')
             target_ratio = float(w_str) / float(h_str)
@@ -109,14 +173,9 @@ class VideoProcessor:
             "-c:a", "copy",
             "-y", str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg pad_to_aspect_ratio failed: {stderr.decode() if stderr else 'Unknown error'}")
         return output_path
 
     @staticmethod
@@ -129,6 +188,7 @@ class VideoProcessor:
         quality: int = 28,
     ) -> str:
         """Generate a low-resolution preview of a video."""
+        ensure_disk_space(Path(output_path).parent, _estimated_output_bytes(input_path))
         cmd = [
             "ffmpeg",
             "-i",
@@ -145,14 +205,9 @@ class VideoProcessor:
             "-y",
             str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg preview failed: {stderr.decode() if stderr else 'Unknown error'}")
         return output_path
 
     @staticmethod
@@ -164,6 +219,8 @@ class VideoProcessor:
         """Merge multiple video files into one."""
         if len(video_paths) == 0:
             raise ValueError("No videos to merge")
+
+        ensure_disk_space(Path(output_path).parent, _estimated_output_bytes(*video_paths))
 
         if len(video_paths) == 1:
             shutil.copy(video_paths[0], output_path)
@@ -187,15 +244,12 @@ class VideoProcessor:
             "-y",
             str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg merge failed: {stderr.decode() if stderr else 'Unknown error'}")
-        list_file.unlink()
+        try:
+            await _run_subprocess_with_timeout(
+                cmd, timeout=FFMPEG_TIMEOUT_PROFILES["MERGE"]
+            )
+        finally:
+            list_file.unlink(missing_ok=True)
         return output_path
 
     @staticmethod
@@ -219,12 +273,9 @@ class VideoProcessor:
             "-frames:v", "1",
             "-y", str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["THUMBNAIL"]
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg extract_frame failed: {stderr.decode()}")
         return output_path
 
     @staticmethod
@@ -239,6 +290,9 @@ class VideoProcessor:
         """
         if len(video_paths) == 0:
             raise ValueError("No videos to merge")
+
+        ensure_disk_space(Path(output_path).parent, _estimated_output_bytes(*video_paths))
+
         if len(video_paths) == 1:
             shutil.copy(video_paths[0], output_path)
             return output_path
@@ -278,12 +332,9 @@ class VideoProcessor:
             "-an",
             "-y", str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["CHAIN"]
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg crossfade merge failed: {stderr.decode()}")
         return output_path
 
     @staticmethod
@@ -295,6 +346,7 @@ class VideoProcessor:
         video_volume: float = 0.0,
     ) -> str:
         """Add or replace audio track in video."""
+        ensure_disk_space(Path(output_path).parent, _estimated_output_bytes(video_path, audio_path))
         filter_parts = []
 
         if audio_volume != 1.0:
@@ -330,14 +382,9 @@ class VideoProcessor:
             ]
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg add_audio failed: {stderr.decode() if stderr else 'Unknown error'}")
         return output_path
 
     @staticmethod
@@ -373,13 +420,9 @@ class VideoProcessor:
             output_path,
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            ["ffmpeg", *cmd], timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        await proc.communicate()
         return output_path
 
     @staticmethod
@@ -408,13 +451,10 @@ class VideoProcessor:
                 "-c:a", "aac",
                 "-y", str(Path(output_path).resolve()),
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(f"FFmpeg trim failed: {stderr.decode()}")
-            return output_path
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
+        )
+        return output_path
 
         # Loop the clip to fill the target duration
         # Use -stream_loop -1 (infinite loop) + -t to stop at target
@@ -436,13 +476,10 @@ class VideoProcessor:
             "-pix_fmt", "yuv420p",
             "-y", str(Path(output_path).resolve()),
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        _, stderr = await proc.communicate()
         list_file.unlink(missing_ok=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg loop-stretch failed: {stderr.decode()}")
         return output_path
 
     @staticmethod
@@ -460,13 +497,29 @@ class VideoProcessor:
             "-y",
             audio_path,
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
         )
-        await proc.communicate()
         return audio_path
+
+    @staticmethod
+    async def convert_audio_to_mp3(input_path: str, output_path: str) -> str:
+        """Convert an audio file to MP3 and return the output path."""
+        cmd = [
+            "ffmpeg",
+            "-i",
+            input_path,
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            "-y",
+            output_path,
+        ]
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["ENCODE"]
+        )
+        return output_path
 
     @staticmethod
     async def generate_thumbnail(
@@ -490,12 +543,9 @@ class VideoProcessor:
             "-y",
             output_path,
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["THUMBNAIL"]
         )
-        await proc.communicate()
         return output_path
 
     @staticmethod
@@ -613,12 +663,9 @@ class VideoProcessor:
             ]
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        await _run_subprocess_with_timeout(
+            cmd, timeout=FFMPEG_TIMEOUT_PROFILES["THUMBNAIL"]
         )
-        await proc.communicate()
 
         for thumb in thumbnails:
             Path(thumb).unlink(missing_ok=True)

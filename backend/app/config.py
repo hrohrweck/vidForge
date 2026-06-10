@@ -1,7 +1,9 @@
+import secrets
 from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,9 +17,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://vidforge:vidforge@localhost:5432/vidforge"
     redis_url: str = "redis://localhost:6379/0"
 
-    secret_key: str = "change-me-in-production"
+    secret_key: str
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 1440
+    access_token_expire_minutes: int = 60
+    cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
     comfyui_url: str = "http://localhost:8188"
     comfyui_workflows_path: str = "./app/comfyui/workflows"
@@ -43,6 +46,7 @@ class Settings(BaseSettings):
     ssh_user: str = ""
     ssh_key_path: str = ""
     ssh_remote_path: str = "/var/lib/vidforge/storage"
+    ssh_known_hosts_path: str = "~/.ssh/known_hosts"
 
     preview_width: int = 854
     preview_height: int = 480
@@ -65,9 +69,30 @@ class Settings(BaseSettings):
     runpod_max_workers: int = 3
 
     admin_email: str = "admin@vidforge.dev"
-    admin_password: str = "admin"
+    admin_password: str | None = None
+
+    @field_validator("secret_key")
+    @classmethod
+    def reject_weak_secret_key(cls, v: str) -> str:
+        if not v or v == "change-me-in-production":
+            raise ValueError(
+                "SECRET_KEY is unset or uses the default value. "
+                "Set a strong random secret via the SECRET_KEY environment variable."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def randomize_admin_password(self) -> "Settings":
+        if self.admin_password is None:
+            self.admin_password = secrets.token_urlsafe(16)
+            print("[Config] ADMIN_PASSWORD not set. Generated random admin password.")
+        return self
+
+    @property
+    def parsed_cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]

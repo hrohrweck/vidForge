@@ -115,7 +115,7 @@ export function ConversationSidebar() {
         const resp = await api.get('/chat/search', { params: { q } })
         const items = resp.data.items ?? resp.data
         setSearchResults(
-          items.map((item: any) => ({
+          items.map((item: { conversation_id: string; conversation_title: string; content: string; created_at: string }) => ({
             id: item.conversation_id,
             title: item.conversation_title,
             snippet: item.content,

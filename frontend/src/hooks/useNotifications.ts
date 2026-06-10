@@ -51,7 +51,6 @@ let state: NotificationState = {
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
-let currentToken: string | null = null
 let intentionalClose = false
 
 const RECONNECT_BASE_MS = 1000
@@ -93,7 +92,7 @@ function getWsBaseUrl(): string {
 }
 
 function scheduleReconnect(): void {
-  if (intentionalClose || !currentToken) return
+  if (intentionalClose) return
 
   const delay = Math.min(
     RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt),
@@ -103,12 +102,11 @@ function scheduleReconnect(): void {
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    openWebSocket(currentToken!)
+    openWebSocket()
   }, delay)
 }
 
-function openWebSocket(token: string): void {
-  // Clean up any existing connection
+function openWebSocket(): void {
   if (ws) {
     ws.onopen = null
     ws.onmessage = null
@@ -121,7 +119,7 @@ function openWebSocket(token: string): void {
   }
 
   const baseUrl = getWsBaseUrl()
-  ws = new WebSocket(`${baseUrl}/ws/notifications?token=${encodeURIComponent(token)}`)
+  ws = new WebSocket(`${baseUrl}/ws/notifications`)
 
   ws.onopen = () => {
     reconnectAttempt = 0
@@ -170,9 +168,8 @@ async function fetchUnreadCount(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /** Open a WebSocket connection for real-time notifications. */
-export function connect(token: string): void {
+export function connect(): void {
   intentionalClose = false
-  currentToken = token
   reconnectAttempt = 0
 
   if (reconnectTimer) {
@@ -180,13 +177,12 @@ export function connect(token: string): void {
     reconnectTimer = null
   }
 
-  openWebSocket(token)
+  openWebSocket()
 }
 
 /** Close the WebSocket connection and stop reconnection attempts. */
 export function disconnect(): void {
   intentionalClose = true
-  currentToken = null
 
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)

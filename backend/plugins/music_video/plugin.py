@@ -51,6 +51,11 @@ class MusicVideoPlugin(PluginBase):
         yaml_path = Path(__file__).parent / "template.yaml"
         return yaml.safe_load(yaml_path.read_text())
 
+    def get_input_schema(self) -> type[Any] | None:
+        from .schemas import MusicVideoInput
+
+        return MusicVideoInput
+
     # ------------------------------------------------------------------
     # Stage: enrich inputs
     # ------------------------------------------------------------------

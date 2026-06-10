@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -11,13 +13,18 @@ from pydantic import BaseModel
 from app.api.auth import (
     get_current_user,
     get_current_user_from_bearer_or_cookie,
-    get_current_user_optional,
 )
 from app.database import User
 from app.services.video_processor import VideoProcessor
 from app.storage import get_storage_backend
 
 router = APIRouter()
+
+
+def _assert_own_upload(path: str, user_id: str) -> None:
+    parts = path.split("/")
+    if len(parts) < 3 or parts[0] != "uploads" or parts[2] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
 ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/wav", "audio/mp3", "audio/x-wav", "audio/m4a"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime"}
@@ -43,6 +50,9 @@ def validate_file(file: UploadFile, allowed_types: set[str]) -> None:
         )
 
 
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
 async def save_upload(file: UploadFile, category: str, user_id: str) -> UploadResponse:
     storage = get_storage_backend()
 
@@ -51,12 +61,22 @@ async def save_upload(file: UploadFile, category: str, user_id: str) -> UploadRe
     timestamp = datetime.utcnow().strftime("%Y/%m/%d")
     storage_path = f"uploads/{category}/{user_id}/{timestamp}/{file_id}{ext}"
 
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB",
-        )
+    total_size = 0
+    with tempfile.SpooledTemporaryFile(max_size=UPLOAD_CHUNK_SIZE) as tmp:
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            if total_size + len(chunk) > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB",
+                )
+            total_size += len(chunk)
+            tmp.write(chunk)
+
+        tmp.seek(0)
+        content = tmp.read()
 
     await storage.upload(storage_path, content)
     url = await storage.get_url(storage_path)
@@ -122,6 +142,7 @@ async def download_file(
     path: str,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
+    _assert_own_upload(path, str(current_user.id))
     storage = get_storage_backend()
 
     try:
@@ -159,6 +180,7 @@ async def stream_file(
     path: str,
     current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
 ) -> Response:
+    _assert_own_upload(path, str(current_user.id))
     storage = get_storage_backend()
 
     try:
@@ -204,9 +226,9 @@ async def get_video_thumbnail(
     timestamp: float = 0.0,
     width: int = 320,
     height: int = 180,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
-    import tempfile
+    _assert_own_upload(path, str(current_user.id))
 
     storage = get_storage_backend()
 
@@ -219,7 +241,8 @@ async def get_video_thumbnail(
         tmp.write(content)
         tmp_path = tmp.name
 
-    thumb_path = tempfile.mktemp(suffix=".jpg")
+    fd, thumb_path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
 
     try:
         await VideoProcessor.generate_thumbnail(tmp_path, thumb_path, timestamp, width, height)
@@ -249,9 +272,9 @@ async def get_video_thumbnails(
     count: int = 5,
     width: int = 320,
     height: int = 180,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ) -> ThumbnailResponse:
-    import tempfile
+    _assert_own_upload(path, str(current_user.id))
 
     storage = get_storage_backend()
 
@@ -279,6 +302,4 @@ async def get_video_thumbnails(
         return ThumbnailResponse(thumbnails=thumb_urls, count=len(thumb_urls))
     finally:
         Path(tmp_path).unlink(missing_ok=True)
-        import shutil
-
         shutil.rmtree(thumb_dir, ignore_errors=True)

@@ -134,12 +134,24 @@ class ConnectionManager:
     # User / admin notification connections
     # ------------------------------------------------------------------
 
+    MAX_CONNECTIONS_PER_USER = 10
+
     async def connect_user(self, websocket: WebSocket, user_id: str) -> None:
-        """Register a WebSocket for user-level notification delivery."""
+        """Register a WebSocket for user-level notification delivery.
+
+        Caps per-user connections at MAX_CONNECTIONS_PER_USER; oldest
+        connection is closed with code 1008 when exceeded.
+        """
         await websocket.accept()
-        if user_id not in self.user_connections:
-            self.user_connections[user_id] = set()
-        self.user_connections[user_id].add(websocket)
+        conns = self.user_connections.setdefault(user_id, set())
+        if len(conns) >= self.MAX_CONNECTIONS_PER_USER:
+            oldest = next(iter(conns))
+            try:
+                await oldest.close(code=1008, reason="Connection limit exceeded")
+            except Exception:
+                pass
+            conns.discard(oldest)
+        conns.add(websocket)
 
     def disconnect_user(self, websocket: WebSocket, user_id: str) -> None:
         """Remove a WebSocket from user-level notification delivery."""

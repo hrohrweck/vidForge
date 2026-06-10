@@ -36,7 +36,6 @@ const listeners = new Set<MediaListener>()
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempt = 0
-let currentToken: string | null = null
 let intentionalClose = false
 let lastSeq = 0
 let hasFetchedMissed = false
@@ -59,7 +58,7 @@ function getWsBaseUrl(): string {
 }
 
 function scheduleReconnect(): void {
-  if (intentionalClose || !currentToken) return
+  if (intentionalClose) return
 
   const delay = Math.min(
     RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt),
@@ -69,12 +68,11 @@ function scheduleReconnect(): void {
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    openWebSocket(currentToken!)
+    openWebSocket()
   }, delay)
 }
 
-function openWebSocket(token: string): void {
-  // Clean up any existing connection
+function openWebSocket(): void {
   if (ws) {
     ws.onopen = null
     ws.onmessage = null
@@ -87,7 +85,7 @@ function openWebSocket(token: string): void {
   }
 
   const baseUrl = getWsBaseUrl()
-  ws = new WebSocket(`${baseUrl}/ws/media?token=${encodeURIComponent(token)}`)
+  ws = new WebSocket(`${baseUrl}/ws/media`)
 
   ws.onopen = () => {
     reconnectAttempt = 0
@@ -122,9 +120,8 @@ function openWebSocket(token: string): void {
 // ---------------------------------------------------------------------------
 
 /** Open a WebSocket connection for real-time media updates. */
-export function connectMediaWS(token: string): void {
+export function connectMediaWS(): void {
   intentionalClose = false
-  currentToken = token
   reconnectAttempt = 0
 
   if (reconnectTimer) {
@@ -132,13 +129,12 @@ export function connectMediaWS(token: string): void {
     reconnectTimer = null
   }
 
-  openWebSocket(token)
+  openWebSocket()
 }
 
 /** Close the WebSocket connection and stop reconnection attempts. */
 export function disconnectMediaWS(): void {
   intentionalClose = true
-  currentToken = null
 
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
@@ -185,10 +181,10 @@ export async function fetchMissedEvents(): Promise<void> {
  */
 export function useMediaUpdates() {
   const queryClient = useQueryClient()
-  const token = useAuthStore((state) => state.token)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
 
   useEffect(() => {
-    if (!token) return
+    if (!isAuthenticated) return
 
     let cancelled = false
 
@@ -197,23 +193,22 @@ export function useMediaUpdates() {
     }
     listeners.add(listener)
 
-    // Fetch missed events once on mount, then connect WebSocket
     if (!hasFetchedMissed) {
       hasFetchedMissed = true
       fetchMissedEvents().then(() => {
         if (!cancelled) {
-          connectMediaWS(token)
+          connectMediaWS()
         }
       })
     } else {
-      connectMediaWS(token)
+      connectMediaWS()
     }
 
     return () => {
       cancelled = true
       listeners.delete(listener)
     }
-  }, [token, queryClient])
+  }, [isAuthenticated, queryClient])
 
   return {
     connected: ws !== null && ws.readyState === WebSocket.OPEN,

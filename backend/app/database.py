@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum as PyEnum
 from typing import AsyncGenerator
@@ -27,6 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.config import get_settings
+
+
+def utc_now() -> datetime:
+    """Return current UTC time as a naive datetime (for DB columns)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ErrorSeverity(str, PyEnum):
@@ -93,7 +98,7 @@ class Group(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     users: Mapped[list["User"]] = relationship(
         secondary="user_groups", back_populates="groups", lazy="selectin"
@@ -112,9 +117,9 @@ class Conversation(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -142,7 +147,7 @@ class Message(Base):
     attachments: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
@@ -157,9 +162,9 @@ class MCPServer(Base):
     auth_type: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
     encrypted_credentials: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
 
@@ -168,7 +173,7 @@ class ChatTokenUsage(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     conversation_id: Mapped[UUID | None] = mapped_column(
@@ -176,7 +181,7 @@ class ChatTokenUsage(Base):
     )
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="chat_token_usages")
     conversation: Mapped["Conversation | None"] = relationship(back_populates="token_usages")
@@ -212,9 +217,9 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -285,9 +290,9 @@ class Project(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     user: Mapped["User"] = relationship(back_populates="projects")
@@ -301,7 +306,7 @@ class Job(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="Untitled Video")
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+        PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
     )
     project_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True
@@ -340,7 +345,7 @@ class Job(Base):
         PG_UUID(as_uuid=True), nullable=True, index=True
     )
     chat_message_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -405,7 +410,7 @@ class ErrorEvent(Base):
     source_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
     source_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -427,7 +432,7 @@ class MediaEvent(Base):
     asset_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
     seq: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
 
     user: Mapped["User"] = relationship(back_populates="media_events")
@@ -444,9 +449,9 @@ class Template(Base):
     created_by: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     creator: Mapped["User | None"] = relationship(back_populates="templates")
@@ -460,9 +465,9 @@ class Style(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     users_using_default: Mapped[list["UserSettings"]] = relationship(back_populates="default_style")
@@ -478,11 +483,11 @@ class Provider(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     daily_budget_limit: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     current_daily_spend: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
-    spend_reset_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    spend_reset_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     priority: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     workers: Mapped[list["Worker"]] = relationship(
@@ -503,7 +508,7 @@ class ModelConfig(Base):
     provider_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("providers.id"), nullable=False, index=True
     )
-    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     provider_model_id: Mapped[str] = mapped_column(String(200), nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     modality: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -519,9 +524,9 @@ class ModelConfig(Base):
     is_chat_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_deprecated: Mapped[bool] = mapped_column(Boolean, default=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
     extra_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
@@ -579,7 +584,7 @@ class Worker(Base):
     capabilities: Mapped[dict] = mapped_column(JSONB, default=dict)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     current_job_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     provider: Mapped["Provider"] = relationship(back_populates="workers")
     jobs: Mapped[list["Job"]] = relationship(back_populates="worker")
@@ -587,6 +592,11 @@ class Worker(Base):
 
 class CostLog(Base):
     __tablename__ = "cost_log"
+    __table_args__ = (
+        Index("ix_cost_log_provider_id", "provider_id"),
+        Index("ix_cost_log_job_id", "job_id"),
+        Index("ix_cost_log_created_at", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     provider_id: Mapped[UUID] = mapped_column(
@@ -598,11 +608,14 @@ class CostLog(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gpu_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class VideoScene(Base):
     __tablename__ = "video_scenes"
+    __table_args__ = (
+        UniqueConstraint("job_id", "scene_number", name="uq_video_scene_job_scene"),
+    )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     job_id: Mapped[UUID] = mapped_column(
@@ -632,9 +645,9 @@ class VideoScene(Base):
     seed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     warnings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     job: Mapped["Job"] = relationship(back_populates="scenes")
@@ -643,13 +656,11 @@ class VideoScene(Base):
 async def seed_builtin_data() -> None:
     """Load built-in templates and styles into the database.
 
-    Templates come from two sources:
-    1. Plugin ``template.yaml`` files (preferred)
-    2. Legacy ``templates/*.yaml`` files (kept for backward compat)
+    Templates come from plugin ``template.yaml`` files.
     """
     from app.config import get_settings
     from app.plugins.registry import get_all_plugins
-    from app.services.template_loader import StyleLoader, TemplateLoader
+    from app.services.template_loader import StyleLoader
 
     settings = get_settings()
 
@@ -696,18 +707,6 @@ async def seed_builtin_data() -> None:
                 db.add(template)
             except Exception as e:
                 print(f"Warning: Could not seed template from plugin {plugin.plugin_id}: {e}")
-
-        # --- Load legacy templates (those without a plugin) ---
-        template_loader = TemplateLoader(settings.templates_path)
-        try:
-            for template_data in template_loader.load_all_templates():
-                result = await db.execute(
-                    select(Template).where(Template.name == template_data["name"])
-                )
-                if result.scalar_one_or_none():
-                    continue  # already loaded via plugin
-        except Exception as e:
-            print(f"Warning: Could not scan legacy templates: {e}")
 
         await db.commit()
 
@@ -846,7 +845,7 @@ class Avatar(Base):
     )
     primary_image_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("avatar_images.id", use_alter=True, name="fk_avatar_primary_image"),
+        ForeignKey("avatar_images.id", use_alter=True, name="fk_avatars_primary_image_id"),
         nullable=True,
     )
     lora_model_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -854,9 +853,9 @@ class Avatar(Base):
         String(20), server_default="not_trained", nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     user: Mapped["User"] = relationship(back_populates="avatars")
@@ -889,7 +888,7 @@ class AvatarImage(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     avatar: Mapped["Avatar"] = relationship(
         back_populates="images", foreign_keys=[avatar_id]
@@ -912,7 +911,7 @@ class JobAvatar(Base):
     )
     role: Mapped[str | None] = mapped_column(Text, nullable=True)
     consistency_strategy_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     job: Mapped["Job"] = relationship(back_populates="avatar_assignments")
     avatar: Mapped["Avatar"] = relationship(back_populates="job_assignments")
@@ -930,9 +929,9 @@ class ObjectRef(Base):
     visual_properties: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utc_now, onupdate=utc_now
     )
 
     user: Mapped["User"] = relationship(back_populates="object_refs")
@@ -976,7 +975,7 @@ class JobObjectRef(Base):
     )
     role: Mapped[str | None] = mapped_column(Text, nullable=True)
     importance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     job: Mapped["Job"] = relationship(back_populates="object_ref_assignments")
     object_ref: Mapped["ObjectRef"] = relationship(back_populates="job_assignments")

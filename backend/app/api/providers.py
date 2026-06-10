@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,21 @@ class ProviderUpdate(BaseModel):
     is_active: bool | None = None
 
 
+SENSITIVE_CONFIG_KEYS = {"api_key", "secret", "token", "password"}
+MASK_SENTINEL = "***"
+
+
+def redact_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Mask sensitive values in a provider/storage config dict."""
+    redacted = {}
+    for key, value in config.items():
+        if any(sensitive in key.lower() for sensitive in SENSITIVE_CONFIG_KEYS):
+            redacted[key] = MASK_SENTINEL
+        else:
+            redacted[key] = value
+    return redacted
+
+
 class ProviderResponse(BaseModel):
     id: UUID
     name: str
@@ -51,6 +66,10 @@ class ProviderResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("config")
+    def serialize_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        return redact_config(config)
 
 
 class ProviderStatusResponse(BaseModel):
@@ -248,6 +267,16 @@ async def update_provider(
         merged = {**provider.config, **data.config}
         # Remove empty strings that indicate "keep existing"
         merged = {k: v for k, v in merged.items() if v != ""}
+        # Restore existing values for sensitive keys when the client sends
+        # the mask sentinel, so admin UI round-trips don't overwrite real
+        # secrets with the redacted placeholder.
+        for key in list(merged.keys()):
+            if (
+                any(sensitive in key.lower() for sensitive in SENSITIVE_CONFIG_KEYS)
+                and merged[key] == MASK_SENTINEL
+                and key in provider.config
+            ):
+                merged[key] = provider.config[key]
         provider.config = merged
     if data.daily_budget_limit is not None:
         provider.daily_budget_limit = Decimal(str(data.daily_budget_limit))

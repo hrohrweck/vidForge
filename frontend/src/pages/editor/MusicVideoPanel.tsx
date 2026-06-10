@@ -48,9 +48,8 @@ export function MusicVideoPanel({ job, jobId, scenes, planningMode }: Props) {
   useEffect(() => {
     let objectUrl: string | null = null
     if (job?.input_data?.audio_file) {
-      const token = localStorage.getItem('token')
       fetch(`/api/uploads/stream/${job.input_data.audio_file}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
       })
         .then((r) => (r.ok ? r.blob() : Promise.reject()))
         .then((blob) => {

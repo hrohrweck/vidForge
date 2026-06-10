@@ -165,7 +165,7 @@ class TestDownloadJob:
         with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
             mock.return_value = {"token": "tok123"}
             result = await _handle_download_job(ctx, {"job_id": "j1"})
-            assert result["download_url"] == "/api/jobs/j1/download?token=tok123"
+            assert result["download_url"] == "/api/jobs/j1/download"
             mock.assert_awaited_once_with(ctx, "GET", "/jobs/j1/download")
 
     @pytest.mark.asyncio

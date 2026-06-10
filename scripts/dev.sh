@@ -27,22 +27,22 @@ usage() {
 
 cmd_up() {
     cd "$PROJECT_DIR/docker"
-    docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 }
 
 cmd_down() {
     cd "$PROJECT_DIR/docker"
-    docker-compose down
+    docker compose down
 }
 
 cmd_logs() {
     cd "$PROJECT_DIR/docker"
-    docker-compose logs -f "${@:-backend}"
+    docker compose logs -f "${@:-backend}"
 }
 
 cmd_build() {
     cd "$PROJECT_DIR/docker"
-    docker-compose up -d --build
+    docker compose up -d --build
 }
 
 cmd_migrate() {
@@ -91,12 +91,12 @@ cmd_clean() {
 
 cmd_shell() {
     cd "$PROJECT_DIR/docker"
-    docker-compose exec backend /bin/bash
+    docker compose exec backend /bin/bash
 }
 
 cmd_status() {
     cd "$PROJECT_DIR/docker"
-    docker-compose ps
+    docker compose ps
 }
 
 case "${1:-}" in

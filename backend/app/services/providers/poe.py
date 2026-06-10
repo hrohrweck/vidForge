@@ -655,14 +655,57 @@ class PoeProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvider):
         return None
 
     @staticmethod
+    def _is_safe_url(url: str) -> bool:
+        import ipaddress
+        import socket
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+            return True
+        except ValueError:
+            pass
+
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+        except socket.gaierror:
+            return False
+
+        for _, _, _, _, sockaddr in addr_info:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+
+        return True
+
+    @staticmethod
     def _sync_download(url: str) -> bytes | None:
         """Download content from a URL synchronously."""
         import logging
         logger = logging.getLogger(__name__)
         try:
             import urllib.request
+
+            if not PoeProvider._is_safe_url(url):
+                logger.warning(f"Blocked unsafe URL: {url[:80]}")
+                return None
+
             req = urllib.request.Request(url, headers={"User-Agent": "VidForge/1.0"})
             with urllib.request.urlopen(req, timeout=60) as resp:
+                final_url = resp.geturl()
+                if final_url != url and not PoeProvider._is_safe_url(final_url):
+                    logger.warning(f"Blocked redirect to unsafe URL: {final_url[:80]}")
+                    return None
                 data = resp.read()
                 logger.debug(f"Downloaded {len(data)} bytes from {url[:80]}")
                 return data

@@ -18,6 +18,7 @@ class SSHStorage(StorageBackend):
         remote_path: str,
         port: int = 22,
         password: str | None = None,
+        known_hosts_path: str | None = None,
     ) -> None:
         import paramiko
 
@@ -28,7 +29,11 @@ class SSHStorage(StorageBackend):
         self.port = port
         self.remote_path = remote_path.rstrip("/")
         self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self._client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        if known_hosts_path:
+            self._client.load_host_keys(known_hosts_path)
+        else:
+            self._client.load_system_host_keys()
         self._sftp: Any = None
 
     def _full_remote_path(self, path: str) -> str:

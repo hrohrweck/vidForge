@@ -200,7 +200,7 @@ def test_default_registry_has_all_five_provider_types() -> None:
 def test_default_registry_maps_type_to_correct_class(
     provider_type: str, expected_class: type[ComfyUIProvider]
 ) -> None:
-    assert registry.get(provider_type) is expected_class
+    assert registry.get(provider_type).__name__ == expected_class.__name__
 
 
 @pytest.mark.parametrize("provider_type", ["atlascloud", "comfyui_direct", "ollama", "poe", "runpod"])

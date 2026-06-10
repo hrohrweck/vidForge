@@ -16,6 +16,21 @@ from app.services.music_video_planner import MusicVideoPlanner
 router = APIRouter(tags=["scenes"])
 
 
+def _resolve_audio_path(storage_path: str, audio_file: str) -> Path:
+    audio_file = audio_file.replace("\\", "/")
+    if audio_file.startswith("/"):
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+
+    root = Path(storage_path).resolve()
+    candidate = (root / audio_file).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Path traversal detected") from exc
+
+    return candidate
+
+
 class LyricsExtractRequest(BaseModel):
     audio_file_path: str
 
@@ -94,7 +109,7 @@ async def get_audio_metadata(
         raise HTTPException(status_code=404, detail="No audio file for this job")
 
     settings = get_settings()
-    audio_path = Path(settings.storage_path).resolve() / audio_file
+    audio_path = _resolve_audio_path(settings.storage_path, audio_file)
 
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
@@ -118,7 +133,7 @@ async def extract_lyrics(
         raise HTTPException(status_code=404, detail="Job not found")
 
     settings = get_settings()
-    audio_path = Path(settings.storage_path).resolve() / request.audio_file_path
+    audio_path = _resolve_audio_path(settings.storage_path, request.audio_file_path)
 
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")

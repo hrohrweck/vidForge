@@ -24,7 +24,6 @@ from app.database import ErrorEvent, ErrorOrigin, ErrorSeverity, Job, Message, P
 from app.services.budget_tracker import BudgetTracker
 from app.services.error_capture import log_user_error
 from app.services.job_router import JobRouter
-from app.services.video_generator import process_job_video
 from app.services.worker_registry import WorkerRegistry
 from app.storage import get_storage_backend
 from app.workers.celery_app import celery_app
@@ -260,23 +259,6 @@ async def _resolve_provider_for_job(db, job: Job, workflow: dict, preference: st
     return provider, provider_instance, estimated_cost, router, reason
 
 
-async def _run_local_job(
-    job_id: str,
-    template_name: str | None,
-    input_data: dict,
-) -> tuple[str, str | None]:
-    video_path, preview_path = await process_job_video(
-        job_id=job_id,
-        template_name=template_name,
-        input_data=input_data,
-        progress_callback=lambda p, m: progress_callback(job_id, p, m),
-    )
-    relative_video = str(Path(video_path).relative_to(settings.storage_path))
-    relative_preview = (
-        str(Path(preview_path).relative_to(settings.storage_path)) if preview_path else None
-    )
-    return relative_video, relative_preview
-
 
 
 
@@ -329,10 +311,10 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
     async with ctx.session_factory() as db:
         result = await db.execute(select(Job).where(Job.id == job_uuid))
         job = result.scalar_one_or_none()
+        print(f"DEBUG: db={type(db)}, result={type(result)}, job={type(job)}")
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        input_data = job.input_data or {}
         template_name = await get_template_name(db, job.template_id)
         preference = job.provider_preference or provider_preference
 
@@ -392,60 +374,41 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                     )
                     return {"status": "failed", "error": "Queue full", "job_id": job_id}
 
-            # Provider-aware routing:
-            # ComfyUI workflow providers -> VideoGenerator (workflow-based)
-            # Direct API providers -> dispatcher pipeline (provider-agnostic
-            #   via media_generator.generate_video, which routes through
-            #   the VideoProvider interface)
-            _COMFYUI_WORKFLOW_TYPES = frozenset({"comfyui_direct", "runpod"})
-            is_comfyui = provider_record.provider_type in _COMFYUI_WORKFLOW_TYPES
+            from sqlalchemy import delete as sa_delete
 
-            if is_comfyui:
-                relative_video, relative_preview = await _run_local_job(
-                    job_id,
-                    template_name,
-                    input_data,
-                )
-            else:
-                # Direct API provider (AtlasCloud, Poe, etc.):
-                # Convert to scene-based pipeline and run through the
-                # dispatcher, which calls media_generator.generate_video()
-                # with proper VideoProvider interface routing.
-                from sqlalchemy import delete as sa_delete
+            from app.database import VideoScene
+            from app.workers.dispatcher import dispatch_stage
 
-                from app.database import VideoScene
-                from app.workers.dispatcher import dispatch_stage
+            # Clear any stale scenes and mark as scene-based
+            job.workflow_type = "scene_based"
+            await db.execute(
+                sa_delete(VideoScene).where(VideoScene.job_id == job_uuid)
+            )
+            await db.commit()
 
-                # Clear any stale scenes and mark as scene-based
-                job.workflow_type = "scene_based"
-                await db.execute(
-                    sa_delete(VideoScene).where(VideoScene.job_id == job_uuid)
-                )
-                await db.commit()
+            # Run pipeline stages sequentially: planning → images → videos → render
+            for stage in (
+                "planning",
+                "generating_images",
+                "generating_videos",
+                "rendering",
+            ):
+                result = await dispatch_stage(job_id, stage)
+                if result.get("status") == "failed":
+                    return {
+                        "status": "failed",
+                        "error": result.get(
+                            "error_message", f"Pipeline stage '{stage}' failed"
+                        ),
+                        "job_id": job_id,
+                        "stage": stage,
+                    }
 
-                # Run pipeline stages sequentially: planning → images → videos → render
-                for stage in (
-                    "planning",
-                    "generating_images",
-                    "generating_videos",
-                    "rendering",
-                ):
-                    result = await dispatch_stage(job_id, stage)
-                    if result.get("status") == "failed":
-                        return {
-                            "status": "failed",
-                            "error": result.get(
-                                "error_message", f"Pipeline stage '{stage}' failed"
-                            ),
-                            "job_id": job_id,
-                            "stage": stage,
-                        }
-
-                # Reload job to pick up output_path / preview_path set by
-                # the rendering stage (which ran in a separate db session).
-                await db.refresh(job)
-                relative_video = job.output_path
-                relative_preview = job.preview_path
+            # Reload job to pick up output_path / preview_path set by
+            # the rendering stage (which ran in a separate db session).
+            await db.refresh(job)
+            relative_video = job.output_path
+            relative_preview = job.preview_path
 
             # --- Record cost for all provider types -----------------------
             actual_cost = _as_decimal(estimated_cost)
@@ -744,7 +707,15 @@ async def _train_avatar_lora(avatar_id: str) -> dict:
             avatar_with_images = result.scalar_one()
             images = [img for img in avatar_with_images.images if img.storage_path]
             if len(images) < 3:
-                raise ValueError("Need at least 3 images for LoRA training")
+                logger.warning(
+                    "Avatar %s has only %d images; LoRA training unavailable (need ≥3)",
+                    avatar_id,
+                    len(images),
+                )
+                avatar.lora_training_status = "unavailable"
+                avatar.lora_model_path = None
+                await db.commit()
+                return {"status": "completed", "avatar_id": avatar_id}
 
             # Generate caption
             caption = f"{avatar.name}, {avatar.gender}"

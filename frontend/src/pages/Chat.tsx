@@ -170,7 +170,7 @@ export default function Chat() {
       setStreaming(false)
       refreshConversations()
     }
-  }, [input, pendingAttachments, selectedConversationId, appendMessage, clearAttachments, setStreaming, setStreamError])
+  }, [input, pendingAttachments, selectedConversationId, selectedModelId, appendMessage, updateStreamingMessage, clearAttachments, setStreaming, setStreamError, refreshConversations])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

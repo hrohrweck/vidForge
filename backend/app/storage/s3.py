@@ -36,8 +36,16 @@ class S3Storage(StorageBackend):
         )
 
     async def download(self, path: str) -> bytes:
+        from botocore.exceptions import ClientError
+
         def _download() -> bytes:
-            response = self._client.get_object(Bucket=self._bucket, Key=path)
+            try:
+                response = self._client.get_object(Bucket=self._bucket, Key=path)
+            except ClientError as exc:
+                code = exc.response.get("Error", {}).get("Code", "")
+                if code == "NoSuchKey":
+                    raise FileNotFoundError(f"S3 object not found: {path}") from exc
+                raise
             return response["Body"].read()
 
         return await asyncio.get_event_loop().run_in_executor(None, _download)

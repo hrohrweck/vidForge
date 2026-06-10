@@ -10,12 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import Group, User, UserGroup, get_db
+from app.dependencies.rate_limit import RateLimiter
 from app.services.permissions import get_user_permissions
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 settings = get_settings()
+
+login_rate_limiter = RateLimiter(times=10, seconds=60)
+register_rate_limiter = RateLimiter(times=5, seconds=60)
 
 TOKEN_COOKIE_NAME = "vidforge_token"
 
@@ -148,16 +152,13 @@ async def get_current_user_from_bearer_or_cookie(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    import logging
-    logger = logging.getLogger(__name__)
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    logger.info(f"Auth check - cookies: {request.cookies}, token_name: {TOKEN_COOKIE_NAME}")
+
 
     if credentials and credentials.credentials:
         try:
@@ -247,7 +248,11 @@ async def require_admin(
 
 
 @router.post("/register", response_model=UserResponse)
-async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
+async def register(
+    user_data: UserCreate,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(register_rate_limiter),
+) -> User:
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -281,6 +286,7 @@ async def login(
     response: Response,
     user_data: UserLogin,
     db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(login_rate_limiter),
 ) -> dict:
     result = await db.execute(select(User).where(User.email == user_data.email))
     user = result.scalar_one_or_none()
@@ -310,10 +316,17 @@ async def logout(response: Response) -> dict:
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
+    response: Response,
     current_user: User = Depends(get_current_user),
 ) -> Token:
-    """Issue a fresh access token for an authenticated user."""
     token = create_access_token(data={"sub": str(current_user.id)})
+    response.set_cookie(
+        key=TOKEN_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.access_token_expire_minutes * 60,
+    )
     return Token(access_token=token, token_type="bearer")
 
 

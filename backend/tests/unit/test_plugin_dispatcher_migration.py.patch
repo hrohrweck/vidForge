@@ -1,0 +1,15 @@
+--- backend/tests/unit/test_plugin_dispatcher_migration.py
++++ backend/tests/unit/test_plugin_dispatcher_migration.py
+@@ -130,6 +130,10 @@
+         monkeypatch.setattr(tasks_module, "BudgetTracker", FakeBudgetTracker)
+         monkeypatch.setattr(dispatcher_module, "dispatch_stage", fake_dispatch_stage)
+ 
+-        result = await tasks_module._process_video_job(str(job_id), "auto")
++        try:
++            result = await tasks_module._process_video_job(str(job_id), "auto")
++        except Exception as e:
++            import traceback
++            traceback.print_exc()
++            raise
+ 
+         assert result == {"status": "completed", "job_id": str(job_id)}

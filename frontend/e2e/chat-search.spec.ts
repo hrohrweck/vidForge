@@ -77,7 +77,7 @@ test.describe('Chat Search', () => {
     await expect(page.getByText('Hello, this is a test message.')).toBeVisible()
 
     const timeElements = page.locator('time, [data-timestamp], [datetime]')
-    const datePattern = page.getByText(/\d{1,2}[:\/]\d{2}/)
+    const datePattern = page.getByText(/\d{1,2}[:/]\d{2}/)
     const hasTimestampElement = await timeElements.first().isVisible().catch(() => false)
     const hasDatePattern = await datePattern.first().isVisible().catch(() => false)
 

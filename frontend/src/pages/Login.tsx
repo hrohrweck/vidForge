@@ -20,17 +20,9 @@ export default function Login() {
       const response = await authApi.login({ email, password })
       return response.data
     },
-    onSuccess: async (data) => {
-      setAuth(data.access_token, {
-        id: '',
-        email,
-        is_active: true,
-        is_superuser: false,
-        groups: [],
-        permissions: [],
-      })
+    onSuccess: async () => {
       const meResponse = await authApi.getMe()
-      setAuth(data.access_token, meResponse.data)
+      setAuth(meResponse.data)
       navigate('/')
     },
     onError: () => {

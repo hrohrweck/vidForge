@@ -304,7 +304,7 @@ export default function Providers() {
       }
 
       if (formState.apiKey.trim()) {
-        ;(runpodPayload as ProviderCreateRequest | ProviderUpdateRequest).config = {
+        (runpodPayload as ProviderCreateRequest | ProviderUpdateRequest).config = {
           ...(runpodPayload.config as Record<string, unknown>),
           api_key: formState.apiKey.trim(),
         }

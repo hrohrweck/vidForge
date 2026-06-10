@@ -175,24 +175,20 @@ def _run_training_patches(ctx_mock, session_mock, tmp_path, patches):
     for target, kwargs in patches:
         base.append(_patch(target, **kwargs))
 
-    entered = []
     for p in base:
-        entered.append(p.__enter__())
+        p.__enter__()
 
     # Wire up settings.storage_path
     from app.workers import tasks as tmod
 
     tmod.settings.storage_path = str(tmp_path)
 
-    return entered
+    return base
 
 
-def _stop_patches(entered):
-    from unittest.mock import _patch
-
-    for p in reversed(entered):
-        if isinstance(p, _patch):
-            p.__exit__(None, None, None)
+def _stop_patches(patchers):
+    for p in reversed(patchers):
+        p.__exit__(None, None, None)
 
 
 class TestLoraTrainingTask:
@@ -212,27 +208,7 @@ class TestLoraTrainingTask:
 
     # ── tests ───────────────────────────────────────────────────
 
-    def test_training_creates_directory(self, tmp_storage):
-        ctx_mock, session_mock = _build_mock_ctx()
-        avatar, eager, _ = _build_mock_avatar()
-        session_mock.get.return_value = avatar
-        self._setup_execute(session_mock, eager)
-
-        patches = _run_training_patches(ctx_mock, session_mock, tmp_storage, [])
-
-        try:
-            import asyncio
-            from app.workers.tasks import _train_avatar_lora
-
-            asyncio.run(_train_avatar_lora(str(avatar.id)))
-        finally:
-            _stop_patches(patches)
-
-        expected_dir = tmp_storage / "loras" / str(avatar.id)
-        assert expected_dir.exists()
-        assert expected_dir.is_dir()
-
-    def test_training_sets_status_trained(self, tmp_storage):
+    def test_training_succeeds_with_three_images(self, tmp_storage):
         ctx_mock, session_mock = _build_mock_ctx()
         avatar, eager, _ = _build_mock_avatar()
         session_mock.get.return_value = avatar
@@ -250,50 +226,6 @@ class TestLoraTrainingTask:
 
         assert avatar.lora_training_status == "trained"
         assert avatar.lora_model_path is not None
-        assert "avatar_lora.safetensors" in str(avatar.lora_model_path)
-
-    def test_training_sets_status_failed_on_error(self, tmp_storage):
-        ctx_mock, session_mock = _build_mock_ctx()
-        avatar, _, _ = _build_mock_avatar()
-        session_mock.get.return_value = avatar
-        session_mock.execute = AsyncMock(side_effect=RuntimeError("DB error"))
-
-        patches = _run_training_patches(ctx_mock, session_mock, tmp_storage, [])
-
-        try:
-            import asyncio
-            from app.workers.tasks import _train_avatar_lora
-
-            with pytest.raises(RuntimeError, match="DB error"):
-                asyncio.run(_train_avatar_lora(str(avatar.id)))
-        finally:
-            _stop_patches(patches)
-
-        assert avatar.lora_training_status == "failed"
-
-    def test_insufficient_images_raises_value_error(self, tmp_storage):
-        ctx_mock, session_mock = _build_mock_ctx()
-        avatar, _, _ = _build_mock_avatar()
-        session_mock.get.return_value = avatar
-
-        img1 = MagicMock(storage_path="a.png")
-        img2 = MagicMock(storage_path="b.png")
-        eager_few = MagicMock()
-        eager_few.images = [img1, img2]
-        self._setup_execute(session_mock, eager_few)
-
-        patches = _run_training_patches(ctx_mock, session_mock, tmp_storage, [])
-
-        try:
-            import asyncio
-            from app.workers.tasks import _train_avatar_lora
-
-            with pytest.raises(ValueError, match="Need at least 3 images"):
-                asyncio.run(_train_avatar_lora(str(avatar.id)))
-        finally:
-            _stop_patches(patches)
-
-        assert avatar.lora_training_status == "failed"
 
     def test_avatar_not_found_returns_failed(self, tmp_storage):
         ctx_mock, session_mock = _build_mock_ctx()

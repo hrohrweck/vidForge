@@ -14,7 +14,7 @@ router = APIRouter()
 async def token_usage(
     from_date: date | None = Query(None, alias="from"),
     to_date: date | None = Query(None, alias="to"),
-    group_by: str = Query("day", regex="^(month|day|hour)$"),
+    group_by: str = Query("day", pattern="^(month|day|hour)$"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -23,7 +23,8 @@ async def token_usage(
     if not from_date:
         from_date = to_date - timedelta(days=30)
 
-    trunc = f"date_trunc('{group_by}', recorded_at)"
+    _valid_trunc = {"month": "month", "day": "day", "hour": "hour"}
+    trunc = f"date_trunc('{_valid_trunc[group_by]}', recorded_at)"
 
     query = text(f"""
         SELECT {trunc} AS bucket, model_id,
@@ -65,7 +66,8 @@ async def dashboard_cost(
     if not from_date:
         from_date = to_date - timedelta(days=30)
 
-    trunc = f"date_trunc('{group_by}', completed_at)"
+    _valid_trunc = {"month": "month", "day": "day", "hour": "hour"}
+    trunc = f"date_trunc('{_valid_trunc[group_by]}', completed_at)"
 
     # Aggregate jobs.actual_cost by completed_at + template_id.
     # media_assets table does not exist in current schema, so we

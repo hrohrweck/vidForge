@@ -233,7 +233,7 @@ export function ChatPanel() {
     } finally {
       setStreaming(false)
     }
-  }, [input, pendingAttachments, selectedConversationId, appendMessage, updateMessage, clearAttachments, setStreaming, setStreamError])
+  }, [input, pendingAttachments, selectedConversationId, selectedModelId, appendMessage, updateMessage, clearAttachments, setStreaming, setStreamError])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -241,8 +241,6 @@ export function ChatPanel() {
       handleSend()
     }
   }, [handleSend])
-
-  if (!panelOpen) return null
 
   const messages = useChatStore((s) => s.selectedConversationId
     ? s.messages[s.selectedConversationId] ?? []
@@ -253,6 +251,8 @@ export function ChatPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  if (!panelOpen) return null
 
   return (
     <div

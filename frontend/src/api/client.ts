@@ -9,58 +9,21 @@ const api = axios.create({
   withCredentials: true,
 })
 
-api.interceptors.request.use((config) => {
-  const token = useAuthStore.getState().token
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-let isRefreshing = false
-let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = []
-
-const processQueue = (token: string | null, error: unknown = null) => {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error)
-    else resolve(token!)
-  })
-  failedQueue = []
-}
-
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
     if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject })
-        }).then((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`
-          return api(originalRequest)
-        })
-      }
-
       originalRequest._retry = true
-      isRefreshing = true
-
       try {
-        const response = await api.post<TokenResponse>('/auth/refresh')
-        const newToken = response.data.access_token
-        useAuthStore.getState().setToken(newToken)
-        processQueue(newToken)
-        originalRequest.headers.Authorization = `Bearer ${newToken}`
+        await api.post('/auth/refresh')
         return api(originalRequest)
       } catch (refreshError) {
-        processQueue(null, refreshError)
         useAuthStore.getState().logout()
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
         }
         return Promise.reject(refreshError)
-      } finally {
-        isRefreshing = false
       }
     }
     return Promise.reject(error)
@@ -374,9 +337,7 @@ export const jobsApi = {
   delete: (id: string) => api.delete(`/jobs/${id}`),
 
   downloadUrl: (id: string) => {
-    // Returns a URL that triggers a browser download with Content-Disposition
-    const token = localStorage.getItem('token')
-    return `/api/jobs/${id}/download?token=${token}`
+    return `/api/jobs/${id}/download`
   },
 
   getObjects: async (id: string) => {
@@ -1066,13 +1027,12 @@ export const chatApi = {
     attachments?: Array<{ kind: string; url: string; name?: string }>,
     signal?: AbortSignal
   ): AsyncGenerator<ChatStreamEvent, void, unknown> {
-    const token = useAuthStore.getState().token
     const response = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+      credentials: 'include',
       body: JSON.stringify({
         content,
         model_id: modelId,
@@ -1114,6 +1074,7 @@ export const chatApi = {
                 const parsed = JSON.parse(data)
                 yield { event: currentEvent, data: parsed } as ChatStreamEvent
               } catch {
+                // ignore malformed JSON lines
               }
             }
             currentEvent = ''

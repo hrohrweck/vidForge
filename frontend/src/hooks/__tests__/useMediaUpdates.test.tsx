@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import React from 'react'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -6,8 +6,19 @@ import { http, HttpResponse } from 'msw'
 import { server } from '../../test/mocks/server'
 
 describe('useMediaUpdates', () => {
-  let MockWebSocket: ReturnType<typeof vi.fn>
-  let wsInstances: any[]
+  interface MockWSInstance {
+    url: string
+    send: ReturnType<typeof vi.fn>
+    close: ReturnType<typeof vi.fn>
+    readyState: number
+    onopen: ((ev: Event) => void) | null
+    onmessage: ((ev: MessageEvent) => void) | null
+    onclose: ((ev: CloseEvent) => void) | null
+    onerror: ((ev: Event) => void) | null
+  }
+
+  let MockWebSocket: Mock<[url: string], MockWSInstance>
+  let wsInstances: MockWSInstance[]
   let originalWebSocket: typeof WebSocket
 
   beforeEach(() => {
@@ -15,23 +26,25 @@ describe('useMediaUpdates', () => {
     wsInstances = []
     originalWebSocket = global.WebSocket
 
-    MockWebSocket = vi.fn(function (this: any, url: string) {
-      const instance = {
+    MockWebSocket = vi.fn(function (this: MockWSInstance, url: string) {
+      const instance: MockWSInstance = {
         url,
         send: vi.fn(),
         close: vi.fn(),
         readyState: WebSocket.CONNECTING,
-        onopen: null as ((ev: Event) => void) | null,
-        onmessage: null as ((ev: MessageEvent) => void) | null,
-        onclose: null as ((ev: CloseEvent) => void) | null,
-        onerror: null as ((ev: Event) => void) | null,
+        onopen: null,
+        onmessage: null,
+        onclose: null,
+        onerror: null,
       }
       wsInstances.push(instance)
       return instance
-    }) as any
+    })
 
     vi.stubGlobal('WebSocket', MockWebSocket)
-    window.localStorage.clear()
+    if (typeof window !== 'undefined') {
+      window.localStorage.clear()
+    }
 
     server.use(
       http.get('*/api/media/events/since', () => {
@@ -46,9 +59,9 @@ describe('useMediaUpdates', () => {
     vi.stubGlobal('WebSocket', originalWebSocket)
   })
 
-  it('opens WebSocket on mount', async () => {
+  it('opens WebSocket on mount when authenticated', async () => {
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({
@@ -65,13 +78,12 @@ describe('useMediaUpdates', () => {
     })
 
     const instance = wsInstances[0]
-    expect(instance.url).toContain('/ws/media')
-    expect(instance.url).toContain('token=test-token')
+    expect(instance.url).toBe('ws://localhost:3000/ws/media')
   })
 
   it('invalidates queries on media_event', async () => {
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({
@@ -112,7 +124,7 @@ describe('useMediaUpdates', () => {
 
   it('ignores non-media events', async () => {
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({
@@ -153,7 +165,7 @@ describe('useMediaUpdates', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
 
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({
@@ -171,7 +183,7 @@ describe('useMediaUpdates', () => {
 
     const instance = wsInstances[0]
     if (instance.onclose) {
-      instance.onclose(new Event('close') as any)
+      instance.onclose(new Event('close') as unknown as CloseEvent)
     }
 
     vi.advanceTimersByTime(1000)
@@ -200,7 +212,7 @@ describe('useMediaUpdates', () => {
     )
 
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({
@@ -232,7 +244,7 @@ describe('useMediaUpdates', () => {
 
   it('skips stale events by seq', async () => {
     const { useAuthStore } = await import('../../stores/auth')
-    useAuthStore.setState({ token: 'test-token' })
+    useAuthStore.setState({ isAuthenticated: true, user: { id: 'u1', email: 'a@b.com', is_active: true, is_superuser: false, groups: [], permissions: [] } })
 
     const { useMediaUpdates } = await import('../useMediaUpdates')
     const queryClient = new QueryClient({

@@ -206,7 +206,7 @@ test.describe('Chat Thinking Filter and Media Display', () => {
 
   test('generated media appears after job completion', async ({ page }) => {
     await setupChatMocks(page)
-    const messageInput = await createNewChat(page)
+    await createNewChat(page)
 
     // Use the exposed Zustand store to inject messages with mediaResult
     // This simulates a completed job with generated media

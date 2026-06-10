@@ -29,21 +29,7 @@ export const handlers = [
     })
   }),
   
-  http.get('*/api/auth/me', ({ request }) => {
-    const auth = request.headers.get('Authorization')
-    if (!auth) {
-      return new HttpResponse(null, { status: 401 })
-    }
-    
-    if (auth.includes('superuser')) {
-      return HttpResponse.json({
-        id: '1',
-        email: 'admin@example.com',
-        is_active: true,
-        is_superuser: true
-      })
-    }
-    
+  http.get('*/api/auth/me', () => {
     return HttpResponse.json({
       id: '1',
       email: 'test@example.com',
@@ -52,12 +38,7 @@ export const handlers = [
     })
   }),
   
-  http.get('*/api/jobs', ({ request }) => {
-    const auth = request.headers.get('Authorization')
-    if (!auth) {
-      return new HttpResponse(null, { status: 401 })
-    }
-    
+  http.get('*/api/jobs', () => {
     return HttpResponse.json([
       {
         id: '1',
@@ -157,11 +138,7 @@ export const handlers = [
     })
   }),
   
-  http.get('*/api/admin/users', ({ request }) => {
-    const auth = request.headers.get('Authorization')
-    if (!auth || !auth.includes('superuser')) {
-      return new HttpResponse(null, { status: 403 })
-    }
+  http.get('*/api/admin/users', () => {
     return HttpResponse.json([
       {
         id: '1',
@@ -173,11 +150,7 @@ export const handlers = [
     ])
   }),
   
-  http.get('*/api/admin/dashboard', ({ request }) => {
-    const auth = request.headers.get('Authorization')
-    if (!auth || !auth.includes('superuser')) {
-      return new HttpResponse(null, { status: 403 })
-    }
+  http.get('*/api/admin/dashboard', () => {
     return HttpResponse.json({
       stats: {
         total_users: 10,
@@ -193,11 +166,7 @@ export const handlers = [
     })
   }),
   
-  http.get('*/api/admin/stats', ({ request }) => {
-    const auth = request.headers.get('Authorization')
-    if (!auth || !auth.includes('superuser')) {
-      return new HttpResponse(null, { status: 403 })
-    }
+  http.get('*/api/admin/stats', () => {
     return HttpResponse.json({
       total_users: 10,
       total_jobs: 50,

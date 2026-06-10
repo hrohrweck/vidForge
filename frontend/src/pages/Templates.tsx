@@ -121,7 +121,8 @@ export default function Templates() {
     },
   })
 
-  const handleUseTemplate = (_template: Template) => {
+  const handleUseTemplate = (template: Template) => {
+    void template
     setShowCreateModal(true)
     setSelectedTemplate(null)
   }

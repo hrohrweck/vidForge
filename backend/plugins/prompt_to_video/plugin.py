@@ -53,6 +53,11 @@ class PromptToVideoPlugin(PluginBase):
         template.setdefault("config", {})["workflow_type"] = "scene_based"
         return template
 
+    def get_input_schema(self) -> type[Any] | None:
+        from .schemas import PromptToVideoInput
+
+        return PromptToVideoInput
+
     # ------------------------------------------------------------------
     # Stage: enrich inputs
     # ------------------------------------------------------------------
@@ -84,6 +89,44 @@ class PromptToVideoPlugin(PluginBase):
             await provider.shutdown()
 
         return context
+
+    async def render(
+        self,
+        db: AsyncSession,
+        job: Job,
+        scenes: list[VideoScene],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        input_data = job.input_data or {}
+        if input_data.get("generate_audio"):
+            try:
+                from app.config import get_settings
+                from app.services.audio_generation import MusicGenService
+
+                svc = MusicGenService()
+                if await svc.is_available():
+                    settings = get_settings()
+                    output_dir = Path(settings.storage_path) / "output" / str(job.id)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    audio_path = str(output_dir / "background_music.mp3")
+                    prompt = input_data.get("audio_prompt") or input_data.get("prompt", "")
+                    duration = min(float(input_data.get("duration", 30)), 120)
+
+                    logger.info("Generating prompt-to-video background music: %s", prompt)
+                    actual_path = await svc.generate(
+                        prompt=prompt,
+                        output_path=audio_path,
+                        duration=duration,
+                        output_format="mp3",
+                    )
+                    context["background_music"] = actual_path
+                    context["background_music_volume"] = input_data.get("audio_volume", 0.3)
+                else:
+                    logger.warning("AudioCraft server not available, skipping generated audio")
+            except Exception:
+                logger.warning("Failed to generate prompt-to-video audio", exc_info=True)
+
+        return await super().render(db, job, scenes, context)
 
     # ------------------------------------------------------------------
     # Stage: plan scenes

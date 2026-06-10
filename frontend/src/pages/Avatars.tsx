@@ -335,7 +335,7 @@ function EditAvatarModal({
       }
       return updated
     },
-    onSuccess: (_updated) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['avatars'] })
       // Revoke object URLs
       newFiles.forEach((sf) => URL.revokeObjectURL(sf.previewUrl))

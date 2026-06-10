@@ -51,6 +51,12 @@ def discover_plugins(plugin_dirs: list[Path] | None = None) -> None:
                     logger.warning("Plugin %s has no create_plugin()", pkg.name)
                     continue
                 plugin = factory()
+                if plugin.plugin_id in _PLUGINS:
+                    existing = _PLUGINS[plugin.plugin_id]
+                    raise ValueError(
+                        f"Duplicate plugin_id '{plugin.plugin_id}' from {pkg.name}; "
+                        f"already registered by {existing.__class__.__module__}"
+                    )
                 _PLUGINS[plugin.plugin_id] = plugin
                 logger.info("[Plugin] Registered %s (%s)", plugin.plugin_id, plugin.display_name)
             except Exception:

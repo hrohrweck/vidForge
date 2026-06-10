@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { RenameDialog } from '../components/media/RenameDialog'
 import { DndContext } from '@dnd-kit/core'
 import { FolderRail } from '../components/media/FolderRail'
@@ -49,7 +49,7 @@ export function MediaLibrary() {
 
   // Data
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useAssets(query)
-  const allAssets = data?.pages.flatMap((page) => page.assets) ?? []
+  const allAssets = useMemo(() => data?.pages.flatMap((page: { assets: MediaAsset[] }) => page.assets) ?? [], [data])
 
   // Hooks
   const bulkMoveMutation = useBulkMoveAssets()
@@ -85,8 +85,6 @@ export function MediaLibrary() {
 
   // Drag and drop
   const {
-    activeId: _activeId,
-    overId: _overId,
     handleDragStart,
     handleDragOver,
     handleDragEnd,
@@ -169,7 +167,8 @@ export function MediaLibrary() {
   const handleFolderChange = useCallback((folderId: string | undefined) => {
     setSelectedFolderId(folderId)
     setQuery((prev) => {
-      const { search, ...rest } = prev
+      const rest = { ...prev }
+      delete (rest as Record<string, unknown>).search
       return { ...rest, folder_id: folderId }
     })
     selection.clear()

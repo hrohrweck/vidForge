@@ -4,6 +4,7 @@ from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.api import (
     admin,
@@ -30,13 +31,22 @@ from app.api.admin_mcp import router as admin_mcp_router
 from app.api.websocket import manager as ws_manager
 from app.api.ws_auth import authenticate_websocket
 from app.config import get_settings
-from app.database import User, async_session, create_tables, seed_builtin_data, seed_rbac_data
+from app.database import (
+    Conversation,
+    Job,
+    User,
+    async_session,
+    create_tables,
+    seed_builtin_data,
+    seed_rbac_data,
+)
 from app.services.model_manager import ModelManager, ModelManagerError
+
+settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    settings = get_settings()
     if settings.debug:
         await create_tables()
 
@@ -57,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with async_session() as db:
         result = await db.execute(sa_select(User).where(User.is_superuser))
         if not result.scalars().first():
+            assert settings.admin_password is not None
             admin_user = User(
                 email=settings.admin_email,
                 hashed_password=pwd_context.hash(settings.admin_password),
@@ -95,9 +106,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://10.80.2.253"],
+    allow_origins=_settings.parsed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,6 +163,18 @@ async def health_models() -> dict[str, Any]:
 
 @app.websocket("/ws/jobs/{job_id}")
 async def websocket_job_updates(websocket: WebSocket, job_id: str) -> None:
+    user = await authenticate_websocket(websocket)
+    if user is None:
+        await websocket.close(code=1008)
+        return
+
+    async with async_session() as db:
+        if not user.is_superuser:
+            result = await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user.id))
+            if result.scalar_one_or_none() is None:
+                await websocket.close(code=1008)
+                return
+
     await ws_manager.connect(websocket, job_id)
     try:
         subscribe_task = asyncio.create_task(ws_manager.subscribe_to_job(job_id, websocket))
@@ -167,6 +191,23 @@ async def websocket_job_updates(websocket: WebSocket, job_id: str) -> None:
 
 @app.websocket("/ws/chat/{conversation_id}")
 async def websocket_chat_updates(websocket: WebSocket, conversation_id: str) -> None:
+    user = await authenticate_websocket(websocket)
+    if user is None:
+        await websocket.close(code=1008)
+        return
+
+    async with async_session() as db:
+        if not user.is_superuser:
+            result = await db.execute(
+                select(Conversation).where(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == user.id,
+                )
+            )
+            if result.scalar_one_or_none() is None:
+                await websocket.close(code=1008)
+                return
+
     await websocket.accept()
     try:
         subscribe_task = asyncio.create_task(ws_manager.subscribe_to_chat(conversation_id, websocket))

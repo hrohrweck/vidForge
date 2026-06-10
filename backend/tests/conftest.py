@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -12,6 +13,9 @@ import app.models.media  # noqa: F401
 from app.api.auth import create_access_token
 from app.database import Base, Job, Template, User, get_db
 from app.main import app
+
+# Ensure a valid SECRET_KEY is present for tests so config validation passes
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only-not-for-production")
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 

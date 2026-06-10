@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_admin
 from app.database import Template, User, get_db
 
 router = APIRouter()
@@ -68,7 +68,7 @@ async def list_templates(
 @router.post("", response_model=TemplateResponse)
 async def create_template(
     template_data: TemplateCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> Template:
     template = Template(
@@ -100,7 +100,7 @@ async def get_template(
 async def update_template(
     template_id: UUID,
     template_data: TemplateCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> Template:
     result = await db.execute(select(Template).where(Template.id == template_id))
@@ -110,11 +110,6 @@ async def update_template(
 
     if template.is_builtin:
         raise HTTPException(status_code=400, detail="Cannot modify built-in templates")
-
-    if template.created_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Not authorized to modify this template"
-        )
 
     template.name = template_data.name
     template.description = template_data.description
@@ -127,7 +122,7 @@ async def update_template(
 @router.delete("/{template_id}")
 async def delete_template(
     template_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(select(Template).where(Template.id == template_id))
@@ -137,11 +132,6 @@ async def delete_template(
 
     if template.is_builtin:
         raise HTTPException(status_code=400, detail="Cannot delete built-in templates")
-
-    if template.created_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Not authorized to delete this template"
-        )
 
     await db.delete(template)
     await db.commit()

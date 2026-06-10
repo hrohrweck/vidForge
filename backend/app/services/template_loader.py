@@ -5,55 +5,6 @@ from typing import Any
 import yaml
 
 
-class TemplateLoader:
-    """Load and validate video templates from YAML files."""
-
-    def __init__(self, templates_dir: str = "templates"):
-        base = Path(templates_dir)
-        if not base.is_absolute():
-            candidate = Path.cwd() / base
-            if candidate.exists():
-                base = candidate
-            else:
-                fallback = Path(__file__).resolve().parents[2] / templates_dir
-                if fallback.exists():
-                    base = fallback
-        self.templates_dir = base
-
-    def load_template(self, name: str) -> dict[str, Any]:
-        """Load a template by name (without .yaml extension) or by template name field."""
-        template_path = self.templates_dir / f"{name}.yaml"
-        if template_path.exists():
-            with open(template_path) as f:
-                return yaml.safe_load(f)
-
-        for template_path in self.templates_dir.glob("*.yaml"):
-            with open(template_path) as f:
-                template = yaml.safe_load(f)
-                if template.get("name") == name:
-                    return template
-
-        raise FileNotFoundError(f"Template not found: {name}")
-
-    def load_all_templates(self) -> list[dict[str, Any]]:
-        """Load all templates from the templates directory."""
-        templates = []
-        for template_path in self.templates_dir.glob("*.yaml"):
-            with open(template_path) as f:
-                template = yaml.safe_load(f)
-                template["_source_file"] = template_path.stem
-                templates.append(template)
-        return templates
-
-    def validate_template(self, template: dict[str, Any]) -> bool:
-        """Validate a template has required fields."""
-        required_fields = ["name", "inputs", "pipeline"]
-        for field in required_fields:
-            if field not in template:
-                raise ValueError(f"Template missing required field: {field}")
-        return True
-
-
 class StyleLoader:
     """Load and validate style presets from YAML files."""
 

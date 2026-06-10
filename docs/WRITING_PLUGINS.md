@@ -263,3 +263,12 @@ The best reference is the existing plugins:
 | `music_video` | Audio upload, Whisper lyrics extraction, beat-synced scenes |
 
 Start from `prompt_to_video` (simplest) and add complexity as needed.
+
+
+## Plugin Base Internals
+
+Plugin authors should continue importing only `PluginBase` from `app.plugins.base`.
+The default stage implementations are split internally across `app.plugins.enrichment`
+and `app.plugins.media_stages`, but those modules are implementation details and do
+not change the public plugin contract. Override methods on `PluginBase` subclasses as
+shown below rather than importing the mixins directly.

@@ -70,6 +70,13 @@ class ComfyUIClient:
         response.raise_for_status()
         return response.content
 
+    async def interrupt(self) -> None:
+        try:
+            response = await self.client.post(f"{self.base_url}/interrupt")
+            response.raise_for_status()
+        except Exception:
+            pass
+
     async def wait_for_completion(
         self, prompt_id: str, poll_interval: float = 2.0, timeout: float = 172800.0
     ) -> dict:
@@ -87,6 +94,7 @@ class ComfyUIClient:
                     return entry
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
+        await self.interrupt()
         raise TimeoutError(f"Prompt {prompt_id} did not complete within {timeout}s")
 
     async def get_video_output(self, history_entry: dict) -> bytes | None:

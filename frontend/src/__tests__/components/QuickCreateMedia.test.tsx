@@ -14,6 +14,7 @@ vi.mock('../../api/client', () => ({
         {
           id: 'img-1',
           name: 'SDXL Turbo',
+          display_name: 'SDXL Turbo',
           description: 'Fast image generation',
           size_gb: 1.5,
           speed: 'fast',
@@ -26,6 +27,7 @@ vi.mock('../../api/client', () => ({
         {
           id: 'img-2',
           name: 'Flux Schnell',
+          display_name: 'Flux Schnell',
           description: 'High quality image model',
           size_gb: 2.0,
           speed: 'medium',
@@ -40,6 +42,7 @@ vi.mock('../../api/client', () => ({
         {
           id: 'vid-1',
           name: 'Wan Video',
+          display_name: 'Wan Video',
           description: 'Video generation model',
           size_gb: 5.0,
           speed: 'slow',
@@ -167,6 +170,7 @@ describe('QuickCreateMedia', () => {
         {
           id: 'img-i2i',
           name: 'Image-to-Image Model',
+          display_name: 'Image-to-Image Model',
           description: 'Supports image input',
           size_gb: 2.0,
           speed: 'fast',
@@ -204,6 +208,7 @@ describe('QuickCreateMedia', () => {
         {
           id: 'img-text-only',
           name: 'Text-Only Image Model',
+          display_name: 'Text-Only Image Model',
           description: 'Only supports text-to-image',
           size_gb: 1.5,
           speed: 'fast',
@@ -240,6 +245,7 @@ describe('QuickCreateMedia', () => {
         {
           id: 'img-multi',
           name: 'Multimodal Model',
+          display_name: 'Multimodal Model',
           description: 'Accepts both text and image',
           size_gb: 3.0,
           speed: 'medium',

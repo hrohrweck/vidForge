@@ -37,10 +37,15 @@ export default function TokenUsageChart({ from, to, groupBy }: TokenUsageChartPr
         .then((r) => r.data),
   })
 
-  const buckets: any[] = data?.buckets ?? []
+  interface Bucket {
+    timestamp: string
+    model_id: string
+    total_tokens: number
+  }
+  const buckets: Bucket[] = data?.buckets ?? []
 
-  const models: string[] = [...new Set(buckets.map((b: any) => b.model_id))]
-  const chartData: Record<string, any>[] = buckets.reduce((acc: any[], b: any) => {
+  const models: string[] = [...new Set(buckets.map((b) => b.model_id))]
+  const chartData: Record<string, string | number>[] = buckets.reduce((acc: Record<string, string | number>[], b: Bucket) => {
     let entry = acc.find((e) => e.timestamp === b.timestamp)
     if (!entry) {
       entry = { timestamp: b.timestamp }
@@ -48,7 +53,7 @@ export default function TokenUsageChart({ from, to, groupBy }: TokenUsageChartPr
     }
     entry[b.model_id] = b.total_tokens
     return acc
-  }, [] as any[])
+  }, [])
 
   return (
     <ResponsiveContainer width="100%" height={300}>

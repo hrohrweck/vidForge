@@ -10,7 +10,7 @@ class MockWebSocket {
   closed = false
   constructor(public url: string) { MockWebSocket.instances.push(this) }
   close() { this.closed = true }
-  send(_: string) {}
+  send() {}
 }
 
 vi.mock('../../api/client', () => ({
@@ -27,13 +27,13 @@ describe('ChatPanel chat WebSocket', () => {
   beforeEach(() => {
     MockWebSocket.instances = []
     vi.stubGlobal('WebSocket', MockWebSocket)
-    const store = useChatStore as any
+    const store = useChatStore as unknown as { persist?: { setOptions: (opts: Record<string, unknown>) => void } }
     store.persist?.setOptions({ storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } })
     useChatStore.setState({
-      conversations: [{ id: 'c1', title: 't', updatedAt: '' }],
+      conversations: [{ id: 'c1', title: 't', updatedAt: '', createdAt: '' }],
       selectedConversationId: 'c1',
       messages: { c1: [] },
-    } as any)
+    })
   })
   afterEach(() => {
     vi.unstubAllGlobals()

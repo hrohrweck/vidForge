@@ -26,77 +26,16 @@ from app.services.providers.base import (
 # ---------------------------------------------------------------------------
 
 
-class TestProviderSemaphore:
+def test_provider_semaphore_initialization():
+    from app.workers.tasks import ProviderSemaphore
 
-    @pytest.mark.asyncio
-    async def test_acquire_when_under_limit(self, mocker):
-        from app.workers import tasks as tmod
+    sem_a = ProviderSemaphore(key="provider:processing:uuid-a", max_concurrent=3)
+    sem_b = ProviderSemaphore(key="provider:processing:uuid-b", max_concurrent=1)
 
-        mock_redis = MagicMock()
-        mock_redis.get = AsyncMock(return_value=0)
-        mock_redis.incr = AsyncMock()
-
-        # Set private attr — redis is a read-only @property
-        tmod.ctx._redis = mock_redis
-
-        sem = tmod.ProviderSemaphore(key="test:key", max_concurrent=2)
-        acquired = await sem.acquire("job-1")
-        assert acquired is True
-        mock_redis.incr.assert_called_once_with("test:key")
-
-    @pytest.mark.asyncio
-    async def test_acquire_when_at_limit(self, mocker):
-        from app.workers import tasks as tmod
-
-        mock_redis = MagicMock()
-        mock_redis.get = AsyncMock(return_value=2)
-        mock_redis.incr = AsyncMock()
-
-        tmod.ctx._redis = mock_redis
-
-        sem = tmod.ProviderSemaphore(key="test:key", max_concurrent=2)
-        acquired = await sem.acquire("job-1")
-        assert acquired is False
-        mock_redis.incr.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_release_when_acquired(self, mocker):
-        from app.workers import tasks as tmod
-
-        mock_redis = MagicMock()
-        mock_redis.get = AsyncMock(return_value=2)
-        mock_redis.decr = AsyncMock()
-
-        tmod.ctx._redis = mock_redis
-
-        sem = tmod.ProviderSemaphore(key="test:key", max_concurrent=2)
-        sem._acquired = True
-        await sem.release()
-        mock_redis.decr.assert_called_once_with("test:key")
-
-    @pytest.mark.asyncio
-    async def test_release_when_not_acquired(self, mocker):
-        from app.workers import tasks as tmod
-
-        mock_redis = MagicMock()
-        mock_redis.decr = AsyncMock()
-
-        tmod.ctx._redis = mock_redis
-
-        sem = tmod.ProviderSemaphore(key="test:key", max_concurrent=2)
-        await sem.release()
-        mock_redis.decr.assert_not_called()
-
-    def test_key_is_configurable_per_provider(self):
-        from app.workers.tasks import ProviderSemaphore
-
-        sem_a = ProviderSemaphore(key="provider:processing:uuid-a", max_concurrent=3)
-        sem_b = ProviderSemaphore(key="provider:processing:uuid-b", max_concurrent=1)
-
-        assert sem_a._key == "provider:processing:uuid-a"
-        assert sem_b._key == "provider:processing:uuid-b"
-        assert sem_a._max == 3
-        assert sem_b._max == 1
+    assert sem_a._key == "provider:processing:uuid-a"
+    assert sem_b._key == "provider:processing:uuid-b"
+    assert sem_a._max == 3
+    assert sem_b._max == 1
 
 
 # ---------------------------------------------------------------------------

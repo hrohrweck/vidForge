@@ -47,9 +47,7 @@ export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEd
       const response = await fetch('/api/uploads/image', {
         method: 'POST',
         body: formData,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
+        credentials: 'include',
       })
 
       if (!response.ok) throw new Error('Upload failed')

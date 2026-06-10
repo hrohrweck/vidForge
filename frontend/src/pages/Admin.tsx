@@ -44,9 +44,7 @@ export default function Admin() {
     queryKey: ['admin-dashboard'],
     queryFn: async () => {
       const response = await fetch('/api/admin/dashboard', {
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
-        },
+        credentials: 'include',
       })
       if (!response.ok) throw new Error('Failed to fetch dashboard')
       return response.json()
@@ -58,9 +56,7 @@ export default function Admin() {
     queryKey: ['admin-users'],
     queryFn: async () => {
       const response = await fetch('/api/admin/users', {
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
-        },
+        credentials: 'include',
       })
       if (!response.ok) throw new Error('Failed to fetch users')
       return response.json()
@@ -72,9 +68,7 @@ export default function Admin() {
     mutationFn: (jobId: string) =>
       fetch(`/api/admin/jobs/${jobId}/retry`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
-        },
+        credentials: 'include',
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] })
@@ -85,9 +79,7 @@ export default function Admin() {
     mutationFn: (jobId: string) =>
       fetch(`/api/admin/jobs/${jobId}/cancel`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().token}`,
-        },
+        credentials: 'include',
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] })

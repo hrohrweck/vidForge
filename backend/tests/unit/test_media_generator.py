@@ -168,14 +168,12 @@ class TestGetProviderInstance:
         provider = _provider_row()
         mock_instance = MagicMock()
         with patch(
-            "app.services.media_generator.registry.create",
+            "app.services.model_resolution.JobRouter.get_provider_instance",
             new_callable=AsyncMock,
             return_value=mock_instance,
         ) as mock_create:
             result = await get_provider_instance(db_session, provider)
-            mock_create.assert_called_once_with(
-                provider.provider_type, provider.id, provider.config
-            )
+            mock_create.assert_called_once_with(provider.id)
             assert result is mock_instance
 
 
@@ -193,7 +191,7 @@ class TestGetProviderForJob:
         )
 
         with patch(
-            "app.services.media_generator.registry.create",
+            "app.services.model_resolution.JobRouter.get_provider_instance",
             new_callable=AsyncMock,
             return_value=mock_instance,
         ):
@@ -223,7 +221,7 @@ class TestGetProviderForJob:
         await db_session.commit()
 
         with patch(
-            "app.services.media_generator.registry.create",
+            "app.services.model_resolution.JobRouter.get_provider_instance",
             new_callable=AsyncMock,
             return_value=mock_instance,
         ):
@@ -249,7 +247,7 @@ class TestGetProviderForJob:
         await db_session.commit()
 
         with patch(
-            "app.services.media_generator.registry.create",
+            "app.services.model_resolution.JobRouter.get_provider_instance",
             new_callable=AsyncMock,
             return_value=mock_instance,
         ):
@@ -280,7 +278,7 @@ class TestResolveImageProvider:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -308,7 +306,7 @@ class TestResolveImageProvider:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -343,7 +341,7 @@ class TestResolveVideoProvider:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -373,7 +371,7 @@ class TestGenerateImage:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -414,7 +412,7 @@ class TestGenerateImage:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -442,7 +440,7 @@ class TestGenerateImage:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -471,7 +469,7 @@ class TestGenerateImage:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -505,7 +503,7 @@ class TestGenerateVideo:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -552,7 +550,7 @@ class TestGenerateVideo:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -580,7 +578,7 @@ class TestGenerateVideo:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -608,7 +606,7 @@ class TestGenerateVideo:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),
@@ -644,7 +642,7 @@ class TestGenerateVideo:
                 return_value=model_config,
             ),
             patch(
-                "app.services.media_generator.registry.create",
+                "app.services.model_resolution.JobRouter.get_provider_instance",
                 new_callable=AsyncMock,
                 return_value=mock_instance,
             ),

@@ -199,7 +199,7 @@ def _parse_response(response: str, target_duration: float, original_segments: li
         logger.warning("LLM response has invalid scenes list, falling back")
         segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
         return _fallback_result(segments_count, original_segments)
-    
+
     # Validate each scene is a dictionary
     if not all(isinstance(scene, dict) for scene in scenes):
         logger.warning("LLM response contains non-dict scenes, falling back")

@@ -13,7 +13,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /app/storage
+RUN mkdir -p /app/storage && \
+    groupadd -r vidforge -g 1001 && \
+    useradd -r -u 1001 -g vidforge vidforge && \
+    chown -R vidforge:vidforge /app
+
+USER vidforge
 
 EXPOSE 8000
 

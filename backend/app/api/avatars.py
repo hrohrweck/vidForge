@@ -460,7 +460,7 @@ async def set_primary_image(
     return _avatar_to_response(avatar)
 
 
-@router.post("/{avatar_id}/train-lora", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{avatar_id}/train-lora", status_code=status.HTTP_501_NOT_IMPLEMENTED)
 async def train_avatar_lora(
     avatar_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -469,13 +469,11 @@ async def train_avatar_lora(
     avatar = await db.get(Avatar, avatar_id)
     if not avatar or avatar.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Avatar not found")
-    if avatar.lora_training_status == "training":
-        raise HTTPException(status_code=409, detail="LoRA training already in progress")
 
-    from app.workers.tasks import train_avatar_lora as train_lora_task
-
-    train_lora_task.delay(str(avatar_id))
-    return {"status": "queued", "avatar_id": str(avatar_id)}
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="LoRA training is not yet available.",
+    )
 
 
 @router.post("/{avatar_id}/generate-poses", status_code=status.HTTP_202_ACCEPTED)

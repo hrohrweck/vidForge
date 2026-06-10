@@ -541,7 +541,7 @@ async def _handle_download_job(ctx: ToolContext, args: dict[str, Any]) -> dict[s
 
     # The endpoint returns a FileResponse; we surface a URL instead of binary.
     return {
-        "download_url": f"/api/jobs/{job_id}/download?token={result.get('token', '')}",
+        "download_url": f"/api/jobs/{job_id}/download",
     }
 
 

@@ -4,16 +4,16 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 up: ## Start all services
-	cd docker && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	cd docker && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 down: ## Stop all services
-	cd docker && docker-compose down
+	cd docker && docker compose down
 
 build: ## Rebuild all containers
-	cd docker && docker-compose up -d --build
+	cd docker && docker compose up -d --build
 
 migrate: ## Run database migrations
-	cd docker && docker-compose exec backend alembic upgrade head
+	cd docker && docker compose exec backend alembic upgrade head
 
 test: test-backend test-frontend ## Run all tests
 
@@ -37,7 +37,7 @@ clean: ## Remove generated files
 	rm -rf backend/.coverage backend/htmlcov
 
 status: ## Show service status
-	cd docker && docker-compose ps
+	cd docker && docker compose ps
 
 logs: ## Tail logs (usage: make logs SERVICE=backend)
-	cd docker && docker-compose logs -f $(SERVICE)
+	cd docker && docker compose logs -f $(SERVICE)

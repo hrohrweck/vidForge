@@ -122,16 +122,14 @@ class TestBroadcastUpdate:
 
 
 class TestProviderSemaphore:
-    """Verify semaphore uses shared async Redis."""
 
     @pytest.mark.asyncio
-    async def test_acquire_increments_redis(self):
+    async def test_acquire_uses_redis_get_and_incr(self):
         from app.workers.context import WorkerContext
         from app.workers.tasks import ProviderSemaphore
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=b"0")
-        mock_redis.incr = AsyncMock(return_value=1)
 
         ctx = WorkerContext()
         with patch("app.workers.context.create_async_engine", return_value=MagicMock()), \
@@ -144,6 +142,7 @@ class TestProviderSemaphore:
             acquired = await sem.acquire("job-1")
 
         assert acquired is True
+        mock_redis.get.assert_awaited_once_with("test:sem")
         mock_redis.incr.assert_awaited_once_with("test:sem")
 
         ctx.stop()
@@ -154,8 +153,8 @@ class TestProviderSemaphore:
         from app.workers.tasks import ProviderSemaphore
 
         mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)
         mock_redis.get = AsyncMock(return_value=b"1")
-        mock_redis.incr = AsyncMock(return_value=1)
         mock_redis.decr = AsyncMock(return_value=0)
 
         ctx = WorkerContext()

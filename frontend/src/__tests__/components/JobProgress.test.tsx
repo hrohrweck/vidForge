@@ -12,7 +12,7 @@ class MockWebSocket {
   close() {
     this.closed = true
   }
-  send(_data: string) {}
+  send() {}
 }
 
 describe('JobProgress', () => {

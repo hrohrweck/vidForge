@@ -85,7 +85,7 @@ export default function JobDetail() {
     return () => {
       ws.close()
     }
-  }, [id, job?.status, queryClient])
+  }, [id, job, queryClient])
 
   if (isLoading) {
     return (

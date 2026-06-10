@@ -228,6 +228,7 @@ export default function SceneEditor() {
       setIsRegenerating(false)
       refetchScenes()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRegenerating, job?.status])
 
   // Auto-download after export completes
@@ -243,6 +244,7 @@ export default function SceneEditor() {
       a.click()
       document.body.removeChild(a)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingDownload, job?.status, job?.output_path, job?.id])
 
   // ── Loading state ─────────────────────────────────────────────────
@@ -775,7 +777,12 @@ function ModelSwitcher({ job, onModelsChanged }: { job?: { id: string; input_dat
     }
   }
 
-  const renderSelect = (label: string, models: any[] | undefined, selected: string, key: string) => (
+  interface ModelOption {
+    id: string
+    name: string
+    provider: string
+  }
+  const renderSelect = (label: string, models: ModelOption[] | undefined, selected: string, key: string) => (
     <div className="flex items-center gap-2">
       <span className="text-xs font-medium w-16">{label}</span>
       <select
@@ -784,7 +791,7 @@ function ModelSwitcher({ job, onModelsChanged }: { job?: { id: string; input_dat
         onChange={(e) => handleModelChange(key, e.target.value)}
         disabled={saving}
       >
-        {models?.map((m: any) => (
+        {models?.map((m) => (
           <option key={m.id} value={m.id}>{m.name} ({m.provider === 'local' ? 'Local' : 'Cloud'})</option>
         )) || <option value="">Loading...</option>}
       </select>

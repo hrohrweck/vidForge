@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, Upload, Loader2, ChevronDown, ChevronRight, Plus, Search, User } from 'lucide-react'
@@ -105,7 +105,9 @@ export default function JobCreateModal({ onClose }: JobCreateModalProps) {
     (t: Template) => t.id === selectedTemplateId
   )
 
-  const templateInputs: TemplateInput[] = (selectedTemplate?.config?.inputs as TemplateInput[]) || []
+  const templateInputs = useMemo<TemplateInput[]>(() => {
+    return (selectedTemplate?.config?.inputs as TemplateInput[]) || []
+  }, [selectedTemplate?.config?.inputs])
 
   useEffect(() => {
     if (templateInputs.length > 0) {

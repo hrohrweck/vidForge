@@ -23,7 +23,6 @@ export function renderWithProviders(
   
   if (authenticated) {
     useAuthStore.setState({
-      token: superuser ? 'superuser-token' : 'test-token',
       user: {
         id: '1',
         email: superuser ? 'admin@example.com' : 'test@example.com',
@@ -36,8 +35,8 @@ export function renderWithProviders(
     })
   } else {
     useAuthStore.setState({
-      token: null,
-      user: null
+      user: null,
+      isAuthenticated: false,
     })
   }
   
@@ -47,7 +46,7 @@ export function renderWithProviders(
         {ui}
       </BrowserRouter>
     </QueryClientProvider>,
-    renderOptions
+    { baseElement: document.body, ...renderOptions }
   )
 }
 

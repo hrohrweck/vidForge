@@ -31,6 +31,7 @@ function TypingIndicator() {
  *   - Qwen: 【thinking】...【/thinking】
  *   - GLM / Poe inline: "Thinking...\n[analysis]\nGenerate Response...\n[answer]"
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function parseThinking(content: string): { thinking: string; answer: string } {
   // <think>...</think> (DeepSeek / Ollama format)
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)

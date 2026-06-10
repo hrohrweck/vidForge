@@ -32,7 +32,12 @@ RUN pip install --no-cache-dir --no-deps audiocraft && \
 COPY server.py .
 
 ENV HF_HOME=/app/hf_cache
-RUN mkdir -p /app/output /app/hf_cache
+RUN mkdir -p /app/output /app/hf_cache && \
+    groupadd -r vidforge -g 1001 && \
+    useradd -r -u 1001 -g vidforge vidforge && \
+    chown -R vidforge:vidforge /app
+
+USER vidforge
 
 VOLUME /app/output
 VOLUME /app/hf_cache

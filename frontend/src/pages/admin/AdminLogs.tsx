@@ -100,12 +100,6 @@ export default function AdminLogs() {
   const { user: currentUser } = useAuthStore()
   const queryClient = useQueryClient()
 
-  // Admin guard
-  if (!currentUser?.is_superuser) {
-    navigate('/', { replace: true })
-    return null
-  }
-
   // Filter state
   const [severityFilter, setSeverityFilter] = useState<ErrorSeverity | 'all'>('all')
   const [originFilter, setOriginFilter] = useState<ErrorOrigin | 'all'>('all')
@@ -189,6 +183,12 @@ export default function AdminLogs() {
     queryFn: () => adminApi.getNotification(expandedId!),
     enabled: !!expandedId,
   })
+
+  // Admin guard — must come after all hooks
+  if (!currentUser?.is_superuser) {
+    navigate('/', { replace: true })
+    return null
+  }
 
   const events = eventsData?.items ?? []
   const total = eventsData?.total ?? 0

@@ -32,6 +32,12 @@ RUN cd /workspace/ComfyUI/custom_nodes && \
 COPY comfyui-entrypoint.sh /usr/local/bin/comfyui-entrypoint.sh
 RUN chmod +x /usr/local/bin/comfyui-entrypoint.sh
 
+RUN groupadd -r vidforge -g 1001 && \
+    useradd -r -u 1001 -g vidforge -G video,render vidforge && \
+    chown -R vidforge:vidforge /workspace
+
+USER vidforge
+
 WORKDIR /workspace/ComfyUI
 
 ENTRYPOINT ["/usr/local/bin/comfyui-entrypoint.sh"]
