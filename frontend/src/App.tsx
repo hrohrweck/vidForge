@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from './stores/auth'
-import { authApi } from './api'
+import { authApi } from './api/client'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Jobs from './pages/Jobs'

@@ -336,9 +336,9 @@ describe('Avatars Page', () => {
 
     const img = screen.getByAltText('StreamTest') as HTMLImageElement
     expect(img).toBeInTheDocument()
-    // storagePath starts with / so URL is /api/uploads/stream//avatars/...
-    expect(img.src).toContain('/api/uploads/stream/')
-    expect(img.src).toContain('avatars/stream-test.png')
+    // entityId is defined, so URL is /api/avatars/avatar-1/stream/stream-test.png
+    expect(img.src).toContain('/api/avatars/avatar-1/stream/')
+    expect(img.src).toContain('stream-test.png')
   })
 
   // 10. test_consistency_strategy_preserved_in_edit
