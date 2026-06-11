@@ -26,9 +26,11 @@
     --ring: 243 75% 59%;
     --radius: 0.5rem;
     
-    --sidebar-bg: 0 0% 100%;
-    --sidebar-border: 214.3 31.8% 91.4%;
-    --header-bg: 0 0% 100%;
+    --sidebar-bg: 222 47% 11%;
+    --sidebar-border: 217.2 32.6% 17.5%;
+    --header-bg: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --header-foreground: 210 40% 98%;
     --subtle-glow: 0 0px 15px rgba(0, 0, 0, 0.05);
   }
 
@@ -57,6 +59,8 @@
     --sidebar-bg: 222 47% 11%;
     --sidebar-border: 217.2 32.6% 17.5%;
     --header-bg: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --header-foreground: 210 40% 98%;
     --subtle-glow: 0 0px 15px rgba(255, 255, 255, 0.05);
   }
 }

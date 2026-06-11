@@ -44,9 +44,11 @@ export default {
         sidebar: {
           bg: "hsl(var(--sidebar-bg))",
           border: "hsl(var(--sidebar-border))",
+          foreground: "hsl(var(--sidebar-foreground))",
         },
         header: {
           bg: "hsl(var(--header-bg))",
+          foreground: "hsl(var(--header-foreground))",
         },
       },
       borderRadius: {

@@ -98,7 +98,7 @@ export default function Layout() {
 
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-col">
-      <header className="sticky top-0 z-50 w-full border-b border-border backdrop-blur-md bg-header-bg/80">
+      <header className="sticky top-0 z-50 w-full border-b border-border backdrop-blur-md bg-header-bg/80 text-header-foreground shadow-md dark:shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
         <div className="h-14 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
             <Button
@@ -155,7 +155,7 @@ export default function Layout() {
         )}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar-bg transition-all duration-300 ease-in-out md:relative md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-foreground shadow-[4px_0_15px_-3px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_15px_-3px_rgba(0,0,0,0.5)] transition-all duration-300 ease-in-out md:relative md:translate-x-0",
             isMobileMenuOpen ? "w-64 translate-x-0" : "-translate-x-full md:translate-x-0",
             isSidebarOpen ? "md:w-64" : "md:w-16"
           )}
@@ -191,7 +191,7 @@ export default function Layout() {
                           'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
                           isActive
                             ? 'bg-primary/10 text-primary'
-                            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
                           !isSidebarOpen && 'md:justify-center md:px-0'
                         )
                       }
@@ -203,7 +203,7 @@ export default function Layout() {
                             "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
                             isActive ? "opacity-100" : "opacity-0"
                           )} />
-                          <entry.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                          <entry.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
                           <span className={cn(
                             "transition-all duration-300",
                             !isSidebarOpen && "md:hidden"
@@ -225,7 +225,7 @@ export default function Layout() {
               size="icon"
               onClick={toggleSidebar}
               aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground"
             >
               <ChevronLeft className={cn("h-5 w-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
             </Button>
@@ -262,13 +262,13 @@ function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick
         className={cn(
           'group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
           active
-            ? 'bg-primary/5 text-foreground'
-            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            ? 'bg-primary/10 text-sidebar-foreground'
+            : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
           collapsed && 'md:justify-center md:px-0'
         )}
         title={collapsed ? group.label : undefined}
       >
-        <group.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+        <group.icon className={cn("h-5 w-5 shrink-0", active ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
         <span className={cn(
           "flex-1 text-left transition-all duration-300",
           collapsed && "md:hidden"
@@ -277,7 +277,7 @@ function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick
         </span>
         {!collapsed && (
           <ChevronRight className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+            "h-4 w-4 shrink-0 text-sidebar-foreground/70 transition-transform duration-200",
             expanded && "rotate-90"
           )} />
         )}
@@ -300,14 +300,14 @@ function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick
                     'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',
                     isActive
                       ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
                     collapsed && 'md:hidden'
                   )
                 }
               >
                 {({ isActive }) => (
                   <>
-                    <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+                    <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
                     <span className="text-[0.8125rem]">{child.label}</span>
                   </>
                 )}
