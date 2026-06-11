@@ -78,9 +78,9 @@ export default function MCPServersPage() {
                  <td className="px-4 py-3 text-center"><button className="text-primary hover:underline" onClick={() => loadTools(s.id)}>{toolsCount[s.id] ?? '-'}</button></td>
                  <td className="px-4 py-3">
                    <div className="flex items-center justify-center gap-1">
-                     <Button variant="ghost" size="sm" onClick={() => test.mutate(s.id)} disabled={test.isPending}><Play className="w-4 h-4" /></Button>
-                     <Button variant="ghost" size="sm" onClick={() => { setForm({ id: s.id, name: s.name, command: s.command, args: s.args?.join('\n') || '', envKeys: s.env_keys?.join('\n') || '', isActive: s.is_active }); setErr(''); setShow(true) }}><Pencil className="w-4 h-4" /></Button>
-                     <Button variant="ghost" size="sm" onClick={() => del(s.id, s.name)} disabled={remove.isPending}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                     <Button variant="ghost" size="sm" onClick={() => test.mutate(s.id)} disabled={test.isPending} title="Test server" aria-label="Test server"><Play className="w-4 h-4" /></Button>
+                     <Button variant="ghost" size="sm" onClick={() => { setForm({ id: s.id, name: s.name, command: s.command, args: s.args?.join('\n') || '', envKeys: s.env_keys?.join('\n') || '', isActive: s.is_active }); setErr(''); setShow(true) }} title="Edit server" aria-label="Edit server"><Pencil className="w-4 h-4" /></Button>
+                     <Button variant="ghost" size="sm" onClick={() => del(s.id, s.name)} disabled={remove.isPending} title="Delete server" aria-label="Delete server"><Trash2 className="w-4 h-4 text-destructive" /></Button>
                    </div>
                  </td>
                </tr>
@@ -97,7 +97,7 @@ export default function MCPServersPage() {
           <div className="bg-background rounded-lg shadow-lg w-full max-w-md mx-4 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">{form.id ? 'Edit Server' : 'Add Server'}</h2>
-              <button onClick={() => setShow(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+              <button onClick={() => setShow(false)} className="text-muted-foreground hover:text-foreground" title="Close" aria-label="Close"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={submit} className="space-y-4">
               <div><label className="block text-sm font-medium mb-1">Name *</label><input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border rounded-md bg-background text-sm" /></div>
