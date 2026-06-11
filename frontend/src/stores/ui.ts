@@ -56,8 +56,13 @@ export const useUiStore = create<UiState>()((set) => ({
   },
 
   toggleSidebar: () => {
-    const current = useUiStore.getState().isSidebarOpen
-    useUiStore.getState().setSidebarOpen(!current)
+    set((state) => {
+      const next = !state.isSidebarOpen
+      setTimeout(() => {
+        useUiStore.getState().setSidebarOpen(next)
+      }, 0)
+      return { isSidebarOpen: next, sidebarError: null }
+    })
   },
 
   resetUiPreferences: () => {
