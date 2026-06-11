@@ -464,6 +464,14 @@ export const modelsApi = {
   },
 }
 
+export interface SidebarPreferenceResponse {
+  sidebar_open: boolean
+}
+
+export interface SidebarPreferenceUpdate {
+  sidebar_open: boolean
+}
+
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
@@ -474,6 +482,16 @@ export const usersApi = {
   setDefaultChatModel: async (modelId: string) => {
     const response = await api.put<{ default_chat_model: string | null }>('/users/settings/chat-model', {
       default_chat_model: modelId,
+    })
+    return response.data
+  },
+  getSidebarPreference: async () => {
+    const response = await api.get<SidebarPreferenceResponse>('/users/settings/sidebar')
+    return response.data
+  },
+  setSidebarPreference: async (sidebarOpen: boolean) => {
+    const response = await api.put<SidebarPreferenceResponse>('/users/settings/sidebar', {
+      sidebar_open: sidebarOpen,
     })
     return response.data
   },

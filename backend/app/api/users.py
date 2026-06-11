@@ -147,3 +147,51 @@ async def update_chat_model(
 
     await db.commit()
     return ChatModelResponse(default_chat_model=data.default_chat_model)
+
+
+class SidebarSettingsRequest(BaseModel):
+    sidebar_open: bool
+
+
+class SidebarSettingsResponse(BaseModel):
+    sidebar_open: bool
+
+
+@router.get("/settings/sidebar", response_model=SidebarSettingsResponse)
+async def get_sidebar_settings(
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+) -> SidebarSettingsResponse:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+
+    if not settings or not settings.preferences:
+        return SidebarSettingsResponse(sidebar_open=True)
+
+    ui_prefs = settings.preferences.get("ui")
+    if isinstance(ui_prefs, dict):
+        return SidebarSettingsResponse(sidebar_open=ui_prefs.get("sidebar_open", True))
+
+    return SidebarSettingsResponse(sidebar_open=True)
+
+
+@router.put("/settings/sidebar", response_model=SidebarSettingsResponse)
+async def update_sidebar_settings(
+    data: SidebarSettingsRequest,
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+) -> SidebarSettingsResponse:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=current_user.id)
+        db.add(settings)
+
+    current_prefs = dict(settings.preferences) if settings.preferences else {}
+    ui_prefs = dict(current_prefs.get("ui") or {}) if isinstance(current_prefs.get("ui"), dict) else {}
+    ui_prefs["sidebar_open"] = data.sidebar_open
+    current_prefs["ui"] = ui_prefs
+    settings.preferences = current_prefs
+
+    await db.commit()
+    return SidebarSettingsResponse(sidebar_open=data.sidebar_open)

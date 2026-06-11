@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from './stores/auth'
+import { useUiStore } from './stores/ui'
 import { authApi } from './api/client'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
@@ -67,13 +68,14 @@ function App() {
   useEffect(() => {
     authApi
       .getMe()
-      .then((response) => {
+      .then(async (response) => {
         setAuth(response.data)
+        await useUiStore.getState().hydrateSidebarPreference()
+        setIsLoading(false)
       })
       .catch(() => {
         // no-op: user not authenticated
-      })
-      .finally(() => {
+        useUiStore.getState().resetUiPreferences()
         setIsLoading(false)
       })
   }, [setAuth])

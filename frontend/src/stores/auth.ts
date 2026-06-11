@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useUiStore } from './ui'
 
 interface Group {
   id: string
@@ -37,6 +38,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       user: null,
       isAuthenticated: false,
     })
+    useUiStore.getState().resetUiPreferences()
   },
   hasPermission: (permission: string) => {
     const user = get().user

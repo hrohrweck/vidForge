@@ -18,6 +18,7 @@ import {
   ScrollText,
 } from 'lucide-react'
 import { useAuthStore } from '../stores/auth'
+import { useUiStore } from '../stores/ui'
 import { ThemeToggle } from './ThemeToggle'
 import { cn } from '../lib/utils'
 import {
@@ -80,7 +81,7 @@ export default function Layout() {
   const isChatPage = location.pathname === '/chat'
   const isFullPage = isChatPage || location.pathname === '/media' || location.pathname.startsWith('/media/') || location.pathname.startsWith('/editor/') || location.pathname === '/settings' || location.pathname === '/jobs' || location.pathname === '/avatars'
   const navEntries = getNavEntries(user?.is_superuser || false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const { isSidebarOpen, toggleSidebar } = useUiStore()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false)
@@ -222,7 +223,8 @@ export default function Layout() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              onClick={toggleSidebar}
+              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
               className="text-muted-foreground hover:text-foreground"
             >
               <ChevronLeft className={cn("h-5 w-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
