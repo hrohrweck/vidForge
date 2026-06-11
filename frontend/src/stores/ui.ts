@@ -56,13 +56,20 @@ export const useUiStore = create<UiState>()((set) => ({
   },
 
   toggleSidebar: () => {
-    set((state) => {
-      const next = !state.isSidebarOpen
-      setTimeout(() => {
-        useUiStore.getState().setSidebarOpen(next)
-      }, 0)
-      return { isSidebarOpen: next, sidebarError: null }
-    })
+    const previous = useUiStore.getState().isSidebarOpen
+    const next = !previous
+    set({ isSidebarOpen: next, sidebarError: null })
+
+    sidebarSaveVersion += 1
+    const thisVersion = sidebarSaveVersion
+
+    usersApi
+      .setSidebarPreference(next)
+      .catch(() => {
+        if (thisVersion === sidebarSaveVersion) {
+          set({ isSidebarOpen: previous, sidebarError: 'Failed to save sidebar preference' })
+        }
+      })
   },
 
   resetUiPreferences: () => {
