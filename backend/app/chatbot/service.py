@@ -540,13 +540,8 @@ class ChatOrchestrator:
                         except ValueError:
                             pass
                     should_pause = self._should_pause_after_tool(tool_name, result)
-                    kind = (
-                        "job_draft"
-                        if result.get("action") == "draft"
-                        else "job_created"
-                        if should_pause
-                        else "tool_result"
-                    )
+                    is_draft = isinstance(result, dict) and result.get("action") == "draft"
+                    kind = "job_draft" if is_draft else "job_created" if should_pause else "tool_result"
                     yield (
                         SSEEventType.TOOL_CALL_RESULT.value,
                         {
@@ -903,12 +898,14 @@ class ChatOrchestrator:
             },
         }
 
-    def _should_pause_after_tool(self, name: str, result: dict[str, Any]) -> bool:
+    def _should_pause_after_tool(self, name: str, result: Any) -> bool:
         """Return True when the assistant should stop after this tool.
 
         Draft jobs and successful job/media creation should not continue to
         further tool calls; the platform will deliver results asynchronously.
         """
+        if not isinstance(result, dict):
+            return False
         if name == "create_job" and result.get("action") == "draft":
             return True
         if name == "create_job" and result.get("job_id"):

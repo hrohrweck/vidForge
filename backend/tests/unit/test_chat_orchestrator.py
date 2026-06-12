@@ -427,3 +427,64 @@ async def test_message_with_image_attachment_non_vision_model(db_session, regula
     assert text_part["text"] == "look at this"
     note_part = next(p for p in user_msg["content"] if p["type"] == "text" and "Image attachment" in p["text"])
     assert "[Image attachment: model does not support vision]" in note_part["text"]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_handles_tool_returning_list(db_session, regular_user, conversation):
+    async def handler(ctx: ToolContext, args: dict[str, Any]) -> list[dict[str, Any]]:
+        return [{"name": "avatar-1"}, {"name": "avatar-2"}]
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="list_avatars",
+            description="List avatars",
+            input_schema={"type": "object"},
+            handler=handler,
+        )
+    )
+    llm = FakeLLM(
+        [
+            [
+                LLMChunk(
+                    type="tool_call",
+                    tool_calls=[
+                        {
+                            "id": "call_list",
+                            "function": {"name": "list_avatars", "arguments": "{}"},
+                        }
+                    ],
+                ),
+                LLMChunk(type="text", content="Found them."),
+                LLMChunk(type="usage", tokens_in=5, tokens_out=2),
+                LLMChunk(type="done"),
+            ]
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        db_session,
+        llm=llm,
+        registry=registry,
+        mcp_manager=FakeMCPManager(),
+    )
+
+    events = await collect_events(orchestrator, conversation, regular_user)
+
+    assert events == [
+        ("token", {"content": "Found them."}),
+        (
+            "tool_call_start",
+            {"id": "call_list", "name": "list_avatars", "arguments": {}},
+        ),
+        (
+            "tool_call_result",
+            {
+                "id": "call_list",
+                "name": "list_avatars",
+                "kind": "tool_result",
+                "result": [{"name": "avatar-1"}, {"name": "avatar-2"}],
+            },
+        ),
+        ("usage", {"tokens_in": 5, "tokens_out": 2}),
+        ("done", {}),
+    ]
