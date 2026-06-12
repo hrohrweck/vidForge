@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import api from '../api/client'
+import { refreshAccessToken } from '../lib/websocket'
 import type { ErrorEvent, ErrorEventListResponse } from '../api/types/notifications'
 
 // ---------------------------------------------------------------------------
@@ -143,9 +144,24 @@ function openWebSocket(): void {
     }
   }
 
-  ws.onclose = () => {
+  ws.onclose = (event: CloseEvent) => {
     ws = null
     setState({ connected: false })
+
+    // 1008 = policy violation, which the backend uses for an expired/missing
+    // access-token cookie. Refresh the cookie once and reconnect immediately.
+    if (event.code === 1008) {
+      refreshAccessToken().then((ok) => {
+        if (ok) {
+          reconnectAttempt = 0
+          openWebSocket()
+        } else {
+          scheduleReconnect()
+        }
+      })
+      return
+    }
+
     scheduleReconnect()
   }
 

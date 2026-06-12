@@ -236,7 +236,12 @@ async def test_run_turn_pauses_on_create_job_draft(db_session, regular_user, con
                 ),
                 LLMChunk(type="usage", tokens_in=4, tokens_out=1),
                 LLMChunk(type="done"),
-            ]
+            ],
+            [
+                LLMChunk(type="text", content="Draft ready."),
+                LLMChunk(type="usage", tokens_in=2, tokens_out=2),
+                LLMChunk(type="done"),
+            ],
         ]
     )
     orchestrator = ChatOrchestrator(
@@ -262,10 +267,11 @@ async def test_run_turn_pauses_on_create_job_draft(db_session, regular_user, con
                 "result": {"action": "draft", "payload": {"title": "make a video"}},
             },
         ),
-        ("usage", {"tokens_in": 4, "tokens_out": 1}),
+        ("token", {"content": "Draft ready."}),
+        ("usage", {"tokens_in": 6, "tokens_out": 3}),
         ("done", {}),
     ]
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -301,7 +307,12 @@ async def test_run_turn_pauses_after_successful_create_job(db_session, regular_u
                 ),
                 LLMChunk(type="usage", tokens_in=4, tokens_out=1),
                 LLMChunk(type="done"),
-            ]
+            ],
+            [
+                LLMChunk(type="text", content="Job created."),
+                LLMChunk(type="usage", tokens_in=2, tokens_out=2),
+                LLMChunk(type="done"),
+            ],
         ]
     )
     orchestrator = ChatOrchestrator(
@@ -327,15 +338,18 @@ async def test_run_turn_pauses_after_successful_create_job(db_session, regular_u
                 "result": {"job_id": str(job_id), "status": "created"},
             },
         ),
-        ("usage", {"tokens_in": 4, "tokens_out": 1}),
+        ("token", {"content": "Job created."}),
+        ("usage", {"tokens_in": 6, "tokens_out": 3}),
         ("done", {}),
     ]
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
 
     rows = (await db_session.execute(select(Message).order_by(Message.created_at))).scalars().all()
     assistant_messages = [r for r in rows if r.role == "assistant"]
-    assert len(assistant_messages) == 1
+    assert len(assistant_messages) == 2
     assert assistant_messages[0].job_id == job_id
+    assert assistant_messages[1].job_id == job_id
+    assert "Job created." in assistant_messages[1].content
 
 
 @pytest.mark.asyncio
@@ -371,7 +385,12 @@ async def test_run_turn_pauses_after_successful_batch_create_jobs(
                 ),
                 LLMChunk(type="usage", tokens_in=4, tokens_out=1),
                 LLMChunk(type="done"),
-            ]
+            ],
+            [
+                LLMChunk(type="text", content="All set."),
+                LLMChunk(type="usage", tokens_in=2, tokens_out=2),
+                LLMChunk(type="done"),
+            ],
         ]
     )
     orchestrator = ChatOrchestrator(
@@ -383,12 +402,13 @@ async def test_run_turn_pauses_after_successful_batch_create_jobs(
 
     events = await collect_events(orchestrator, conversation, regular_user)
 
-    assert events[-3][0] == "tool_call_result"
-    assert events[-3][1]["name"] == "batch_create_jobs"
-    assert events[-3][1]["kind"] == "job_created"
-    assert events[-2] == ("usage", {"tokens_in": 4, "tokens_out": 1})
+    assert events[-4][0] == "tool_call_result"
+    assert events[-4][1]["name"] == "batch_create_jobs"
+    assert events[-4][1]["kind"] == "job_created"
+    assert events[-3] == ("token", {"content": "All set."})
+    assert events[-2] == ("usage", {"tokens_in": 6, "tokens_out": 3})
     assert events[-1] == ("done", {})
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
 
 
 @pytest.mark.asyncio

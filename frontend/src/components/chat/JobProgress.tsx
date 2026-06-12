@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { refreshAccessToken } from '../../lib/websocket'
 
 interface JobProgressProps {
   jobId: string
@@ -19,8 +20,11 @@ export default function JobProgress({ jobId, onComplete }: JobProgressProps) {
   const [status, setStatus] = useState<string>('queued')
   const [done, setDone] = useState(false)
 
+  const authRetryDone = useRef(false)
+
   useEffect(() => {
     if (done) return
+
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/jobs/${jobId}`
     const ws = new WebSocket(wsUrl)
@@ -47,6 +51,15 @@ export default function JobProgress({ jobId, onComplete }: JobProgressProps) {
         }
       } catch (e) {
         console.error('job ws parse', e)
+      }
+    }
+
+    ws.onclose = async (event) => {
+      // 1008 = policy violation; the access-token cookie expired. Refresh it
+      // once and let the effect reopen the socket on the next render cycle.
+      if (event.code === 1008 && !authRetryDone.current) {
+        authRetryDone.current = true
+        await refreshAccessToken()
       }
     }
 

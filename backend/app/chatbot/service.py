@@ -475,6 +475,7 @@ class ChatOrchestrator:
                 break
 
         job_id_from_tool: UUID | None = None
+        active_tools = tools
         for iteration in range(1, self.max_iterations + 1):
             if time.monotonic() - started_at >= self.max_wall_seconds:
                 yield self._error_event("wall_clock_limit_exceeded")
@@ -486,7 +487,7 @@ class ChatOrchestrator:
             loop_tokens_in = 0
             loop_tokens_out = 0
 
-            async for chunk in llm.chat_stream(history, model=actual_model, tools=tools):
+            async for chunk in llm.chat_stream(history, model=actual_model, tools=active_tools):
                 if chunk.type == "text" and chunk.content:
                     text_parts.append(chunk.content)
                     yield (SSEEventType.TOKEN.value, {"content": _strip_thinking_no_trim(chunk.content)})
@@ -574,12 +575,11 @@ class ChatOrchestrator:
                         self.db.add(assistant_message)
                         await self.db.commit()
                         await self.db.refresh(assistant_message)
-                    await self._record_usage(
-                        user_id, model_id, conversation_id, tokens_in, tokens_out
-                    )
-                    yield self._usage_event(tokens_in, tokens_out)
-                    yield self._done_event()
-                    return
+                    # Disable tools and give the model one more chance to produce a
+                    # natural closing message before we end the turn.
+                    active_tools = None
+                    history = self._trim_messages(history)
+                    continue
 
                 history = self._trim_messages(history)
                 continue
