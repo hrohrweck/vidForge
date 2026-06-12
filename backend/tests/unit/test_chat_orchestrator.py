@@ -2,11 +2,12 @@
 
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
-from app.chatbot.service import ChatOrchestrator, SYSTEM_PROMPT
+from app.chatbot.service import SYSTEM_PROMPT, ChatOrchestrator
 from app.chatbot.tools import ToolContext, ToolDefinition, ToolRegistry
 from app.database import ChatTokenUsage, Conversation, Message
 from app.services.llm_service import LLMChunk
@@ -195,10 +196,13 @@ async def test_run_turn_emits_error_when_loop_bound_is_hit(db_session, regular_u
         registry=registry,
         mcp_manager=FakeMCPManager(),
     )
+    orchestrator.max_iterations = 8
 
     events = await collect_events(orchestrator, conversation, regular_user)
 
-    assert events[-2:] == [("error", {"reason": "iteration_limit_exceeded"}), ("done", {})]
+    assert events[-2][0] == "error"
+    assert events[-2][1]["reason"] == "iteration_limit_exceeded"
+    assert events[-1] == ("done", {})
 
 
 @pytest.mark.asyncio
@@ -261,6 +265,129 @@ async def test_run_turn_pauses_on_create_job_draft(db_session, regular_user, con
         ("usage", {"tokens_in": 4, "tokens_out": 1}),
         ("done", {}),
     ]
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_turn_pauses_after_successful_create_job(db_session, regular_user, conversation):
+    job_id = uuid4()
+
+    async def handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        return {"job_id": str(job_id), "status": "created"}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="create_job",
+            description="Create job",
+            input_schema={"type": "object", "properties": {"prompt": {"type": "string"}}},
+            handler=handler,
+        )
+    )
+    llm = FakeLLM(
+        [
+            [
+                LLMChunk(
+                    type="tool_call",
+                    tool_calls=[
+                        {
+                            "id": "call_1",
+                            "function": {
+                                "name": "create_job",
+                                "arguments": '{"prompt": "make a video"}',
+                            },
+                        }
+                    ],
+                ),
+                LLMChunk(type="usage", tokens_in=4, tokens_out=1),
+                LLMChunk(type="done"),
+            ]
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        db_session,
+        llm=llm,
+        registry=registry,
+        mcp_manager=FakeMCPManager(),
+    )
+
+    events = await collect_events(orchestrator, conversation, regular_user)
+
+    assert events == [
+        (
+            "tool_call_start",
+            {"id": "call_1", "name": "create_job", "arguments": {"prompt": "make a video"}},
+        ),
+        (
+            "tool_call_result",
+            {
+                "id": "call_1",
+                "name": "create_job",
+                "kind": "job_created",
+                "result": {"job_id": str(job_id), "status": "created"},
+            },
+        ),
+        ("usage", {"tokens_in": 4, "tokens_out": 1}),
+        ("done", {}),
+    ]
+    assert len(llm.calls) == 1
+
+    rows = (await db_session.execute(select(Message).order_by(Message.created_at))).scalars().all()
+    assistant_messages = [r for r in rows if r.role == "assistant"]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0].job_id == job_id
+
+
+@pytest.mark.asyncio
+async def test_run_turn_pauses_after_successful_batch_create_jobs(
+    db_session, regular_user, conversation
+):
+    async def handler(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+        return {"created_count": 2, "job_ids": [str(uuid4()), str(uuid4())]}
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="batch_create_jobs",
+            description="Batch create jobs",
+            input_schema={"type": "object"},
+            handler=handler,
+        )
+    )
+    llm = FakeLLM(
+        [
+            [
+                LLMChunk(
+                    type="tool_call",
+                    tool_calls=[
+                        {
+                            "id": "batch_1",
+                            "function": {
+                                "name": "batch_create_jobs",
+                                "arguments": '{"template_id": "tmpl-1", "jobs": [{"prompt": "a"}]}',
+                            },
+                        }
+                    ],
+                ),
+                LLMChunk(type="usage", tokens_in=4, tokens_out=1),
+                LLMChunk(type="done"),
+            ]
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        db_session,
+        llm=llm,
+        registry=registry,
+        mcp_manager=FakeMCPManager(),
+    )
+
+    events = await collect_events(orchestrator, conversation, regular_user)
+
+    assert events[-3][0] == "tool_call_result"
+    assert events[-3][1]["name"] == "batch_create_jobs"
+    assert events[-3][1]["kind"] == "job_created"
+    assert events[-2] == ("usage", {"tokens_in": 4, "tokens_out": 1})
+    assert events[-1] == ("done", {})
     assert len(llm.calls) == 1
 
 

@@ -126,10 +126,9 @@ async def test_orchestrator_persists_job_id_when_tool_returns_one(
 
     rows = (await db_session.execute(select(Message).order_by(Message.created_at))).scalars().all()
     assistant_messages = [r for r in rows if r.role == "assistant"]
-    assert len(assistant_messages) == 2
+    assert len(assistant_messages) == 1
 
-    final_assistant = assistant_messages[-1]
-    assert final_assistant.job_id == job_id
+    assert assistant_messages[0].job_id == job_id
 
 
 @pytest.mark.asyncio
@@ -197,5 +196,5 @@ async def test_orchestrator_ignores_invalid_job_id(
 
     rows = (await db_session.execute(select(Message).order_by(Message.created_at))).scalars().all()
     assistant_messages = [r for r in rows if r.role == "assistant"]
-    final_assistant = assistant_messages[-1]
-    assert final_assistant.job_id is None
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0].job_id is None

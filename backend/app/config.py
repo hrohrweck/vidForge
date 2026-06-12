@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     llm_model: str = "qwen3.6:35b"
     llm_timeout_seconds: float = 3600.0
+    chat_max_iterations: int = 16
     audiocraft_url: str = "http://localhost:5050"
 
     templates_path: str = "./templates"

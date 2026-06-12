@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chatbot.mcp_client import MCPClientManager
 from app.chatbot.streaming import SSEEventType
 from app.chatbot.tools import ToolContext, ToolRegistry, create_builtin_registry, dispatch
+from app.config import get_settings
 from app.database import ChatTokenUsage, Conversation, MCPServer, Message, ModelConfig
 from app.services.llm_service import LLMClient
 from app.storage import get_storage_backend
@@ -357,7 +358,7 @@ class TokenUsageService:
 class ChatOrchestrator:
     """Drive one chatbot turn through LLM streaming and serial tool execution."""
 
-    max_iterations = 8
+    max_iterations = 16
     max_wall_seconds = 900.0
     default_context_limit = 8192
 
@@ -377,6 +378,7 @@ class ChatOrchestrator:
         self.mcp_manager: ChatMCPManager = mcp_manager or cast(ChatMCPManager, MCPClientManager())
         self.token_usage = token_usage or TokenUsageService()
         self.context_limit = context_limit or self.default_context_limit
+        self.max_iterations = get_settings().chat_max_iterations
         self.conversations = ConversationService(db)
 
     async def _resolve_llm(self, model_id: str) -> Any:
@@ -537,7 +539,14 @@ class ChatOrchestrator:
                             job_id_from_tool = UUID(result["job_id"])
                         except ValueError:
                             pass
-                    kind = "job_draft" if self._is_job_draft(tool_name, result) else "tool_result"
+                    should_pause = self._should_pause_after_tool(tool_name, result)
+                    kind = (
+                        "job_draft"
+                        if result.get("action") == "draft"
+                        else "job_created"
+                        if should_pause
+                        else "tool_result"
+                    )
                     yield (
                         SSEEventType.TOOL_CALL_RESULT.value,
                         {
@@ -561,11 +570,15 @@ class ChatOrchestrator:
                             "content": tool_content,
                         }
                     )
-                    if kind == "job_draft":
-                        should_pause = True
+                    if should_pause:
                         break
 
                 if should_pause:
+                    if assistant_message is not None and job_id_from_tool is not None:
+                        assistant_message.job_id = job_id_from_tool
+                        self.db.add(assistant_message)
+                        await self.db.commit()
+                        await self.db.refresh(assistant_message)
                     await self._record_usage(
                         user_id, model_id, conversation_id, tokens_in, tokens_out
                     )
@@ -890,8 +903,21 @@ class ChatOrchestrator:
             },
         }
 
-    def _is_job_draft(self, name: str, result: dict[str, Any]) -> bool:
-        return name == "create_job" and result.get("action") == "draft"
+    def _should_pause_after_tool(self, name: str, result: dict[str, Any]) -> bool:
+        """Return True when the assistant should stop after this tool.
+
+        Draft jobs and successful job/media creation should not continue to
+        further tool calls; the platform will deliver results asynchronously.
+        """
+        if name == "create_job" and result.get("action") == "draft":
+            return True
+        if name == "create_job" and result.get("job_id"):
+            return True
+        if name == "batch_create_jobs" and result.get("created_count"):
+            return True
+        if name == "generate_media" and result.get("task_id"):
+            return True
+        return False
 
     def _usage_event(self, tokens_in: int, tokens_out: int) -> StreamEvent:
         return (
@@ -904,6 +930,11 @@ class ChatOrchestrator:
             return (SSEEventType.ERROR.value, {
                 "reason": reason,
                 "message": "The conversation timed out (15 minutes). Please try a shorter message or split your request into smaller parts.",
+            })
+        if reason == "iteration_limit_exceeded":
+            return (SSEEventType.ERROR.value, {
+                "reason": reason,
+                "message": "The assistant reached the maximum number of steps for this turn. Please try again or split your request into smaller parts.",
             })
         return (SSEEventType.ERROR.value, {"reason": reason})
 
