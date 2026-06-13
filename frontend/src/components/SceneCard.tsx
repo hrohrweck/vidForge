@@ -33,7 +33,7 @@ export function SceneCard({ scene, onEdit, formatTime }: SceneCardProps) {
         <span className="text-xs font-medium text-muted-foreground">
           Scene {scene.scene_number}
         </span>
-        <Button variant="ghost" size="sm" onClick={onEdit} className="h-6 w-6 p-0">
+        <Button variant="ghost" size="sm" onClick={onEdit} className="h-6 w-6 p-0" title="Edit scene" aria-label="Edit scene">
           <Pencil className="h-3 w-3" />
         </Button>
       </div>
