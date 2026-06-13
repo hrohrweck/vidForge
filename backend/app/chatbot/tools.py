@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Project, Template
+from app.services.chat_autonomy_service import ChatAutonomyService
 from app.services.llm_service import LLMClient
 
 
@@ -161,6 +162,65 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     if isinstance(result, dict) and "id" in result and "job_id" not in result:
         result["job_id"] = result["id"]
     return result
+
+
+async def _handle_present_job_draft(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Present a job draft to the user for approval."""
+    template = args.get("template")
+    prompt = args.get("prompt")
+    if not template:
+        return {"error": "missing_argument", "message": "'template' is required"}
+    if not prompt:
+        return {"error": "missing_argument", "message": "'prompt' is required"}
+
+    draft: dict[str, Any] = {
+        "template": template,
+        "prompt": prompt,
+        "duration": args.get("duration", 30),
+        "style": args.get("style", "realistic"),
+        "aspect_ratio": args.get("aspect_ratio", "16:9"),
+    }
+
+    if "avatars" in args:
+        draft["avatars"] = [
+            {"avatar_id": str(item)} if isinstance(item, str) else item
+            for item in args["avatars"]
+        ]
+
+    for key in ("image_model", "video_model"):
+        if key in args:
+            draft[key] = args[key]
+
+    return {"kind": "job_draft", "action": "draft", "draft": draft}
+
+
+async def _handle_set_chat_autonomy(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Set the chat autonomy mode for this conversation."""
+    mode = args.get("mode")
+    if mode not in ("confirm", "autonomous"):
+        return {"error": "invalid_mode", "message": "'mode' must be 'confirm' or 'autonomous'"}
+
+    if not ctx.conversation_id or ctx.db is None:
+        return {
+            "error": "missing_context",
+            "message": "Conversation context and database session are required",
+        }
+
+    await ChatAutonomyService.set_mode(
+        ctx.db, UUID(ctx.conversation_id), UUID(ctx.user_id), mode
+    )
+    return {"mode": mode}
+
+
+async def _handle_get_chat_autonomy(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Get the chat autonomy mode for this conversation."""
+    if not ctx.conversation_id or ctx.db is None:
+        return {"mode": "confirm"}
+
+    mode = await ChatAutonomyService.get_mode(
+        ctx.db, UUID(ctx.conversation_id), UUID(ctx.user_id)
+    )
+    return {"mode": mode}
 
 
 async def _handle_list_templates(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2382,6 +2442,61 @@ def create_builtin_registry() -> ToolRegistry:
                 },
             },
             handler=_handle_update_user_settings,
+        )
+    )
+
+    # Chat autonomy / draft presentation
+    registry.register(
+        ToolDefinition(
+            name="present_job_draft",
+            description="Present a video generation draft to the user for approval before creating a job.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "template": {"type": "string", "description": "Template ID or name"},
+                    "prompt": {"type": "string", "description": "Video generation prompt"},
+                    "duration": {"type": "number", "description": "Target duration in seconds"},
+                    "style": {"type": "string", "description": "Visual style name"},
+                    "aspect_ratio": {"type": "string", "description": "Aspect ratio (e.g. 16:9)"},
+                    "avatars": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of avatar IDs to include in the video",
+                    },
+                    "image_model": {"type": "string", "description": "Image generation model ID"},
+                    "video_model": {"type": "string", "description": "Video generation model ID"},
+                },
+                "required": ["template", "prompt"],
+            },
+            handler=_handle_present_job_draft,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="set_chat_autonomy",
+            description="Set whether the chatbot must confirm before creating jobs.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["confirm", "autonomous"],
+                        "description": "Chat autonomy mode",
+                    },
+                },
+                "required": ["mode"],
+            },
+            handler=_handle_set_chat_autonomy,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="get_chat_autonomy",
+            description="Get the current chat autonomy mode for this conversation.",
+            input_schema={"type": "object", "properties": {}},
+            handler=_handle_get_chat_autonomy,
         )
     )
 
