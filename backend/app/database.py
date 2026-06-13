@@ -122,6 +122,7 @@ class Conversation(Base):
         DateTime, default=utc_now, onupdate=utc_now
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(
