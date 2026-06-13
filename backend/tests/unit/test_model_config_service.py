@@ -348,3 +348,73 @@ class TestUniqueConstraint:
         await _create(db_session, model_id="dup")
         with pytest.raises(IntegrityError):
             await _create(db_session, model_id="dup")
+
+
+# ---------------------------------------------------------------------------
+# Upsert Tests
+# ---------------------------------------------------------------------------
+
+class TestUpsert:
+    async def test_upsert_creates_missing_config(self, db_session):
+        config = await ModelConfigService.upsert(
+            db_session,
+            PROVIDER_ID,
+            "upsert-new",
+            {
+                "display_name": "Upsert New",
+                "provider_model_id": "upsert-new",
+                "modality": "image",
+                "endpoint_type": "generateImage",
+                "cost_config": {"cost_per_image": 0.05, "currency": "USD"},
+            },
+        )
+        assert config.model_id == "upsert-new"
+        assert config.is_active is False
+        assert config.cost_config["cost_per_image"] == 0.05
+
+    async def test_upsert_merges_cost_config(self, db_session):
+        await _create(
+            db_session,
+            model_id="upsert-merge",
+            cost_config={"cost_per_image": 0.05, "currency": "USD"},
+        )
+
+        config = await ModelConfigService.upsert(
+            db_session,
+            PROVIDER_ID,
+            "upsert-merge",
+            {
+                "display_name": "Updated",
+                "modality": "image",
+                "endpoint_type": "generateImage",
+                "cost_config": {"currency": "credits"},
+            },
+        )
+        await db_session.commit()
+
+        assert config.display_name == "Updated"
+        assert config.cost_config["cost_per_image"] == 0.05
+        assert config.cost_config["currency"] == "credits"
+
+    async def test_upsert_overwrites_when_provider_returns_value(self, db_session):
+        await _create(
+            db_session,
+            model_id="upsert-overwrite",
+            cost_config={"cost_per_image": 0.05, "currency": "USD"},
+        )
+
+        config = await ModelConfigService.upsert(
+            db_session,
+            PROVIDER_ID,
+            "upsert-overwrite",
+            {
+                "display_name": "Updated",
+                "modality": "image",
+                "endpoint_type": "generateImage",
+                "cost_config": {"cost_per_image": 0.10, "currency": "credits"},
+            },
+        )
+        await db_session.commit()
+
+        assert config.cost_config["cost_per_image"] == 0.10
+        assert config.cost_config["currency"] == "credits"

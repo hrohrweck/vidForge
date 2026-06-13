@@ -288,6 +288,60 @@ class ModelConfigService:
         return await ModelConfigService.create(db, create_data)
 
     @staticmethod
+    async def upsert(
+        db: AsyncSession,
+        provider_id: UUID,
+        model_id: str,
+        defaults: dict,
+    ) -> ModelConfig:
+        """Create or update a ModelConfig, merging JSONB metadata with existing rows.
+
+        Existing manually-edited cost/constraint/capability values are preserved
+        unless the provider explicitly returns a replacement value.
+        """
+        from app.services.model_metadata import (
+            merge_capabilities,
+            merge_constraints,
+            merge_cost_config,
+        )
+
+        config = await ModelConfigService.get_by_id(db, model_id, provider_id)
+        if config:
+            update_data = {
+                k: v for k, v in defaults.items() if k not in ("model_id", "provider_id")
+            }
+            if "capabilities" in update_data:
+                update_data["capabilities"] = merge_capabilities(
+                    config.capabilities, update_data["capabilities"]
+                )
+            if "constraints" in update_data:
+                update_data["constraints"] = merge_constraints(
+                    config.constraints, update_data["constraints"]
+                )
+            if "cost_config" in update_data:
+                update_data["cost_config"] = merge_cost_config(
+                    config.cost_config, update_data["cost_config"]
+                )
+            for key, value in update_data.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            config.is_deprecated = False
+            await db.flush()
+            return config
+
+        create_data = {
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "is_active": False,
+            "display_name": defaults.get("display_name", model_id),
+            "provider_model_id": defaults.get("provider_model_id", model_id),
+            "modality": defaults.get("modality", "image"),
+            "endpoint_type": defaults.get("endpoint_type", "comfyui"),
+            **{k: v for k, v in defaults.items() if k not in ("model_id", "provider_id")},
+        }
+        return await ModelConfigService.create(db, create_data)
+
+    @staticmethod
     async def mark_deprecated(db: AsyncSession, model_id: str, provider_id: UUID) -> None:
         config = await ModelConfigService.get_by_id(db, model_id, provider_id)
         if config is None:
