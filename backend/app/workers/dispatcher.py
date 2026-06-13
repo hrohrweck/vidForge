@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Template, VideoScene
 from app.plugins.registry import get_plugin, get_plugin_for_template
+from app.services.job_chat_notifier import JobChatNotifier
 from app.services.media_events import record_and_publish_media_event
 from app.workers.context import ctx
 
@@ -143,6 +144,7 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                 job.stage = "planned"
                 job.progress = 15
                 await db.commit()
+                await JobChatNotifier.notify_planned(db, job)
                 return {"status": "completed", "job_id": job_id, "stage": "planned", **result}
 
         if stage == "generating_images":
@@ -162,12 +164,14 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                     job.stage = "images_ready"
                     job.progress = 40
                     await db.commit()
+                    await JobChatNotifier.notify_images_ready(db, job)
                     return {"status": "completed", "job_id": job_id, "stage": "images_ready"}
 
                 job.status = "failed"
                 job.stage = "generating_images"
                 job.error_message = "All image scenes failed to generate"
                 await db.commit()
+                await JobChatNotifier.notify_failed(db, job, job.error_message)
                 return {"status": "failed", "job_id": job_id, "stage": "generating_images"}
 
         if stage == "generating_videos":
@@ -187,12 +191,14 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
                     job.stage = "videos_ready"
                     job.progress = 80
                     await db.commit()
+                    await JobChatNotifier.notify_videos_ready(db, job)
                     return {"status": "completed", "job_id": job_id, "stage": "videos_ready"}
 
                 job.status = "failed"
                 job.stage = "generating_videos"
                 job.error_message = "All video scenes failed to generate"
                 await db.commit()
+                await JobChatNotifier.notify_failed(db, job, job.error_message)
                 return {"status": "failed", "job_id": job_id, "stage": "generating_videos"}
 
         if stage == "rendering":
@@ -256,7 +262,14 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
                 from app.workers.tasks import _post_completion_message
 
-                await _post_completion_message(job.id, db=db)
+                try:
+                    await _post_completion_message(job.id, db=db)
+                except Exception:
+                    logger.warning(
+                        "Failed to post completion card for job %s",
+                        job.id,
+                        exc_info=True,
+                    )
 
                 return {"status": "completed", "job_id": job_id, "stage": "completed", **render_result}
 
@@ -264,6 +277,14 @@ async def dispatch_stage(job_id: str, stage: str) -> dict[str, Any]:
 
     except Exception as exc:
         await _mark_stage_failed(job_id, stage, exc)
+        try:
+            async with ctx.session_factory() as db:
+                job, _plugin = await _load_job(db, job_id)
+                await JobChatNotifier.notify_failed(db, job, str(exc))
+        except Exception:
+            logger.warning(
+                "Failed to post failure card for job %s", job_id, exc_info=True
+            )
         raise
 
 
