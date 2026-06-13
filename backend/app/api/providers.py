@@ -509,7 +509,7 @@ async def sync_provider_models(
         model_id = model_data.get("model_id", model_data.get("id", ""))
         if not model_id:
             continue
-        config = await ModelConfigService.get_or_create(
+        config = await ModelConfigService.upsert(
             db, provider_id, model_id, model_data
         )
         synced.append(config)
