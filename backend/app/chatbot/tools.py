@@ -191,6 +191,31 @@ async def _handle_present_job_draft(ctx: ToolContext, args: dict[str, Any]) -> d
         if key in args:
             draft[key] = args[key]
 
+    if ctx.conversation_id and ctx.db:
+        from uuid import uuid4
+
+        from app.api.websocket import manager as ws_manager
+        from app.database import Message
+
+        card_message = Message(
+            id=uuid4(),
+            conversation_id=UUID(ctx.conversation_id),
+            role="assistant",
+            content="Here is a draft for your review.",
+            attachments=[{
+                "kind": "job_card",
+                "card_type": "job_draft",
+                "job_id": None,
+                "title": "Job draft",
+                "data": draft,
+                "actions": ["create"],
+            }],
+        )
+        ctx.db.add(card_message)
+        await ctx.db.commit()
+        await ctx.db.refresh(card_message)
+        await ws_manager.broadcast_chat_message(ctx.conversation_id, str(card_message.id))
+
     return {"kind": "job_draft", "action": "draft", "draft": draft}
 
 

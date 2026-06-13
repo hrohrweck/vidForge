@@ -2,12 +2,21 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { usersApi } from '../api/client'
 
+export interface JobCardAttachment {
+  kind: 'job_card'
+  card_type: 'job_draft' | 'scene_plan' | 'image_review' | 'video_review' | 'job_completed' | 'job_error'
+  job_id: string | null
+  title: string
+  data: Record<string, unknown>
+  actions: string[]
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   createdAt: string
-  attachments?: Array<{url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
+  attachments?: Array<JobCardAttachment | {url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
   toolCallId?: string
   jobId?: string | null
   mediaResult?: { kind: string; url: string; mime_type?: string }
