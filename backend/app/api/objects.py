@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import ObjectRef, ObjectRefImage, User, get_db
 from app.storage import get_storage_backend
@@ -320,7 +320,7 @@ async def stream_object_image(
     current_user: User = Depends(get_current_user_from_bearer_or_cookie),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    obj = await _get_object_ref_or_404(object_ref_id, current_user.id, db)
+    await _get_object_ref_or_404(object_ref_id, current_user.id, db)
 
     result = await db.execute(
         select(ObjectRefImage).where(

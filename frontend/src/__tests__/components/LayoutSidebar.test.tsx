@@ -99,3 +99,61 @@ describe('Layout Sidebar', () => {
     expect(dashboardLabel.className).toContain('md:hidden')
   })
 })
+
+describe('Layout Sidebar Submenu (collapsed desktop)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuthStore.setState({
+      user: {
+        id: '1',
+        email: 'admin@example.com',
+        is_active: true,
+        is_superuser: true,
+        groups: [],
+        permissions: [],
+      },
+      isAuthenticated: true,
+    })
+    useUiStore.setState({
+      isSidebarOpen: false,
+      sidebarHydrated: true,
+      sidebarError: null,
+    })
+  })
+
+  it('clicking a group in the collapsed sidebar opens a submenu view with Back', () => {
+    renderLayout()
+
+    const adminButton = screen.getByTitle('Admin')
+    fireEvent.click(adminButton)
+
+    expect(screen.getByText('Back')).toBeInTheDocument()
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('Providers')).toBeInTheDocument()
+    expect(screen.queryByText('Dashboard')).not.toBeInTheDocument()
+  })
+
+  it('clicking Back restores the collapsed main menu without saving sidebar preference', () => {
+    renderLayout()
+
+    fireEvent.click(screen.getByTitle('Admin'))
+    fireEvent.click(screen.getByText('Back'))
+
+    expect(screen.queryByText('Back')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overview')).not.toBeInTheDocument()
+    expect(screen.getByText('Dashboard')).toBeInTheDocument()
+
+    expect(usersApi.setSidebarPreference).not.toHaveBeenCalled()
+  })
+
+  it('expanded sidebar keeps existing inline group expansion', () => {
+    useUiStore.setState({ isSidebarOpen: true, sidebarHydrated: true })
+    renderLayout()
+
+    const adminButton = screen.getByText('Admin')
+    fireEvent.click(adminButton)
+
+    expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.queryByText('Back')).not.toBeInTheDocument()
+  })
+})

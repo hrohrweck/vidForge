@@ -1,6 +1,7 @@
 """Tests for object reference wiring in generate_images and generate_videos."""
 
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -117,7 +118,7 @@ class TestGenerateImagesObjectWiring:
             received_prompt = prompt
             fpath = Path(temp_storage) / "scene_1_seed.png"
             fpath.write_bytes(b"fake-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _ObjectWiringPlugin()
@@ -153,7 +154,7 @@ class TestGenerateImagesObjectWiring:
             received_prompt = prompt
             fpath = Path(temp_storage) / "scene_1_seed.png"
             fpath.write_bytes(b"fake-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _ObjectWiringPlugin()
@@ -196,7 +197,7 @@ class TestGenerateImagesObjectWiring:
             received_prompt = prompt
             fpath = Path(temp_storage) / "scene_1_seed.png"
             fpath.write_bytes(b"fake-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _ObjectWiringPlugin()
@@ -246,7 +247,7 @@ class TestGenerateImagesObjectWiring:
             received_prompt = prompt
             fpath = Path(temp_storage) / "scene_1_seed.png"
             fpath.write_bytes(b"fake-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _ObjectWiringPlugin()
@@ -317,7 +318,7 @@ class TestGenerateVideosObjectWiring:
             received_prompt = prompt
             fpath = Path(temp_storage) / "scene_1_video.mp4"
             fpath.write_bytes(b"fake-video")
-            return (str(fpath), "test-model", uuid4(), 4.0, None)
+            return (str(fpath), "test-model", uuid4(), 4.0, None, Decimal("0"))
 
         gen_video_mock = AsyncMock(side_effect=_gen_video)
 

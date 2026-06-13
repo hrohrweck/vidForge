@@ -53,6 +53,9 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         (("timeout", "timed out"), ProviderTimeoutError),
     ]
 
+    # Estimated GPU seconds consumed per Flux image generation on this endpoint.
+    _EST_IMAGE_GPU_SECONDS = 30.0
+
     def __init__(self, provider_id: UUID, config: dict):
         self.provider_id = provider_id
         self.config = config
@@ -359,20 +362,47 @@ class RunPodProvider(ComfyUIProvider, ImageProvider, VideoProvider):
         return self._default_models()
 
     def _default_models(self) -> list[dict[str, Any]]:
+        cost_per_second = float(self.cost_per_gpu_hour) / 3600.0
         return [
             {
                 "id": "wan2.2",
+                "model_id": "wan2.2",
+                "provider_model_id": "wan2.2",
                 "name": "Wan 2.2",
+                "display_name": "Wan 2.2",
                 "type": "video",
-                "capabilities": ["text-to-video", "image-to-video"],
-                "provider_type": "runpod",
+                "modality": "video",
+                "endpoint_type": "comfyui",
+                "capabilities": {
+                    "accepts_text": True,
+                    "accepts_image": True,
+                    "outputs_video": True,
+                },
+                "constraints": {
+                    "max_duration": 5,
+                    "supported_aspect_ratios": ["16:9"],
+                    "resolutions": ["848x480"],
+                },
+                "cost_config": {"currency": "USD", "cost_per_second": cost_per_second},
             },
             {
                 "id": "flux1-schnell",
+                "model_id": "flux1-schnell",
+                "provider_model_id": "flux1-schnell",
                 "name": "Flux.1 Schnell",
+                "display_name": "Flux.1 Schnell",
                 "type": "image",
-                "capabilities": ["text-to-image", "image-to-image"],
-                "provider_type": "runpod",
+                "modality": "image",
+                "endpoint_type": "comfyui",
+                "capabilities": {
+                    "accepts_text": True,
+                    "accepts_image": True,
+                    "outputs_image": True,
+                },
+                "constraints": {
+                    "supported_aspect_ratios": ["1:1", "16:9", "9:16", "3:2", "4:3"],
+                },
+                "cost_config": {"currency": "USD", "cost_per_image": cost_per_second * self._EST_IMAGE_GPU_SECONDS},
             },
         ]
 

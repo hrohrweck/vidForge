@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Job, Project
+from app.database import Job, Project, Template
 from app.services.llm_service import LLMClient
 
 
@@ -107,7 +107,21 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
         UUID(template)
         payload["template_id"] = template
     except ValueError:
-        payload["template_id"] = template
+        # The LLM sometimes passes a template name instead of a UUID.
+        # Resolve it to the matching builtin template ID.
+        if ctx.db is not None:
+            result = await ctx.db.execute(
+                select(Template.id)
+                .where(Template.name.ilike(template))
+                .limit(1)
+            )
+            template_id = result.scalar_one_or_none()
+            if template_id is not None:
+                payload["template_id"] = str(template_id)
+            else:
+                payload["template_id"] = template
+        else:
+            payload["template_id"] = template
 
     if "reference_image_url" not in args:
         url = await _resolve_attachment_image_url(ctx)
@@ -136,7 +150,9 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     if ctx.message_id:
         payload["chat_message_id"] = ctx.message_id
 
-    payload["auto_start"] = False
+    # Let the jobs endpoint auto-start by default so the chat-created job
+    # actually enters the pipeline instead of remaining pending.
+    payload.setdefault("auto_start", True)
 
     from app.chatbot.api_tools import call_user_api
 

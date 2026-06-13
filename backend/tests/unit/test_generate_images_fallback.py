@@ -9,13 +9,13 @@ Tests cover:
 
 import os
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Avatar, AvatarImage, Job, VideoScene
 from app.plugins.base import PluginBase
@@ -94,7 +94,7 @@ def _make_gen_image_success(storage_dir):
         fname = f"scene_{scene_number}.png"
         fpath = os.path.join(storage_dir, fname)
         Path(fpath).write_bytes(b"fake-png-data")
-        return (fname, "test-model", uuid4())
+        return (fname, "test-model", uuid4(), Decimal("0"))
 
     return AsyncMock(side_effect=_gen)
 
@@ -137,7 +137,7 @@ class TestGenerateImagesFallback:
 
         gen_image_mock = AsyncMock(side_effect=[
             NonRecoverableError("GPU out of memory"),
-            ("scene_fallback.png", "test-model", uuid4()),
+            ("scene_fallback.png", "test-model", uuid4(), Decimal("0")),
         ])
         import_mock = AsyncMock(return_value=None)
 

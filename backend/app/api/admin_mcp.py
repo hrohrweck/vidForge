@@ -11,7 +11,7 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.chatbot.crypto import encrypt_credentials
 from app.chatbot.mcp_client import MCPClientManager
 from app.database import MCPServer, User, get_db

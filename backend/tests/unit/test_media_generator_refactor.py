@@ -138,7 +138,7 @@ async def test_generate_image_retries_recoverable_errors(
     monkeypatch.setattr(media_generator.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(media_generator.settings, "storage_path", str(tmp_path))
 
-    relative_path, model_label, resolved_provider_id = await media_generator.generate_image(
+    relative_path, model_label, resolved_provider_id, _cost = await media_generator.generate_image(
         db_session,
         job,
         "retry prompt",

@@ -30,6 +30,7 @@ from app.api import (
 from app.api.admin_mcp import router as admin_mcp_router
 from app.api.websocket import manager as ws_manager
 from app.api.ws_auth import authenticate_websocket
+from app.api.ws_heartbeat import WebSocketHeartbeat
 from app.config import get_settings
 from app.database import (
     Conversation,
@@ -176,16 +177,28 @@ async def websocket_job_updates(websocket: WebSocket, job_id: str) -> None:
                 return
 
     await ws_manager.connect(websocket, job_id)
+    send_lock = asyncio.Lock()
+    heartbeat = WebSocketHeartbeat(
+        websocket,
+        interval=settings.ws_heartbeat_interval_seconds,
+        timeout=settings.ws_heartbeat_timeout_seconds,
+        send_lock=send_lock,
+    )
+    heartbeat.start()
     try:
-        subscribe_task = asyncio.create_task(ws_manager.subscribe_to_job(job_id, websocket))
+        subscribe_task = asyncio.create_task(
+            ws_manager.subscribe_to_job(job_id, websocket, send_lock)
+        )
         try:
             while True:
                 await websocket.receive_text()
+                heartbeat.reset()
         except WebSocketDisconnect:
             pass
         finally:
             subscribe_task.cancel()
     finally:
+        await heartbeat.stop()
         ws_manager.disconnect(websocket, job_id)
 
 
@@ -209,16 +222,28 @@ async def websocket_chat_updates(websocket: WebSocket, conversation_id: str) -> 
                 return
 
     await websocket.accept()
+    send_lock = asyncio.Lock()
+    heartbeat = WebSocketHeartbeat(
+        websocket,
+        interval=settings.ws_heartbeat_interval_seconds,
+        timeout=settings.ws_heartbeat_timeout_seconds,
+        send_lock=send_lock,
+    )
+    heartbeat.start()
     try:
-        subscribe_task = asyncio.create_task(ws_manager.subscribe_to_chat(conversation_id, websocket))
+        subscribe_task = asyncio.create_task(
+            ws_manager.subscribe_to_chat(conversation_id, websocket, send_lock)
+        )
         try:
             while True:
                 await websocket.receive_text()
+                heartbeat.reset()
         except WebSocketDisconnect:
             pass
         finally:
             subscribe_task.cancel()
     finally:
+        await heartbeat.stop()
         await websocket.close()
 
 
@@ -235,18 +260,28 @@ async def websocket_notifications(websocket: WebSocket, token: str | None = None
         await websocket.close(code=1008)
         return
     await ws_manager.connect_user(websocket, str(user.id))
+    send_lock = asyncio.Lock()
+    heartbeat = WebSocketHeartbeat(
+        websocket,
+        interval=settings.ws_heartbeat_interval_seconds,
+        timeout=settings.ws_heartbeat_timeout_seconds,
+        send_lock=send_lock,
+    )
+    heartbeat.start()
     try:
         subscribe_task = asyncio.create_task(
-            ws_manager.subscribe_to_user_notifications(str(user.id), websocket)
+            ws_manager.subscribe_to_user_notifications(str(user.id), websocket, send_lock)
         )
         try:
             while True:
                 await websocket.receive_text()
+                heartbeat.reset()
         except WebSocketDisconnect:
             pass
         finally:
             subscribe_task.cancel()
     finally:
+        await heartbeat.stop()
         ws_manager.disconnect_user(websocket, str(user.id))
 
 
@@ -257,16 +292,26 @@ async def websocket_media_events(websocket: WebSocket, token: str | None = None)
         await websocket.close(code=1008)
         return
     await ws_manager.connect_user(websocket, str(user.id))
+    send_lock = asyncio.Lock()
+    heartbeat = WebSocketHeartbeat(
+        websocket,
+        interval=settings.ws_heartbeat_interval_seconds,
+        timeout=settings.ws_heartbeat_timeout_seconds,
+        send_lock=send_lock,
+    )
+    heartbeat.start()
     try:
         subscribe_task = asyncio.create_task(
-            ws_manager.subscribe_to_media_events(str(user.id), websocket)
+            ws_manager.subscribe_to_media_events(str(user.id), websocket, send_lock)
         )
         try:
             while True:
                 await websocket.receive_text()
+                heartbeat.reset()
         except WebSocketDisconnect:
             pass
         finally:
             subscribe_task.cancel()
     finally:
+        await heartbeat.stop()
         ws_manager.disconnect_user(websocket, str(user.id))

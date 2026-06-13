@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -153,8 +154,21 @@ async def test_process_video_job_does_not_hold_outer_session_during_dispatch_gen
         def __init__(self, db):
             self.db = db
 
-        async def record_spend(self, *args, **kwargs):
-            return None
+        async def check_budget(self, provider_id, amount):
+            return (True, "")
+
+    async def fake_estimate_job_cost(*args, **kwargs):
+        return SimpleNamespace(total=Decimal("0"))
+
+    async def fake_get_job_actual_cost(*args, **kwargs):
+        return Decimal("0")
+
+    monkeypatch.setattr(
+        "app.services.cost_estimator.estimate_job_cost", fake_estimate_job_cost
+    )
+    monkeypatch.setattr(
+        "app.services.cost_estimator.get_job_actual_cost", fake_get_job_actual_cost
+    )
 
     async def fake_dispatch_stage(dispatched_job_id: str, stage: str):
         assert dispatched_job_id == str(job_id)

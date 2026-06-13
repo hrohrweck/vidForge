@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { refreshAccessToken } from '../../lib/websocket'
+import { useMemo, useRef, useState } from 'react'
+import { usePersistentWebSocket } from '../../lib/websocket'
 
 interface JobProgressProps {
   jobId: string
@@ -19,52 +19,46 @@ export default function JobProgress({ jobId, onComplete }: JobProgressProps) {
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<string>('queued')
   const [done, setDone] = useState(false)
+  const disconnectRef = useRef<() => void>(() => {})
 
-  const authRetryDone = useRef(false)
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/jobs/${jobId}`
 
-  useEffect(() => {
-    if (done) return
-
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/jobs/${jobId}`
-    const ws = new WebSocket(wsUrl)
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: WSMessage = JSON.parse(event.data)
-        if (msg.job_id !== jobId) return
-        if (typeof msg.progress === 'number') setProgress(msg.progress)
-        if (msg.status) setStatus(msg.status)
-        const isTerminal =
-          msg.type === 'completed' ||
-          msg.type === 'failed' ||
-          (msg.type === 'status_update' &&
-            (msg.status === 'completed' || msg.status === 'failed'))
-        if (isTerminal) {
-          setDone(true)
-          onComplete?.({
-            output_path: msg.output_path,
-            preview_path: msg.preview_path,
-            status: msg.status ?? msg.type,
-          })
-          ws.close()
+  const wsOptions = useMemo(
+    () => ({
+      url: wsUrl,
+      connect: !done,
+      authRetry: true,
+      onMessage: (event: MessageEvent) => {
+        try {
+          const msg: WSMessage = JSON.parse(event.data)
+          if (msg.job_id !== jobId) return
+          if (typeof msg.progress === 'number') setProgress(msg.progress)
+          if (msg.status) setStatus(msg.status)
+          const isTerminal =
+            msg.type === 'completed' ||
+            msg.type === 'failed' ||
+            (msg.type === 'status_update' &&
+              (msg.status === 'completed' || msg.status === 'failed'))
+          if (isTerminal) {
+            setDone(true)
+            onComplete?.({
+              output_path: msg.output_path,
+              preview_path: msg.preview_path,
+              status: msg.status ?? msg.type,
+            })
+            disconnectRef.current()
+          }
+        } catch (e) {
+          console.error('job ws parse', e)
         }
-      } catch (e) {
-        console.error('job ws parse', e)
-      }
-    }
+      },
+    }),
+    [wsUrl, jobId, done, onComplete],
+  )
 
-    ws.onclose = async (event) => {
-      // 1008 = policy violation; the access-token cookie expired. Refresh it
-      // once and let the effect reopen the socket on the next render cycle.
-      if (event.code === 1008 && !authRetryDone.current) {
-        authRetryDone.current = true
-        await refreshAccessToken()
-      }
-    }
-
-    return () => ws.close()
-  }, [jobId, done, onComplete])
+  const { disconnect } = usePersistentWebSocket(wsOptions)
+  disconnectRef.current = disconnect
 
   return (
     <div

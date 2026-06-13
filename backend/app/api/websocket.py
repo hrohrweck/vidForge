@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Set
@@ -102,7 +103,12 @@ class ConnectionManager:
         r = await self.get_redis()
         await r.publish(f"chat:{conversation_id}", payload)
 
-    async def subscribe_to_job(self, job_id: str, websocket: WebSocket) -> None:
+    async def subscribe_to_job(
+        self,
+        job_id: str,
+        websocket: WebSocket,
+        send_lock: asyncio.Lock | None = None,
+    ) -> None:
         r = await self.get_redis()
         pubsub = r.pubsub()
         await pubsub.subscribe(f"job:{job_id}")
@@ -110,13 +116,22 @@ class ConnectionManager:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     try:
-                        await websocket.send_text(message["data"])
+                        if send_lock is not None:
+                            async with send_lock:
+                                await websocket.send_text(message["data"])
+                        else:
+                            await websocket.send_text(message["data"])
                     except Exception:
                         break
         finally:
             await pubsub.unsubscribe(f"job:{job_id}")
 
-    async def subscribe_to_chat(self, conversation_id: str, websocket: WebSocket) -> None:
+    async def subscribe_to_chat(
+        self,
+        conversation_id: str,
+        websocket: WebSocket,
+        send_lock: asyncio.Lock | None = None,
+    ) -> None:
         r = await self.get_redis()
         pubsub = r.pubsub()
         await pubsub.subscribe(f"chat:{conversation_id}")
@@ -124,7 +139,11 @@ class ConnectionManager:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     try:
-                        await websocket.send_text(message["data"])
+                        if send_lock is not None:
+                            async with send_lock:
+                                await websocket.send_text(message["data"])
+                        else:
+                            await websocket.send_text(message["data"])
                     except Exception:
                         break
         finally:
@@ -222,7 +241,10 @@ class ConnectionManager:
             self.disconnect_admin(conn)
 
     async def subscribe_to_user_notifications(
-        self, user_id: str, websocket: WebSocket
+        self,
+        user_id: str,
+        websocket: WebSocket,
+        send_lock: asyncio.Lock | None = None,
     ) -> None:
         """Forward Redis ``notifications:user:{user_id}`` messages to *websocket*."""
         r = await self.get_redis()
@@ -232,13 +254,21 @@ class ConnectionManager:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     try:
-                        await websocket.send_text(message["data"])
+                        if send_lock is not None:
+                            async with send_lock:
+                                await websocket.send_text(message["data"])
+                        else:
+                            await websocket.send_text(message["data"])
                     except Exception:
                         break
         finally:
             await pubsub.unsubscribe(f"notifications:user:{user_id}")
 
-    async def subscribe_to_admin_notifications(self, websocket: WebSocket) -> None:
+    async def subscribe_to_admin_notifications(
+        self,
+        websocket: WebSocket,
+        send_lock: asyncio.Lock | None = None,
+    ) -> None:
         """Forward Redis ``notifications:admin`` messages to *websocket*."""
         r = await self.get_redis()
         pubsub = r.pubsub()
@@ -247,7 +277,11 @@ class ConnectionManager:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     try:
-                        await websocket.send_text(message["data"])
+                        if send_lock is not None:
+                            async with send_lock:
+                                await websocket.send_text(message["data"])
+                        else:
+                            await websocket.send_text(message["data"])
                     except Exception:
                         break
         finally:
@@ -279,7 +313,12 @@ class ConnectionManager:
             for conn in disconnected:
                 self.disconnect_user(conn, user_id)
 
-    async def subscribe_to_media_events(self, user_id: str, websocket: WebSocket) -> None:
+    async def subscribe_to_media_events(
+        self,
+        user_id: str,
+        websocket: WebSocket,
+        send_lock: asyncio.Lock | None = None,
+    ) -> None:
         r = await self.get_redis()
         pubsub = r.pubsub()
         await pubsub.subscribe(f"media:user:{user_id}")
@@ -287,7 +326,11 @@ class ConnectionManager:
             async for message in pubsub.listen():
                 if message["type"] == "message":
                     try:
-                        await websocket.send_text(message["data"])
+                        if send_lock is not None:
+                            async with send_lock:
+                                await websocket.send_text(message["data"])
+                        else:
+                            await websocket.send_text(message["data"])
                     except Exception:
                         break
         finally:

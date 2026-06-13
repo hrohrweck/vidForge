@@ -23,4 +23,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: integration tests requiring real database",
+    "poe_img2img: optional Poe img2img/i2v verification tests",
 ]

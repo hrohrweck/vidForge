@@ -16,10 +16,9 @@ from uuid import uuid4
 import pytest
 
 from app.database import ModelConfig, Provider
-from app.models.media import MediaAsset, SourceType
+from app.models.media import MediaAsset
 from app.services.model_config_service import ModelConfigService
 from app.services.providers.atlascloud import AtlasCloudProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -248,7 +247,7 @@ class TestQuickMediaRecordsCost:
         await db_session.flush()
 
         cost_config = {"credits_per_image": 5, "credits_per_second": 0, "currency": "credits"}
-        config = await _make_model_config(
+        await _make_model_config(
             db_session,
             provider_id=provider.id,
             model_id="test-image-cost",
@@ -269,7 +268,7 @@ class TestQuickMediaRecordsCost:
 
         with patch("app.workers.tasks.ctx", mock_ctx), \
              patch("app.services.media_generator.generate_image", AsyncMock(
-                 return_value=("/tmp/test.png", "test-image-cost", provider.id)
+                 return_value=("/tmp/test.png", "test-image-cost", provider.id, Decimal("5"))
              )), \
              patch("app.workers.tasks.Path.exists", return_value=True), \
              patch("app.workers.tasks.Path.mkdir"), \
@@ -306,7 +305,7 @@ class TestQuickMediaRecordsCost:
         await db_session.flush()
 
         cost_config = {"credits_per_image": 0, "credits_per_second": 3, "currency": "credits"}
-        config = await _make_model_config(
+        await _make_model_config(
             db_session,
             provider_id=provider.id,
             model_id="test-video-cost",
@@ -326,7 +325,7 @@ class TestQuickMediaRecordsCost:
 
         with patch("app.workers.tasks.ctx", mock_ctx), \
              patch("app.services.media_generator.generate_video", AsyncMock(
-                 return_value=("/tmp/test.mp4", "test-video-cost", provider.id, 8, None)
+                 return_value=("/tmp/test.mp4", "test-video-cost", provider.id, 8, None, Decimal("24"))
              )), \
              patch("app.workers.tasks.Path.exists", return_value=True), \
              patch("app.workers.tasks.Path.mkdir"), \
@@ -374,7 +373,7 @@ class TestCostConfigJsonStructure:
             "credits_per_second": 3,
             "currency": "credits",
         }
-        config = await _make_model_config(
+        await _make_model_config(
             db_session,
             provider_id=provider.id,
             model_id="structured-cost-model",
@@ -408,7 +407,7 @@ class TestCostConfigJsonStructure:
         provider = _make_provider(db_session=db_session)
         await db_session.flush()
 
-        config = await _make_model_config(
+        await _make_model_config(
             db_session,
             provider_id=provider.id,
             model_id="no-cost-model",

@@ -21,7 +21,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import require_admin
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.api.schemas.notifications import (
     ErrorEventListResponse,
     ErrorEventResponse,

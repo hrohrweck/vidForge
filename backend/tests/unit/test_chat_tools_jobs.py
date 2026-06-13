@@ -52,11 +52,34 @@ class TestCreateJob:
             mock.assert_awaited_once()
             assert mock.call_args[0][1] == "POST"
             assert mock.call_args[0][2] == "/jobs"
+            assert mock.call_args[1]["json_data"]["auto_start"] is True
 
     @pytest.mark.asyncio
     async def test_missing_template(self, ctx):
         result = await _handle_create_job(ctx, {"prompt": "hello"})
         assert result["error"] == "missing_argument"
+
+    @pytest.mark.asyncio
+    async def test_resolves_template_name_to_id(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from uuid import uuid4
+
+        template_id = uuid4()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = template_id
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
+        ctx_with_db = ToolContext(user_id="test-user-id", db=db)
+
+        with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
+            mock.return_value = {"job_id": "abc", "status": "pending"}
+            result = await _handle_create_job(
+                ctx_with_db,
+                {"template": "prompt to video", "prompt": "hello"},
+            )
+            assert result == {"job_id": "abc", "status": "pending"}
+            payload = mock.call_args[1]["json_data"]
+            assert payload["template_id"] == str(template_id)
 
 
 class TestGetJobStatus:

@@ -150,7 +150,7 @@ def _infer_generation_type(
     ai: bool,
     asi: bool,
     ami: bool,
-    av: bool,
+    _av: bool,
     oi: bool,
     ov: bool,
     ot: bool,
@@ -170,8 +170,6 @@ def _infer_generation_type(
             return GenerationType.IMAGE_TO_IMAGE
         if at:
             return GenerationType.TEXT_TO_IMAGE
-    if ot:
-        return GenerationType.UNKNOWN
     return GenerationType.UNKNOWN
 
 
@@ -323,6 +321,41 @@ def _build_model_section(config: dict, *, modality: str) -> list[str]:
     if scene_instruction:
         lines.append(f"  {scene_instruction}")
 
+    # Prompt length limits
+    if modality in ("image", "video"):
+        max_prompt_len = config.get("max_prompt_length") or constraints.get("max_prompt_length")
+        if max_prompt_len:
+            lines.append(f"  Max prompt length: {max_prompt_len} characters")
+
+    # Aspect ratios
+    aspect_ratios = config.get("supported_aspect_ratios") or constraints.get("supported_aspect_ratios")
+    if aspect_ratios:
+        lines.append(f"  Supported aspect ratios: {', '.join(str(a) for a in aspect_ratios)}")
+
+    # Cost guidance
+    cost_config: dict = config.get("cost_config") or {}
+    if modality == "image" and cost_config.get("cost_per_image") is not None:
+        currency = cost_config.get("currency", "")
+        cost_line = f"  Estimated cost per image: {cost_config['cost_per_image']}"
+        if currency:
+            cost_line += f" {currency}"
+        lines.append(cost_line)
+    if modality == "video" and cost_config.get("cost_per_second") is not None:
+        currency = cost_config.get("currency", "")
+        cost_line = f"  Estimated cost per video second: {cost_config['cost_per_second']}"
+        if currency:
+            cost_line += f" {currency}"
+        lines.append(cost_line)
+
+    # Chaining note for video models
+    if modality == "video":
+        max_dur = config.get("max_duration") or constraints.get("max_duration")
+        if max_dur:
+            lines.append(
+                f"  IMPORTANT: If a scene is longer than {max_dur}s it will be split into "
+                f"chained {max_dur}s sub-clips. Plan scene durations accordingly."
+            )
+
     return lines
 
 
@@ -408,11 +441,48 @@ def build_reference_capacity_context(
     )
 
 
+def build_scene_constraints_context(
+    video_model_config: dict | None,
+    image_model_config: dict | None,
+    text_model_config: dict | None,
+    target_duration: float,
+) -> str:
+    """Return a concise CONSTRAINTS block for planner prompts."""
+    # Imported locally to avoid a circular import at module load time.
+    from app.services.model_metadata import get_model_constraint
+
+    lines = ["PLANNING CONSTRAINTS:"]
+    lines.append(f"- Target total duration: {target_duration} seconds")
+
+    if video_model_config:
+        max_dur = get_model_constraint(video_model_config, "max_duration", 5)
+        lines.append(f"- Video model max clip duration: {max_dur}s. Keep each scene ≤ {max_dur}s when possible; longer scenes will be chained.")
+        ratios = get_model_constraint(video_model_config, "supported_aspect_ratios")
+        if ratios:
+            lines.append(f"- Video model supported aspect ratios: {', '.join(str(r) for r in ratios)}")
+
+    if image_model_config:
+        max_len = get_model_constraint(image_model_config, "max_prompt_length")
+        if max_len:
+            lines.append(f"- Image model max prompt length: {max_len} characters")
+        ratios = get_model_constraint(image_model_config, "supported_aspect_ratios")
+        if ratios:
+            lines.append(f"- Image model supported aspect ratios: {', '.join(str(r) for r in ratios)}")
+
+    if text_model_config:
+        max_len = get_model_constraint(text_model_config, "max_prompt_length")
+        if max_len:
+            lines.append(f"- Text model max prompt length: {max_len} characters")
+
+    return "\n".join(lines)
+
+
 __all__ = [
     "GenerationType",
     "ModelCapabilities",
     "ModelCapability",
     "build_model_capabilities_context",
     "build_reference_capacity_context",
+    "build_scene_constraints_context",
     "normalize_capabilities",
 ]

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.database import MediaEvent, User, get_db
 from app.models.media import MediaAsset, MediaAssetReference, MediaAssetTag, MediaFolder, MediaTag
 from app.schemas.media import (

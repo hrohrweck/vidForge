@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.config import get_settings
 from app.database import User
 from app.services.audio_generation import MusicGenService

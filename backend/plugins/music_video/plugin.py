@@ -103,15 +103,50 @@ class MusicVideoPlugin(PluginBase):
         duration = context.get("audio_duration") or lyrics.get("duration", 30)
         style = input_data.get("style", "realistic")
         text_model = input_data.get("text_model")
+        video_model = input_data.get("video_model")
+        image_model = input_data.get("image_model")
 
+        from app.api.models import get_model
         from app.services.llm_service import resolve_llm
+        from app.services.model_capabilities import (
+            build_model_capabilities_context,
+            build_scene_constraints_context,
+        )
+        from app.services.model_metadata import get_model_constraint
 
         provider = None
         if text_model:
             provider = await resolve_llm(text_model, db)
 
+        video_config = await get_model(db, video_model) if video_model else None
+        image_config = await get_model(db, image_model) if image_model else None
+        text_config = await get_model(db, text_model) if text_model else None
+
+        model_capabilities_context = build_model_capabilities_context(
+            video_model_config=video_config,
+            image_model_config=image_config,
+        )
+        constraints_context = build_scene_constraints_context(
+            video_model_config=video_config,
+            image_model_config=image_config,
+            text_model_config=text_config,
+            target_duration=duration,
+        )
+        max_clip_duration = get_model_constraint(video_config, "max_duration", 5)
+        image_max_prompt_length = get_model_constraint(image_config, "max_prompt_length")
+
         from .planner import plan_music_video
-        plan = await plan_music_video(lyrics=lyrics, duration=duration, style=style, provider=provider, model=text_model)
+        plan = await plan_music_video(
+            lyrics=lyrics,
+            duration=duration,
+            style=style,
+            provider=provider,
+            model=text_model,
+            model_capabilities_context=model_capabilities_context,
+            constraints_context=constraints_context,
+            max_clip_duration=max_clip_duration,
+            image_max_prompt_length=image_max_prompt_length,
+        )
 
         # Create VideoScene rows
         from sqlalchemy import delete as sa_delete

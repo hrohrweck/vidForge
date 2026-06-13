@@ -323,7 +323,7 @@ class EnrichmentMixin:
                     f"Portrait of {name}, {gender}, {bio}. "
                     "Clean background, well-lit, photorealistic portrait, looking at camera."
                 )
-                relative_path, _model_id, _pid = await generate_image(
+                relative_path, _model_id, _pid, _cost = await generate_image(
                     db=db,
                     job=job,
                     prompt=img_prompt,
@@ -500,7 +500,7 @@ class EnrichmentMixin:
                 continue
 
             try:
-                image_path, _media_id, _provider_id = await cast(Any, self)._retry(
+                image_path, _media_id, _provider_id, _cost = await cast(Any, self)._retry(
                     generate_image,
                     db=db,
                     job=job,
@@ -559,7 +559,7 @@ class EnrichmentMixin:
         if not prompt:
             return None
         input_data = job.input_data or {}
-        image_path, _mid, _pid = await cast(Any, self)._retry(
+        image_path, _mid, _pid, _cost = await cast(Any, self)._retry(
             generate_image,
             db=db, job=job, prompt=prompt,
             scene_number=scene.scene_number,
@@ -597,7 +597,7 @@ class EnrichmentMixin:
             duration = max(2, int(scene_duration))
             prompt = scene.visual_description or scene.lyrics_segment or ""
             input_data = job.input_data or {}
-            video_path, _mid, _pid, actual_duration, warning = await cast(Any, self)._retry(
+            video_path, _mid, _pid, actual_duration, warning, _cost = await cast(Any, self)._retry(
                 generate_video,
                 db=db, job=job, prompt=prompt,
                 scene_number=scene.scene_number,

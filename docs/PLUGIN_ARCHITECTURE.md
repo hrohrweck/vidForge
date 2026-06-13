@@ -242,6 +242,24 @@ This context is generated once during `enrich_inputs()` and appended to the
 planner prompt. It enables the LLM to produce scene descriptions that match
 the actual capabilities of the configured models.
 
+### Planning Constraints Context
+
+In addition to model capabilities, every scene planner should also receive a
+`PLANNING CONSTRAINTS` block built by
+`build_scene_constraints_context()` from
+`app/services/model_capabilities.py`. This block includes:
+
+- Target total duration for the video
+- The selected video model's max clip duration
+- Supported aspect ratios for image/video models
+- Max prompt length for image and text models
+
+The planner must respect these limits: scene durations should not exceed the
+video model's max clip duration (the pipeline will chain longer scenes into
+sub-clips, but planning within the limit is more efficient), and image
+prompts must be kept within the image model's `max_prompt_length`. Prompts
+that exceed the limit are automatically truncated after planning.
+
 ## Creating a New Plugin
 
 See [docs/WRITING_PLUGINS.md](WRITING_PLUGINS.md) for a step-by-step guide.

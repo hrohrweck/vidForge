@@ -7,15 +7,13 @@ Tests cover:
 - Avatar context included in sub-scene prompt generation
 """
 
-import asyncio
-import os
 import tempfile
+from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, VideoScene
 from app.plugins.base import PluginBase
@@ -86,7 +84,7 @@ def _make_video_mock(tmp_dir):
         fpath.write_bytes(b"fake-mp4-data")
 
         rel_path = str(fpath.relative_to(tmp_dir))
-        return (rel_path, "test-video-model", uuid4(), float(duration), None)
+        return (rel_path, "test-video-model", uuid4(), float(duration), None, Decimal("0"))
 
     return AsyncMock(side_effect=_gen_video)
 
@@ -104,7 +102,7 @@ def _make_video_mock_safe():
                          duration=5, aspect_ratio="16:9", title=None,
                          **kwargs):
         return ("output/test/scene_video.mp4", "test-model",
-                uuid4(), float(duration), None)
+                uuid4(), float(duration), None, Decimal("0"))
 
     return AsyncMock(side_effect=_gen_video)
 
@@ -176,7 +174,7 @@ class TestVideoChainingAvatarShortScene:
             fpath = out_dir / "scene_video.mp4"
             fpath.write_bytes(b"fake-mp4-data")
             return (str(fpath.relative_to(temp_storage)),
-                    "test-model", uuid4(), 5.0, None)
+                    "test-model", uuid4(), 5.0, None, Decimal("0"))
 
         gen_video_mock = AsyncMock(side_effect=_capture_video)
 
@@ -222,7 +220,7 @@ class TestVideoChainingAvatarShortScene:
             fpath = out_dir / "scene_video.mp4"
             fpath.write_bytes(b"fake-mp4-data")
             return (str(fpath.relative_to(temp_storage)),
-                    "test-model", uuid4(), 5.0, None)
+                    "test-model", uuid4(), 5.0, None, Decimal("0"))
 
         gen_video_mock = AsyncMock(side_effect=_capture_video)
 
@@ -250,7 +248,7 @@ class TestVideoChainingAvatarLongScene:
         async def _capture(**kwargs):
             call_log.append(kwargs)
             return ("output/test/scene_video.mp4", "test-model",
-                    uuid4(), float(kwargs.get("duration", 5)), None)
+                    uuid4(), float(kwargs.get("duration", 5)), None, Decimal("0"))
 
         return AsyncMock(side_effect=_capture)
 
@@ -589,8 +587,6 @@ class TestVideoChainingAvatarCharacterContext:
         ]
 
         gen_video_mock = _make_video_mock(temp_storage)
-
-        captured_llm_calls = []
 
         async def _fake_extract_frame(video_path, image_path, ratio=0.8):
             Path(image_path).write_bytes(b"fake-seed-frame")

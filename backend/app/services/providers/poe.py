@@ -885,6 +885,30 @@ class PoeProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvider):
             "supports_web_search": "web_search" in features,
         }
 
+        constraints: dict[str, Any] = {}
+        if ctx and ctx.get("context_length"):
+            constraints["max_prompt_length"] = ctx["context_length"]
+        if ctx and ctx.get("max_output_tokens"):
+            constraints["max_output_tokens"] = ctx["max_output_tokens"]
+
+        cost: dict[str, Any] = {"currency": pricing.get("currency", "compute_points")}
+        compute_points = pricing.get("compute_points")
+        if compute_points is not None:
+            if modality == "image":
+                cost["cost_per_image"] = compute_points
+            elif modality == "video":
+                # Poe reports a single compute-point price per video call;
+                # normalize to a per-second rate using the default 5s clip.
+                cost["cost_per_second"] = compute_points / 5.0
+            else:
+                # Preserve the provider-specific per-call price for text models.
+                cost["compute_points"] = compute_points
+        # Only set token costs if Poe exposes per-token pricing.
+        if pricing.get("prompt_tokens") is not None:
+            cost["cost_per_1k_prompt_tokens"] = pricing["prompt_tokens"] * 1000
+        if pricing.get("completion_tokens") is not None:
+            cost["cost_per_1k_completion_tokens"] = pricing["completion_tokens"] * 1000
+
         result: dict[str, Any] = {
             "model_id": m["id"],
             "provider_model_id": m.get("root") or m["id"],
@@ -892,20 +916,9 @@ class PoeProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvider):
             "modality": modality,
             "endpoint_type": endpoint,
             "capabilities": caps,
+            "constraints": constraints or None,
+            "cost_config": cost,
         }
-
-        if ctx and (ctx.get("context_length") or ctx.get("max_output_tokens")):
-            result["constraints"] = {
-                "context_length": ctx.get("context_length"),
-                "max_output_tokens": ctx.get("max_output_tokens"),
-            }
-
-        if pricing:
-            cost: dict[str, Any] = {"currency": pricing.get("currency", "compute_points")}
-            compute_points = pricing.get("compute_points")
-            if compute_points is not None:
-                cost["compute_points"] = compute_points
-            result["cost_config"] = cost
 
         return result
 

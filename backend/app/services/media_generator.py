@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -18,6 +18,7 @@ from app.services.comfyui_workflows import (
     get_comfyui_workflow_path,
     load_comfyui_workflow,
 )
+from app.services.cost_estimator import estimate_media_call
 from app.services.error_capture import log_user_error
 from app.services.error_mapping import classify_provider_error
 from app.services.model_config_service import ModelConfigService
@@ -323,7 +324,7 @@ async def generate_image(
     lora_path: str | None = None,
     lora_strength: float = 0.8,
     title: str | None = None,
-) -> tuple[str, str, UUID | None]:
+) -> tuple[str, str, UUID | None, Decimal]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename_base = (
@@ -338,6 +339,9 @@ async def generate_image(
         model_preference,
         has_reference_image=bool(reference_image_path),
     )
+
+    model_config = await ModelConfigService.resolve_model_config(db, selected_model, resolved_pid)
+    call_cost = Decimal("0")
 
     if not isinstance(instance, ImageProvider):
         raise ValueError(
@@ -385,8 +389,11 @@ async def generate_image(
         raise ValueError(f"Image generation returned no data (model={selected_model})")
 
     image_path.write_bytes(image_data)
+    if model_config:
+        call_cost = estimate_media_call(model_config, "image").estimated_cost
+
     relative_path = str(image_path.relative_to(settings.storage_path))
-    return relative_path, f"generated_with_{selected_model}", resolved_pid
+    return relative_path, f"generated_with_{selected_model}", resolved_pid, call_cost
 
 
 async def generate_video(
@@ -400,7 +407,7 @@ async def generate_video(
     duration: int = 5,
     aspect_ratio: str = "16:9",
     title: str | None = None,
-) -> tuple[str, str, UUID | None, float, str | None]:
+) -> tuple[str, str, UUID | None, float, str | None, Decimal]:
     output_dir = get_scene_output_dir(str(job.id), scene_number)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename_base = (
@@ -416,6 +423,9 @@ async def generate_video(
         has_seed_image=bool(reference_image_path),
     )
 
+    model_config = await ModelConfigService.resolve_model_config(db, selected_model, resolved_pid)
+    call_cost = Decimal("0")
+
     if not isinstance(instance, VideoProvider):
         raise ValueError(
             f"Provider {getattr(instance, 'provider_id', 'unknown')} "
@@ -424,15 +434,8 @@ async def generate_video(
 
     # Check aspect ratio support
     ar_warning: str | None = None
-    result = await db.execute(
-        select(ModelConfig).where(
-            ModelConfig.model_id == selected_model,
-            ModelConfig.is_active == True,  # noqa: E712
-        )
-    )
-    model_info = result.scalars().first()
-    if model_info:
-        _supported, ar_warning = await check_aspect_ratio_support(model_info, aspect_ratio)
+    if model_config:
+        _supported, ar_warning = await check_aspect_ratio_support(model_config, aspect_ratio)
         if ar_warning:
             await log_user_error(
                 db,
@@ -486,10 +489,16 @@ async def generate_video(
         Path(tmp_path).unlink(missing_ok=True)
 
     video_path.write_bytes(output_data)
+    if model_config:
+        call_cost = estimate_media_call(
+            model_config, "video", duration=float(duration)
+        ).estimated_cost
+
     return (
         str(video_path.relative_to(settings.storage_path)),
         f"generated_with_{selected_model}",
         resolved_pid,
         float(duration),
         ar_warning,
+        call_cost,
     )

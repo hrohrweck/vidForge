@@ -658,6 +658,8 @@ export default function ModelManagement() {
               <TableHead>Modality</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Chat</TableHead>
+              <TableHead>Cost</TableHead>
+              <TableHead>Max Prompt</TableHead>
               <TableHead>Last Synced</TableHead>
               <TableHead className="w-[140px]">Actions</TableHead>
             </TableRow>
@@ -733,6 +735,17 @@ export default function ModelManagement() {
                           : 'Enable chat for model'
                       }
                     />
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {(() => {
+                      const cc = config.costConfig as Record<string, string | number> | undefined
+                      const amount = cc?.cost_per_image ?? cc?.cost_per_second
+                      if (amount == null) return '-'
+                      return `${amount} ${cc?.currency ?? ''}`.trim()
+                    })()}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {(config.constraints as { max_prompt_length?: number } | undefined)?.max_prompt_length ?? '-'}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {config.lastSyncedAt

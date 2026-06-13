@@ -1,6 +1,7 @@
 """Unit tests for deferred object reference image generation."""
 
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -114,7 +115,7 @@ class TestDeferredObject:
             call_count += 1
             fpath = Path(temp_storage) / "obj_ref_notebook.png"
             fpath.write_bytes(b"fake-object-ref-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()
@@ -156,7 +157,7 @@ class TestDeferredObject:
         async def _gen_image(**kwargs):
             nonlocal call_count
             call_count += 1
-            return ("/fake/path", "test-model", uuid4())
+            return ("/fake/path", "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()
@@ -207,7 +208,7 @@ class TestDeferredObject:
                 raise ValueError("Invalid prompt — non-recoverable")
             fpath = Path(temp_storage) / "obj_ref_magnifier.png"
             fpath.write_bytes(b"fake-magnifier-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()
@@ -249,7 +250,7 @@ class TestDeferredObject:
         async def _gen_image(**kwargs):
             fpath = Path(temp_storage) / "obj_ref_notebook.png"
             fpath.write_bytes(b"fake-notebook-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()
@@ -290,7 +291,7 @@ class TestDeferredObject:
         async def _gen_image(**kwargs):
             fpath = Path(temp_storage) / "obj_ref_notebook.png"
             fpath.write_bytes(b"fake-notebook-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()
@@ -364,7 +365,7 @@ class TestDeferredObject:
             call_prompts.append(prompt)
             fpath = Path(temp_storage) / "obj_ref_test.png"
             fpath.write_bytes(b"fake-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
         plugin = _TestPlugin()

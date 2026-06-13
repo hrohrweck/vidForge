@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie
+from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.database import ModelConfig, Provider, User, UserSettings, get_db
 from app.services.model_config_service import ModelConfigService
 from app.services.model_resolver import get_family_variants, is_family_id
@@ -38,7 +38,7 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
 
     if not has_keys:
         modality = m.modality
-        inferred: dict[str, bool] = {}
+        inferred: dict[str, Any] = {}
         if modality == "image":
             inferred = {"accepts_text": True, "outputs_image": True}
         elif modality == "video":
@@ -65,6 +65,8 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
         "max_resolution": constraints.get("max_resolution"),
         "default_steps": constraints.get("default_steps"),
         "distilled": constraints.get("distilled", False),
+        "cost_config": cost_config,
+        "max_prompt_length": constraints.get("max_prompt_length"),
         "resolutions": constraints.get("resolutions"),
         "size_param_family": constraints.get("size_param_family"),
         "constraints": {
@@ -78,7 +80,6 @@ def _model_config_to_dict(m: ModelConfig) -> dict[str, Any]:
             "distilled": constraints.get("distilled", False),
         },
         "description": (m.extra_params or {}).get("description"),
-        "cost_config": cost_config,
         "is_family": is_family_id(m.model_id),
         "variants": get_family_variants(m.model_id) if is_family_id(m.model_id) else {},
     }

@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import api from '../api/client'
-import { refreshAccessToken } from '../lib/websocket'
+import { PersistentWebSocket } from '../lib/websocket'
 import type { ErrorEvent, ErrorEventListResponse } from '../api/types/notifications'
 
 // ---------------------------------------------------------------------------
@@ -49,13 +49,7 @@ let state: NotificationState = {
   connected: false,
 }
 
-let ws: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let reconnectAttempt = 0
-let intentionalClose = false
-
-const RECONNECT_BASE_MS = 1000
-const RECONNECT_MAX_MS = 30000
+let ws: PersistentWebSocket | null = null
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -92,82 +86,39 @@ function getWsBaseUrl(): string {
   return `${protocol}//${window.location.host}`
 }
 
-function scheduleReconnect(): void {
-  if (intentionalClose) return
-
-  const delay = Math.min(
-    RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt),
-    RECONNECT_MAX_MS,
-  )
-  reconnectAttempt++
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    openWebSocket()
-  }, delay)
-}
-
 function openWebSocket(): void {
   if (ws) {
-    ws.onopen = null
-    ws.onmessage = null
-    ws.onclose = null
-    ws.onerror = null
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close()
-    }
+    ws.disconnect()
     ws = null
   }
 
   const baseUrl = getWsBaseUrl()
-  ws = new WebSocket(`${baseUrl}/ws/notifications`)
-
-  ws.onopen = () => {
-    reconnectAttempt = 0
-    setState({ connected: true })
-    // Fetch current unread count on connect
-    fetchUnreadCount()
-  }
-
-  ws.onmessage = (event: MessageEvent) => {
-    try {
-      const payload = JSON.parse(event.data as string) as WsPayload
-      if (payload.type === 'error_event') {
-        const errorEvent = wsPayloadToErrorEvent(payload)
-        setState({
-          events: [errorEvent, ...state.events],
-          unreadCount: state.unreadCount + 1,
-        })
-      }
-    } catch {
-      // Ignore malformed messages
-    }
-  }
-
-  ws.onclose = (event: CloseEvent) => {
-    ws = null
-    setState({ connected: false })
-
-    // 1008 = policy violation, which the backend uses for an expired/missing
-    // access-token cookie. Refresh the cookie once and reconnect immediately.
-    if (event.code === 1008) {
-      refreshAccessToken().then((ok) => {
-        if (ok) {
-          reconnectAttempt = 0
-          openWebSocket()
-        } else {
-          scheduleReconnect()
+  ws = new PersistentWebSocket({
+    url: `${baseUrl}/ws/notifications`,
+    authRetry: true,
+    onOpen: () => {
+      setState({ connected: true })
+      fetchUnreadCount()
+    },
+    onMessage: (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data as string) as WsPayload
+        if (payload.type === 'error_event') {
+          const errorEvent = wsPayloadToErrorEvent(payload)
+          setState({
+            events: [errorEvent, ...state.events],
+            unreadCount: state.unreadCount + 1,
+          })
         }
-      })
-      return
-    }
-
-    scheduleReconnect()
-  }
-
-  ws.onerror = () => {
-    // onclose will fire after onerror, so reconnect is handled there
-  }
+      } catch {
+        // Ignore malformed messages
+      }
+    },
+    onClose: () => {
+      setState({ connected: false })
+    },
+  })
+  ws.connect()
 }
 
 async function fetchUnreadCount(): Promise<void> {
@@ -185,37 +136,16 @@ async function fetchUnreadCount(): Promise<void> {
 
 /** Open a WebSocket connection for real-time notifications. */
 export function connect(): void {
-  intentionalClose = false
-  reconnectAttempt = 0
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-
+  if (ws?.connected) return
   openWebSocket()
 }
 
 /** Close the WebSocket connection and stop reconnection attempts. */
 export function disconnect(): void {
-  intentionalClose = true
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-
   if (ws) {
-    ws.onopen = null
-    ws.onmessage = null
-    ws.onclose = null
-    ws.onerror = null
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close()
-    }
+    ws.disconnect()
     ws = null
   }
-
   setState({ connected: false })
 }
 

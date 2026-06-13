@@ -328,8 +328,28 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
         except (ValueError, ZeroDivisionError):
             return ratio  # fallback: return as-is
 
-    @staticmethod
-    def _normalize_model(model_data: dict[str, Any]) -> dict[str, Any]:
+    ATLAS_KNOWN_LIMITS: dict[str, dict[str, Any]] = {
+        "wan-2.1-t2v-480p": {
+            "max_duration": 5,
+            "supported_aspect_ratios": ["16:9"],
+            "resolutions": ["848x480"],
+        },
+        "wan-2.1-i2v-480p": {
+            "max_duration": 5,
+            "supported_aspect_ratios": ["16:9"],
+            "resolutions": ["848x480"],
+        },
+        "flux-1.1-pro": {"supported_aspect_ratios": ["1:1", "16:9", "3:2"]},
+    }
+
+    ATLAS_KNOWN_COST: dict[str, dict[str, Any]] = {
+        "wan-2.1-t2v-480p": {"cost_per_second": 0.05, "currency": "credits"},
+        "wan-2.1-i2v-480p": {"cost_per_second": 0.05, "currency": "credits"},
+        "flux-1.1-pro": {"cost_per_image": 0.02, "currency": "credits"},
+    }
+
+    @classmethod
+    def _normalize_model(cls, model_data: dict[str, Any]) -> dict[str, Any]:
         atype = model_data.get("type", "Text").lower()
         model_id = model_data.get("model", "").lower()
         caps: dict[str, Any] = {"supports_chat": atype == "text"}
@@ -354,6 +374,12 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
             caps.update({"accepts_text": True, "outputs_text": True})
 
         provider_model_id = model_data.get("model", "")
+        constraints = dict(cls.ATLAS_KNOWN_LIMITS.get(model_id, {}))
+        if atype == "text":
+            constraints.setdefault("max_prompt_length", 8192)
+
+        cost = dict(cls.ATLAS_KNOWN_COST.get(model_id, {"currency": "credits"}))
+
         return {
             "model_id": provider_model_id,
             "provider_model_id": provider_model_id,
@@ -367,7 +393,8 @@ class AtlasCloudProvider(ComfyUIProvider, ImageProvider, VideoProvider, LLMProvi
                 else "chat_completions"
             ),
             "capabilities": caps,
-            "cost_config": {"currency": "credits"},
+            "constraints": constraints or None,
+            "cost_config": cost,
         }
 
     # ── Model Config helper ───────────────────────────────────────

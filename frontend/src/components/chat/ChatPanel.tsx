@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Paperclip, X, FileText, Image, Music } from 'lucide-react'
 import { useChatStore } from '../../stores/chat'
 import { generateId } from '../../lib/utils'
 import type { Message, Attachment } from '../../stores/chat'
 import { chatApi } from '../../api/client'
+import { usePersistentWebSocket } from '../../lib/websocket'
 import { MessageBubble } from './MessageBubble'
 import { ModelPicker } from './ModelPicker'
 
@@ -72,47 +73,82 @@ export function ChatPanel() {
     })
   }, [selectedConversationId, setMessages])
 
-  useEffect(() => {
-    if (!selectedConversationId) return
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = selectedConversationId
+    ? `${wsProtocol}//${window.location.host}/ws/chat/${selectedConversationId}`
+    : ''
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat/${selectedConversationId}`
-    const ws = new WebSocket(wsUrl)
+  const handleChatMessage = useCallback(
+    async (messageId: string) => {
+      if (!selectedConversationId) return
 
-    ws.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type !== 'chat_message_appended') return
-        const messageId: string | undefined = data.message_id
-        if (!messageId) return
+      const state = useChatStore.getState()
+      const existing = state.messages[selectedConversationId] ?? []
+      if (existing.some((m) => m.id === messageId)) return
 
-        const state = useChatStore.getState()
-        const existing = state.messages[selectedConversationId] ?? []
-        if (existing.some((m) => m.id === messageId)) return
+      const fetched = await chatApi.listMessages(selectedConversationId)
+      const newMsg = fetched.find((m) => m.id === messageId)
+      if (!newMsg) return
 
-        const fetched = await chatApi.listMessages(selectedConversationId)
-        const newMsg = fetched.find((m) => m.id === messageId)
-        if (!newMsg) return
+      const freshExisting = useChatStore.getState().messages[selectedConversationId] ?? []
+      if (freshExisting.some((m) => m.id === newMsg.id)) return
 
-        const freshExisting = useChatStore.getState().messages[selectedConversationId] ?? []
-        if (freshExisting.some((m) => m.id === newMsg.id)) return
+      appendMessage(selectedConversationId, {
+        id: newMsg.id,
+        role: newMsg.role,
+        content: newMsg.content,
+        createdAt: newMsg.created_at,
+        attachments: newMsg.attachments,
+        jobId: newMsg.job_id ?? undefined,
+        toolCallId: newMsg.tool_call_id ?? undefined,
+      })
+    },
+    [selectedConversationId, appendMessage],
+  )
 
-        appendMessage(selectedConversationId, {
-          id: newMsg.id,
-          role: newMsg.role,
-          content: newMsg.content,
-          createdAt: newMsg.created_at,
-          attachments: newMsg.attachments,
-          jobId: newMsg.job_id ?? undefined,
-          toolCallId: newMsg.tool_call_id ?? undefined,
+  const chatWsOptions = useMemo(
+    () => ({
+      url: wsUrl,
+      connect: !!selectedConversationId,
+      authRetry: true,
+      onOpen: () => {
+        if (!selectedConversationId) return
+        // Replay any messages that arrived while the socket was disconnected.
+        chatApi.listMessages(selectedConversationId).then((msgs) => {
+          const current = useChatStore.getState().messages[selectedConversationId] ?? []
+          const currentIds = new Set(current.map((m) => m.id))
+          const missing = msgs.filter((m) => !currentIds.has(m.id))
+          for (const newMsg of missing) {
+            appendMessage(selectedConversationId, {
+              id: newMsg.id,
+              role: newMsg.role,
+              content: newMsg.content,
+              createdAt: newMsg.created_at,
+              attachments: newMsg.attachments,
+              jobId: newMsg.job_id ?? undefined,
+              toolCallId: newMsg.tool_call_id ?? undefined,
+            })
+          }
+        }).catch(() => {
+          // Ignore replay failures; live messages will still arrive.
         })
-      } catch (e) {
-        console.error('chat ws parse', e)
-      }
-    }
+      },
+      onMessage: (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type !== 'chat_message_appended') return
+          const messageId: string | undefined = data.message_id
+          if (!messageId) return
+          void handleChatMessage(messageId)
+        } catch (e) {
+          console.error('chat ws parse', e)
+        }
+      },
+    }),
+    [wsUrl, selectedConversationId, handleChatMessage, appendMessage],
+  )
 
-    return () => ws.close()
-  }, [selectedConversationId, appendMessage])
+  usePersistentWebSocket(chatWsOptions)
 
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return

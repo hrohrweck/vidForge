@@ -30,14 +30,15 @@ RUN pip install --no-cache-dir --no-deps audiocraft && \
     protobuf sympy
 
 COPY server.py .
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 ENV HF_HOME=/app/hf_cache
-RUN mkdir -p /app/output /app/hf_cache && \
+ENV NUMBA_CACHE_DIR=/app/hf_cache/numba
+RUN mkdir -p /app/output /app/hf_cache /app/hf_cache/numba && \
     groupadd -r vidforge -g 1001 && \
     useradd -r -u 1001 -g vidforge vidforge && \
     chown -R vidforge:vidforge /app
-
-USER vidforge
 
 VOLUME /app/output
 VOLUME /app/hf_cache
@@ -47,4 +48,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-CMD ["python", "server.py"]
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -2,13 +2,13 @@
 
 import os
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Avatar, AvatarImage, Job, JobObjectRef, ObjectRef, VideoScene
 from app.plugins.base import PluginBase
@@ -150,7 +150,7 @@ def _make_gen_image_mock(tmp_dir):
         fname = f"{title or 'avatar'}.png"
         fpath = os.path.join(tmp_dir, fname)
         Path(fpath).write_bytes(b"fake-png-data")
-        return (fname, "test-model", uuid4())
+        return (fname, "test-model", uuid4(), Decimal("0"))
 
     return AsyncMock(side_effect=_gen_image)
 
@@ -430,7 +430,7 @@ class TestCreateAutoAvatarsImageGen:
 
         llm_mock = AsyncMock(return_value=SINGLE_CHAR_RESPONSE_2)
         gen_image_mock = AsyncMock(
-            return_value=("nonexistent/eve.png", "test-model", uuid4())
+            return_value=("nonexistent/eve.png", "test-model", uuid4(), Decimal("0"))
         )
         prefs_mock = AsyncMock(return_value={"text_to_image_model": "flux1-schnell"})
 
@@ -562,7 +562,7 @@ class TestGenerateImagesAvatar:
             captured_kwargs["reference_image_strength"] = reference_image_strength
             fpath = Path(temp_storage) / "scene1.png"
             fpath.write_bytes(b"fake-scene-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
 
@@ -594,7 +594,7 @@ class TestGenerateImagesAvatar:
             captured_kwargs["reference_image_strength"] = reference_image_strength
             fpath = Path(temp_storage) / "scene1.png"
             fpath.write_bytes(b"fake-scene-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
 
@@ -633,7 +633,7 @@ class TestGenerateImagesAvatar:
             captured_kwargs["reference_image_path"] = reference_image_path
             fpath = Path(temp_storage) / "scene1.png"
             fpath.write_bytes(b"fake-scene-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
 
@@ -678,7 +678,7 @@ class TestGenerateImagesAvatar:
             captured_kwargs["reference_image_path"] = reference_image_path
             fpath = Path(temp_storage) / "scene1.png"
             fpath.write_bytes(b"fake-scene-image")
-            return (str(fpath), "test-model", uuid4())
+            return (str(fpath), "test-model", uuid4(), Decimal("0"))
 
         gen_image_mock = AsyncMock(side_effect=_gen_image)
 
@@ -737,9 +737,9 @@ class TestCreateAutoObjects:
         )
         links = result.scalars().all()
         assert len(links) == 2
-        link_roles = {l.role for l in links}
+        link_roles = {link.role for link in links}
         assert link_roles == {"Alice's evidence log", "Investigation tool"}
-        assert all(l.importance_score is None for l in links)
+        assert all(link.importance_score is None for link in links)
 
     @pytest.mark.asyncio
     async def test_characters_only_no_objects(

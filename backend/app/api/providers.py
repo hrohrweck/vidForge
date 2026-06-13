@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie, require_admin
+from app.api.auth import get_current_user_from_bearer_or_cookie, require_admin
 from app.database import ModelConfig, Provider, User, get_db
 from app.services.budget_tracker import BudgetTracker
 from app.services.job_router import JobRouter
@@ -108,11 +108,11 @@ class ModelConfigCreate(BaseModel):
     modality: str = Field(..., pattern=r"^(video|image|text)$")
     endpoint_type: str = Field(default="comfyui")
     prompt_format: str = Field(default="string")
-    parameter_map: dict | None = None
-    extra_params: dict | None = None
-    capabilities: dict | None = None
-    constraints: dict | None = None
-    cost_config: dict | None = None
+    parameter_map: dict[str, Any] | None = None
+    extra_params: dict[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
+    constraints: dict[str, Any] | None = None
+    cost_config: dict[str, Any] | None = None
     comfyui_workflow: str | None = None
     is_active: bool = True
 
@@ -125,11 +125,11 @@ class ModelConfigUpdate(BaseModel):
     modality: str | None = Field(None, pattern=r"^(video|image|text)$")
     endpoint_type: str | None = None
     prompt_format: str | None = None
-    parameter_map: dict | None = None
-    extra_params: dict | None = None
-    capabilities: dict | None = None
-    constraints: dict | None = None
-    cost_config: dict | None = None
+    parameter_map: dict[str, Any] | None = None
+    extra_params: dict[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
+    constraints: dict[str, Any] | None = None
+    cost_config: dict[str, Any] | None = None
     comfyui_workflow: str | None = None
     is_active: bool | None = None
 
@@ -147,6 +147,9 @@ class ModelConfigResponse(BaseModel):
     is_deprecated: bool
     last_synced_at: datetime | None
     created_at: datetime
+    cost_config: dict[str, Any] | None = None
+    constraints: dict[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

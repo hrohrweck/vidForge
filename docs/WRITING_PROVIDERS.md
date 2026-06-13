@@ -253,6 +253,30 @@ is created with `is_active=False`. An admin must explicitly enable it on the
 Model Management page (`/admin/models`) before it can be used. This prevents
 unvetted models from appearing in user-facing model selectors.
 
+## Model Metadata Sync
+
+A provider that implements `sync_models()` should return a list of dicts with
+these canonical fields:
+
+- `model_id` (str, required) — Stable local identifier for the model.
+- `provider_model_id` (str) — Identifier used in provider API calls.
+- `display_name` (str) — Human-readable name shown in the UI.
+- `modality`: `"image"`, `"video"`, or `"text"` — Primary output modality.
+- `endpoint_type`: e.g. `"generateImage"`, `"generateVideo"`,
+  `"chat_completions"`, `"comfyui"` — Provider-specific endpoint hint.
+- `capabilities`: dict of `accepts_*` / `outputs_*` booleans used for routing.
+- `constraints`: dict with optional values such as `max_duration`,
+  `max_prompt_length`, `max_resolution`, `resolutions`,
+  `supported_aspect_ratios`.
+- `cost_config`: dict with optional `cost_per_image`, `cost_per_second`,
+  `cost_per_1k_prompt_tokens`, `cost_per_1k_completion_tokens`, `currency`.
+
+Manually edited `cost_config` and `constraints` values are preserved across
+syncs unless the provider explicitly returns a replacement value. The
+`ModelConfigService.upsert()` helper merges discovered metadata with existing
+rows instead of overwriting the entire JSONB document, so admin changes to
+costs are not lost when a provider is re-synced.
+
 ## Error Classification
 
 Providers map external exceptions to a typed hierarchy via

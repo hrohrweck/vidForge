@@ -297,11 +297,35 @@ class ComfyUIDirectProvider(ImageProvider, VideoProvider, ComfyUIProvider):
             )
             for name in unet_values:
                 model_type = "video" if "wan" in name.lower() else "image"
+                constraints: dict[str, Any] | None = None
+                cost_config: dict[str, Any] | None = None
+                if "wan" in name.lower():
+                    constraints = {
+                        "max_duration": 5,
+                        "supported_aspect_ratios": ["16:9"],
+                        "resolutions": ["848x480"],
+                    }
+                    cost_config = {"currency": "local", "cost_per_second": 0}
+                elif "flux" in name.lower():
+                    constraints = {
+                        "supported_aspect_ratios": ["1:1", "16:9", "9:16", "3:2", "4:3"],
+                    }
+                    cost_config = {"currency": "local", "cost_per_image": 0}
                 models.append({
                     "model_id": f"comfyui_unet:{name}",
                     "name": name,
                     "type": model_type,
                     "category": "unet",
+                    "modality": model_type,
+                    "endpoint_type": "comfyui",
+                    "constraints": constraints,
+                    "cost_config": cost_config,
+                    "capabilities": {
+                        "accepts_text": True,
+                        "accepts_image": model_type == "video" or "flux" in name.lower(),
+                        "outputs_video": model_type == "video",
+                        "outputs_image": model_type == "image",
+                    },
                 })
         except Exception as e:
             logger.warning("Failed to sync UNET models from ComfyUI: %s", e)

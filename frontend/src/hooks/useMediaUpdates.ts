@@ -9,6 +9,7 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import api from '../api/client'
+import { PersistentWebSocket } from '../lib/websocket'
 import { useAuthStore } from '../stores/auth'
 import { mediaKeys } from './useMedia'
 
@@ -33,15 +34,9 @@ type MediaListener = (payload: MediaEventPayload) => void
 
 const listeners = new Set<MediaListener>()
 
-let ws: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-let reconnectAttempt = 0
-let intentionalClose = false
+let ws: PersistentWebSocket | null = null
 let lastSeq = 0
 let hasFetchedMissed = false
-
-const RECONNECT_BASE_MS = 1000
-const RECONNECT_MAX_MS = 30000
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -57,62 +52,31 @@ function getWsBaseUrl(): string {
   return `${protocol}//${window.location.host}`
 }
 
-function scheduleReconnect(): void {
-  if (intentionalClose) return
-
-  const delay = Math.min(
-    RECONNECT_BASE_MS * Math.pow(2, reconnectAttempt),
-    RECONNECT_MAX_MS,
-  )
-  reconnectAttempt++
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    openWebSocket()
-  }, delay)
-}
-
 function openWebSocket(): void {
   if (ws) {
-    ws.onopen = null
-    ws.onmessage = null
-    ws.onclose = null
-    ws.onerror = null
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close()
-    }
+    ws.disconnect()
     ws = null
   }
 
   const baseUrl = getWsBaseUrl()
-  ws = new WebSocket(`${baseUrl}/ws/media`)
-
-  ws.onopen = () => {
-    reconnectAttempt = 0
-  }
-
-  ws.onmessage = (event: MessageEvent) => {
-    try {
-      const payload = JSON.parse(event.data as string) as MediaEventPayload
-      if (payload.type === 'media_event' && typeof payload.seq === 'number') {
-        if (payload.seq > lastSeq) {
-          lastSeq = payload.seq
-          emit(payload)
+  ws = new PersistentWebSocket({
+    url: `${baseUrl}/ws/media`,
+    authRetry: true,
+    onMessage: (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data as string) as MediaEventPayload
+        if (payload.type === 'media_event' && typeof payload.seq === 'number') {
+          if (payload.seq > lastSeq) {
+            lastSeq = payload.seq
+            emit(payload)
+          }
         }
+      } catch {
+        // Ignore malformed messages
       }
-    } catch {
-      // Ignore malformed messages
-    }
-  }
-
-  ws.onclose = () => {
-    ws = null
-    scheduleReconnect()
-  }
-
-  ws.onerror = () => {
-    // onclose will fire after onerror, so reconnect is handled there
-  }
+    },
+  })
+  ws.connect()
 }
 
 // ---------------------------------------------------------------------------
@@ -121,34 +85,14 @@ function openWebSocket(): void {
 
 /** Open a WebSocket connection for real-time media updates. */
 export function connectMediaWS(): void {
-  intentionalClose = false
-  reconnectAttempt = 0
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-
+  if (ws?.connected) return
   openWebSocket()
 }
 
 /** Close the WebSocket connection and stop reconnection attempts. */
 export function disconnectMediaWS(): void {
-  intentionalClose = true
-
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-
   if (ws) {
-    ws.onopen = null
-    ws.onmessage = null
-    ws.onclose = null
-    ws.onerror = null
-    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-      ws.close()
-    }
+    ws.disconnect()
     ws = null
   }
 }
@@ -167,6 +111,11 @@ export async function fetchMissedEvents(): Promise<void> {
   } catch {
     // Silently fail — will rely on WebSocket for future updates
   }
+}
+
+/** Current sequence number (for tests and debugging). */
+export function getLastMediaSeq(): number {
+  return lastSeq
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +160,6 @@ export function useMediaUpdates() {
   }, [isAuthenticated, queryClient])
 
   return {
-    connected: ws !== null && ws.readyState === WebSocket.OPEN,
+    connected: ws !== null && ws.connected,
   }
 }

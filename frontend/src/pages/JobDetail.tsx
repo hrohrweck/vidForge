@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Trash2, Download, Play, RefreshCw } from 'lucide-react'
 import { jobsApi, type Job } from '../api/client'
+import { usePersistentWebSocket } from '../lib/websocket'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 import VideoPlayer from '../components/VideoPlayer'
@@ -44,48 +45,45 @@ export default function JobDetail() {
     },
   })
 
-  useEffect(() => {
-    if (!id || !job || job.status === 'completed' || job.status === 'failed') return
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = id ? `${wsProtocol}//${window.location.host}/ws/jobs/${id}` : ''
+  const shouldConnect = !!id && !!job && job.status !== 'completed' && job.status !== 'failed'
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/jobs/${id}`
+  const wsOptions = useMemo(
+    () => ({
+      url: wsUrl,
+      connect: shouldConnect,
+      authRetry: true,
+      onMessage: (event: MessageEvent) => {
+        try {
+          const message: WebSocketMessage = JSON.parse(event.data)
+          if (message.job_id === id) {
+            setLocalJob((prev) => {
+              if (!prev) return null
+              return {
+                ...prev,
+                status: message.status || prev.status,
+                progress: message.progress ?? prev.progress,
+                error_message: message.error || null,
+                output_path: message.output_path || prev.output_path,
+                preview_path: message.preview_path || prev.preview_path,
+              }
+            })
 
-    const ws = new WebSocket(wsUrl)
-
-    ws.onmessage = (event) => {
-      try {
-        const message: WebSocketMessage = JSON.parse(event.data)
-        if (message.job_id === id) {
-          setLocalJob((prev) => {
-            if (!prev) return null
-            return {
-              ...prev,
-              status: message.status || prev.status,
-              progress: message.progress ?? prev.progress,
-              error_message: message.error || null,
-              output_path: message.output_path || prev.output_path,
-              preview_path: message.preview_path || prev.preview_path,
+            if (message.type === 'completed' || message.type === 'failed') {
+              queryClient.invalidateQueries({ queryKey: ['job', id] })
+              queryClient.invalidateQueries({ queryKey: ['jobs'] })
             }
-          })
-
-          if (message.type === 'completed' || message.type === 'failed') {
-            queryClient.invalidateQueries({ queryKey: ['job', id] })
-            queryClient.invalidateQueries({ queryKey: ['jobs'] })
           }
+        } catch {
+          console.error('Failed to parse WebSocket message')
         }
-      } catch {
-        console.error('Failed to parse WebSocket message')
-      }
-    }
+      },
+    }),
+    [wsUrl, shouldConnect, id, queryClient],
+  )
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
-
-    return () => {
-      ws.close()
-    }
-  }, [id, job, queryClient])
+  usePersistentWebSocket(wsOptions)
 
   if (isLoading) {
     return (

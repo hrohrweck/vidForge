@@ -306,6 +306,10 @@ class OllamaProvider(LLMProvider):
         """Translate an Ollama ``/api/tags`` entry to a ModelConfig-shaped dict."""
         name = raw.get("name", "")
         display = name.split(":", 1)[0] if ":" in name else name
+        details = raw.get("details") or {}
+        parameter_size = details.get("parameter_size", "")
+        # rough context window heuristic; override in UI if known
+        max_prompt_length = 8192 if "7b" in parameter_size.lower() else 32768
         return {
             "model_id": name,
             "provider_model_id": name,
@@ -316,6 +320,7 @@ class OllamaProvider(LLMProvider):
                 "supports_chat": True,
                 "supports_tools": OllamaProvider._supports_model_name(name),
             },
+            "constraints": {"max_prompt_length": max_prompt_length},
             "cost_config": {"cost": 0, "currency": "USD"},
             "is_deprecated": False,
             "is_active": True,

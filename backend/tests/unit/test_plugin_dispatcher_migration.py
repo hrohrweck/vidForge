@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -9,16 +10,26 @@ from app.database import Job, Template
 
 
 class _Result:
-    def __init__(self, value=None) -> None:
+    def __init__(self, value=None, values=None) -> None:
         self._value = value
+        self._values = values or []
 
     def scalar_one_or_none(self):
         return self._value
 
+    def scalars(self):
+        class _Scalars:
+            def __init__(self, values):
+                self._values = values
+
+            def all(self):
+                return self._values
+
+        return _Scalars(self._values)
+
 
 class _Session:
     def __init__(self, job, template) -> None:
-        print(f"DEBUG: _SessionFactory init job={type(job)}")
         self.job = job
         self.template = template
 
@@ -47,7 +58,6 @@ class _Session:
 
 class _SessionFactory:
     def __init__(self, job, template) -> None:
-        print(f"DEBUG: _SessionFactory init job={type(job)}")
         self.job = job
         self.template = template
 
@@ -115,8 +125,21 @@ async def test_process_video_job_routes_every_provider_through_dispatcher(
         def __init__(self, db):
             self.db = db
 
-        async def record_spend(self, *args, **kwargs):
-            return None
+        async def check_budget(self, provider_id, amount):
+            return (True, "")
+
+    async def fake_estimate_job_cost(*args, **kwargs):
+        return SimpleNamespace(total=Decimal("0"))
+
+    async def fake_get_job_actual_cost(*args, **kwargs):
+        return Decimal("0")
+
+    monkeypatch.setattr(
+        "app.services.cost_estimator.estimate_job_cost", fake_estimate_job_cost
+    )
+    monkeypatch.setattr(
+        "app.services.cost_estimator.get_job_actual_cost", fake_get_job_actual_cost
+    )
 
     stages: list[str] = []
 
@@ -133,18 +156,7 @@ async def test_process_video_job_routes_every_provider_through_dispatcher(
     monkeypatch.setattr(tasks_module, "BudgetTracker", FakeBudgetTracker)
     monkeypatch.setattr(dispatcher_module, "dispatch_stage", fake_dispatch_stage)
 
-    try:
-        print(f"DEBUG: tasks_module.ctx={id(tasks_module.ctx)}, context.ctx={id(context.ctx)}")
-        try:
-            result = await tasks_module._process_video_job(str(job_id), "auto")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise
+    result = await tasks_module._process_video_job(str(job_id), "auto")
 
     assert result == {"status": "completed", "job_id": str(job_id)}
     assert stages == ["planning", "generating_images", "generating_videos", "rendering"]

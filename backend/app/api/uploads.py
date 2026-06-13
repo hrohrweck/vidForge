@@ -11,7 +11,6 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.api.auth import (
-    get_current_user,
     get_current_user_from_bearer_or_cookie,
 )
 from app.database import User

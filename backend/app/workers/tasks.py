@@ -311,7 +311,6 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
     async with ctx.session_factory() as db:
         result = await db.execute(select(Job).where(Job.id == job_uuid))
         job = result.scalar_one_or_none()
-        print(f"DEBUG: db={type(db)}, result={type(result)}, job={type(job)}")
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
@@ -346,16 +345,6 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
             if job.estimated_cost is None:
                 job.estimated_cost = estimated_cost
             await db.commit()
-
-            await update_job_status(
-                job_uuid,
-                "processing",
-                0,
-                provider_id=provider_record.id,
-                estimated_cost=estimated_cost,
-            )
-
-            started_at = datetime.utcnow()
 
             # Acquire capacity semaphore for providers that need it
             max_concurrent = provider_record.config.get("max_concurrent_jobs", 0)
@@ -404,23 +393,53 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                         "stage": stage,
                     }
 
+                if stage == "planning":
+                    # Estimate cost from the planned scenes and selected models
+                    from app.services.cost_estimator import estimate_job_cost
+
+                    scene_result = await db.execute(
+                        select(VideoScene).where(VideoScene.job_id == job_uuid)
+                    )
+                    scenes = list(scene_result.scalars().all())
+                    cost_estimate = await estimate_job_cost(db, job, scenes)
+                    estimated_cost = cost_estimate.total
+
+                    if job.estimated_cost is None:
+                        job.estimated_cost = estimated_cost
+                    await db.commit()
+
+                    # Budget check
+                    budget_tracker = BudgetTracker(db)
+                    within_budget, budget_message = await budget_tracker.check_budget(
+                        provider_record.id, estimated_cost
+                    )
+                    if not within_budget:
+                        await update_job_status(
+                            job_uuid,
+                            "failed",
+                            0,
+                            error_message=budget_message,
+                        )
+                        return {"status": "failed", "error": budget_message, "job_id": job_id}
+
+                    await update_job_status(
+                        job_uuid,
+                        "processing",
+                        0,
+                        provider_id=provider_record.id,
+                        estimated_cost=estimated_cost,
+                    )
+
             # Reload job to pick up output_path / preview_path set by
             # the rendering stage (which ran in a separate db session).
             await db.refresh(job)
             relative_video = job.output_path
             relative_preview = job.preview_path
 
-            # --- Record cost for all provider types -----------------------
-            actual_cost = _as_decimal(estimated_cost)
-            duration_seconds = max(1, int((datetime.utcnow() - started_at).total_seconds()))
-            budget_tracker = BudgetTracker(db)
-            await budget_tracker.record_spend(
-                provider_record.id,
-                job_uuid,
-                actual_cost,
-                duration_seconds=duration_seconds,
-                gpu_type=provider_record.config.get("gpu_type"),
-            )
+            # --- Record actual cost from per-generation CostLog rows ---
+            from app.services.cost_estimator import get_job_actual_cost
+
+            actual_cost = await get_job_actual_cost(db, job_uuid)
 
             await update_job_status(
                 job_uuid,
@@ -682,8 +701,6 @@ def train_avatar_lora(self, avatar_id: str) -> dict:
 
 
 async def _train_avatar_lora(avatar_id: str) -> dict:
-    import shutil
-
     from app.database import Avatar
 
     async with ctx.session_factory() as db:
@@ -842,7 +859,7 @@ async def _generate_avatar_poses(avatar_id: str) -> dict:
 
             for i, prompt in enumerate(poses):
                 try:
-                    path, _model, _pid = await generate_image(
+                    path, _model, _pid, _cost = await generate_image(
                         db=db,
                         job=mock_job,  # type: ignore[arg-type]
                         prompt=prompt,
@@ -1124,7 +1141,7 @@ async def _generate_quick_media(
             # 4. Generate
             # ------------------------------------------------------------------
             if config.modality == "image":
-                path, model_used, prov_id = await generate_image(
+                path, model_used, prov_id, _cost = await generate_image(
                     db=db,
                     job=quick_job,  # type: ignore[arg-type]
                     prompt=prompt,
@@ -1138,7 +1155,7 @@ async def _generate_quick_media(
                 content_type = "image/png"
 
             elif config.modality == "video":
-                path, model_used, prov_id, dur_out, _warning = await generate_video(
+                path, model_used, prov_id, dur_out, _warning, _cost = await generate_video(
                     db=db,
                     job=quick_job,  # type: ignore[arg-type]
                     prompt=prompt,
@@ -1194,25 +1211,9 @@ async def _generate_quick_media(
             # ------------------------------------------------------------------
             # 6. Record cost on the asset
             # ------------------------------------------------------------------
-            from decimal import Decimal
-
-            if config and config.cost_config:
-                cc = config.cost_config
-                if config.modality == "image":
-                    cost = Decimal(str(cc.get("credits_per_image", cc.get("compute_points", 0))))
-                    asset.cost = cost
-                elif config.modality == "video":
-                    cost_per_sec = Decimal(
-                        str(
-                            cc.get(
-                                "credits_per_second",
-                                cc.get("compute_points_per_second", 0),
-                            )
-                        )
-                    )
-                    asset.cost = cost_per_sec * duration
-                await db.commit()
-                logger.info("Quick media generation cost: %s", asset.cost)
+            asset.cost = _cost
+            await db.commit()
+            logger.info("Quick media generation cost: %s", asset.cost)
 
             # ------------------------------------------------------------------
             # 7. Clean up the temp job output dir

@@ -7,23 +7,31 @@ descriptions with image prompts.
 
 from __future__ import annotations
 
-import json
 import logging
+import math
 import re
 from typing import Any
 
 from app.services.llm_service import LLMClient
+from app.services.media_generator import enforce_min_scene_duration
+
+from ..prompt_to_video.planner import (
+    _clean_llm_response,
+    _ensure_concise_prompts,
+    _ensure_style_prefix,
+    _extract_json_with_scenes,
+)
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a video director. Convert script segments into visual scenes for AI video generation.
 
-Each scene should be 3-15 seconds long. Output ONLY valid JSON:
+Output ONLY valid JSON:
 {"scenes": [{"start_time": 0.0, "end_time": 5.0, "narration": "text", "visual_description": "desc", "image_prompt": "prompt", "mood": "mood", "camera_movement": "movement", "seed_image_prompt": "image prompt for seed image generation"}]}
 
 Guidelines:
-- Scene duration: 3-15 seconds each — longer scenes allow for richer visual storytelling
-- Image prompts: 10-25 words, highly visual
+- Scene duration: respect the max clip duration in the PLANNING CONSTRAINTS. If the total video requires more time, split the story into multiple scenes rather than exceeding the per-clip limit.
+- Image prompts: concise, highly visual, and within the model's max prompt length
 - CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - Narration is the text that will be spoken during this scene
 - Match mood to the narration content
@@ -89,10 +97,13 @@ async def plan_scenes_from_script(
     style: str = "realistic",
     avatars_context: str | None = None,
     model_capabilities_context: str | None = None,
+    constraints_context: str | None = None,
     objects_context: str | None = None,
     reference_capacity_context: str | None = None,
     provider: Any | None = None,
     model: str | None = None,
+    max_clip_duration: float = 5.0,
+    image_max_prompt_length: int | None = None,
 ) -> dict[str, Any]:
     """Plan scenes from parsed script segments.
 
@@ -137,6 +148,8 @@ async def plan_scenes_from_script(
             user_prompt += f"\n{reference_capacity_context}\n"
         if model_capabilities_context:
             user_prompt += f"\n{model_capabilities_context}\n\n"
+        if constraints_context:
+            user_prompt += f"\n{constraints_context}\n\n"
         user_prompt += f"\nScript segments:{seg_text}"
         result: dict[str, Any] = {}
 
@@ -149,11 +162,22 @@ async def plan_scenes_from_script(
                 provider=provider,
             )
 
-            result = _parse_response(response, duration, original_segments=segments)
+            result = _parse_response(
+                response,
+                duration,
+                original_segments=segments,
+                max_clip_duration=max_clip_duration,
+            )
             if not result.get("_is_fallback"):
-                return result
+                break
             logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
             user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
+
+        max_prompt_chars = image_max_prompt_length or 400
+        _ensure_style_prefix(result["scenes"], style)
+        await _ensure_concise_prompts(
+            result["scenes"], style, llm, max_chars=max_prompt_chars
+        )
 
         return result
     finally:
@@ -162,49 +186,61 @@ async def plan_scenes_from_script(
             await provider.shutdown()
 
 
-def _parse_response(response: str, target_duration: float, original_segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _parse_response(
+    response: str,
+    target_duration: float,
+    original_segments: list[dict[str, Any]] | None = None,
+    max_clip_duration: float = 5.0,
+) -> dict[str, Any]:
     """Parse LLM response into a dict with ``scenes`` and ``object_selections`` keys."""
     cleaned = _clean_llm_response(response)
 
-    parsed = None
-    candidates = [
-        cleaned,
-        cleaned.replace("```json", "").replace("```", ""),
-        re.sub(r'\*\*.*?\*\*', '', cleaned),
-    ]
-    for candidate in candidates:
-        candidate = candidate.strip()
-        if candidate.startswith("{") and "scenes" in candidate:
-            try:
-                parsed = json.loads(candidate)
-                break
-            except json.JSONDecodeError:
-                pass
+    parsed = _extract_json_with_scenes(cleaned)
 
     if not parsed:
-        m = re.search(r'\{[^{}]*"scenes"[^{}]*(?:\[[^\]]*\][^{}]*)*\}', cleaned, re.DOTALL)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-            except json.JSONDecodeError:
-                pass
+        candidates = [
+            cleaned,
+            cleaned.replace("```json", "").replace("```", ""),
+            re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL),
+            re.sub(r"【.*?】", "", cleaned),
+            re.sub(r"\*\*.*?\*\*", "", cleaned),
+        ]
+        for candidate in candidates:
+            parsed = _extract_json_with_scenes(candidate)
+            if parsed:
+                break
 
     if not parsed:
         logger.warning("Could not parse LLM scene plan, using fallback")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
-        return _fallback_result(segments_count, original_segments)
+        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        return _fallback_result(
+            segments_count,
+            original_segments,
+            max_clip_duration,
+            target_duration=target_duration,
+        )
 
     scenes = parsed.get("scenes", [])
     if not scenes or not isinstance(scenes, list):
         logger.warning("LLM response has invalid scenes list, falling back")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
-        return _fallback_result(segments_count, original_segments)
+        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        return _fallback_result(
+            segments_count,
+            original_segments,
+            max_clip_duration,
+            target_duration=target_duration,
+        )
 
     # Validate each scene is a dictionary
     if not all(isinstance(scene, dict) for scene in scenes):
         logger.warning("LLM response contains non-dict scenes, falling back")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / 5))
-        return _fallback_result(segments_count, original_segments)
+        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        return _fallback_result(
+            segments_count,
+            original_segments,
+            max_clip_duration,
+            target_duration=target_duration,
+        )
 
     # Extract object selections if present
     object_selections = parsed.get("object_selections", [])
@@ -221,43 +257,33 @@ def _parse_response(response: str, target_duration: float, original_segments: li
             s["end_time"] = target_duration
 
     # Enforce minimum scene duration
-    from app.services.media_generator import enforce_min_scene_duration
     scenes = enforce_min_scene_duration(scenes)
 
     return {"scenes": scenes, "object_selections": object_selections}
 
 
-def _clean_llm_response(response: str) -> str:
-    """Remove common LLM artifacts (thinking tags, markdown fences, etc.)."""
-    text = response.strip()
-
-    if text.startswith("```"):
-        start = text.find("\n", 3) if text.startswith("```") else 0
-        if start > 0:
-            lang_tag = text[3:start].strip().lower()
-            if lang_tag in ("json", "", "javascript"):
-                end = text.find("```", start + 1)
-                if end != -1:
-                    text = text[start:end].strip()
-                else:
-                    text = text[start:].strip()
-
-    text = re.sub(r'【\w+】.*?【/\w+】', '', text, flags=re.DOTALL)
-    text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
-    text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL)
-
-    text = text.strip()
-    text = re.sub(r'^(Here is|Here are|Okay,|Sure,|Certainly,).*?\n', '', text, flags=re.IGNORECASE)
-
-    return text.strip()
-
-
-def _fallback_result(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    scenes = _fallback_scenes(segments_count, original_segments)
+def _fallback_result(
+    segments_count: int,
+    original_segments: list[dict[str, Any]] | None = None,
+    max_clip_duration: float = 5.0,
+    target_duration: float | None = None,
+) -> dict[str, Any]:
+    if target_duration is not None:
+        segments_count = min(
+            segments_count,
+            max(1, math.ceil(target_duration / max_clip_duration)),
+        )
+    scenes = _fallback_scenes(segments_count, original_segments, max_clip_duration)
+    if target_duration is not None and scenes:
+        scenes[-1]["end_time"] = target_duration
     return {"scenes": scenes, "object_selections": [], "_is_fallback": True}
 
 
-def _fallback_scenes(segments_count: int, original_segments: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def _fallback_scenes(
+    segments_count: int,
+    original_segments: list[dict[str, Any]] | None = None,
+    max_clip_duration: float = 5.0,
+) -> list[dict[str, Any]]:
     def _seg_desc(i: int) -> str:
         if original_segments and i < len(original_segments):
             narration = original_segments[i].get("narration", "").strip()
@@ -267,8 +293,8 @@ def _fallback_scenes(segments_count: int, original_segments: list[dict[str, Any]
 
     return [
         {
-            "start_time": i * 5.0,
-            "end_time": (i + 1) * 5.0,
+            "start_time": i * max_clip_duration,
+            "end_time": (i + 1) * max_clip_duration,
             "narration": original_segments[i].get("narration", "") if original_segments and i < len(original_segments) else "",
             "visual_description": _seg_desc(i),
             "image_prompt": f"Visual scene {i + 1}: {_seg_desc(i)}",

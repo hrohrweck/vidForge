@@ -451,20 +451,7 @@ Output only the enhanced prompt, nothing else."""
         )
 
         enhanced = enhanced.strip()
-
-        import re
-        enhanced = re.sub(r"<think>.*?</think>", "", enhanced, flags=re.DOTALL).strip()
-        enhanced = re.sub(r"【thinking】.*?【/thinking】", "", enhanced, flags=re.DOTALL).strip()
-
-        enhanced = re.sub(r"^(Here's|Here is).*?(prompt|enhanced|version)[:\s]*", "", enhanced, flags=re.IGNORECASE).strip()
-        enhanced = re.sub(r"^\d+\.\s*\*\*.*?\*\*[:\s]*", "", enhanced, flags=re.MULTILINE).strip()
-
-        lines = [line.strip() for line in enhanced.split('\n') if line.strip() and not line.strip().startswith('-') and not re.match(r'^\d+\.', line.strip())]
-        if len(lines) > 1:
-            for line in reversed(lines):
-                if len(line) > 20 and not line.startswith('**') and not line.startswith('#'):
-                    enhanced = line
-                    break
+        enhanced = self._clean_enhanced_response(enhanced)
 
         if enhanced.startswith('"') and enhanced.endswith('"'):
             enhanced = enhanced[1:-1]
@@ -473,6 +460,97 @@ Output only the enhanced prompt, nothing else."""
             enhanced = f"{enhanced}, {style_suffix}"
 
         return enhanced
+
+    def _clean_enhanced_response(self, text: str) -> str:
+        """Extract the actual enhanced prompt from verbose LLM outputs.
+
+        Some models (notably Qwen-style reasoning models) return thinking
+        processes, bullet lists, and labels instead of a plain prompt. This
+        method strips those artifacts and returns the most likely prompt text.
+        """
+        import re
+
+        # Strip explicit thinking/reasoning tags.
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"【thinking】.*?【/thinking】", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<reasoning>.*?</reasoning>", "", text, flags=re.DOTALL).strip()
+
+        # Strip markdown fences if the LLM wrapped the prompt in a code block.
+        if text.startswith("```"):
+            start = text.find("\n", 3)
+            if start > 0:
+                end = text.find("```", start + 1)
+                if end != -1:
+                    text = text[start:end].strip()
+                else:
+                    text = text[start:].strip()
+
+        # Remove common preamble prefixes such as "Here's a thinking process:".
+        text = re.sub(
+            r"^(Here's|Here is|Okay,|Sure,|Certainly,).*?(thinking process|prompt|enhanced|version)[:\s]*",
+            "",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+
+        structural_labels = {
+            "core idea",
+            "style request",
+            "constraints",
+            "subject",
+            "subjects",
+            "setting",
+            "settings",
+            "lighting/style",
+            "background/effect",
+            "mood",
+            "lighting",
+            "visual style",
+            "summary",
+            "final prompt",
+            "enhanced prompt",
+        }
+
+        lines = text.splitlines()
+        cleaned: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Skip bullet lines.
+            if re.match(r"^[-*+]\s", stripped):
+                continue
+            # Skip numbered headings like "1. **Core Idea:**".
+            if re.match(r"^\d+\.\s*\*\*.*?\*\*[:\s]*", stripped):
+                continue
+            # Skip lines that are only a structural label.
+            label_match = re.match(r"^(\*\*)?([\w\s/]+)(\*\*)?\s*[:：]", stripped)
+            if label_match:
+                label = label_match.group(2).strip().lower()
+                if label in structural_labels:
+                    continue
+            cleaned.append(stripped)
+
+        if cleaned:
+            text = " ".join(cleaned)
+        else:
+            # Fallback: if every line looked structural, strip the markers and
+            # join whatever text remains.
+            stripped_lines: list[str] = []
+            for line in lines:
+                s = re.sub(r"^[-*+]\s*", "", line.strip())
+                s = re.sub(r"\*\*", "", s)
+                s = re.sub(r"^[\w\s/]+\s*[:：]\s*", "", s)
+                if s:
+                    stripped_lines.append(s)
+            text = " ".join(stripped_lines)
+
+        # Remove remaining markdown bold and collapse whitespace.
+        text = re.sub(r"\*\*", "", text)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        return text
 
 
 class ScriptSegmenter:

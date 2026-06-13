@@ -149,11 +149,12 @@ class TestGenerateVideo:
         )
 
         workflow = provider.queue_prompt.call_args[0][0]
-        k_sampler = None
-        for node in workflow.values():
-            if node.get("class_type") == "EmptyHunyuanLatentVideo":
-                assert node["inputs"]["length"] == 49  # 2*24=48, +1 for odd
-                break
+        latent_nodes = [
+            node for node in workflow.values()
+            if node.get("class_type") == "EmptyHunyuanLatentVideo"
+        ]
+        assert len(latent_nodes) == 1
+        assert latent_nodes[0]["inputs"]["length"] == 49  # 2*24=48, +1 for odd
 
 
 class TestGenerateImage:
@@ -391,7 +392,26 @@ class TestRunpodModelCapabilities:
         provider = _make_provider()
         models = provider._default_models()
         flux = next(m for m in models if m["id"] == "flux1-schnell")
-        assert "image-to-image" in flux["capabilities"]
+        assert flux["capabilities"]["accepts_image"] is True
+        assert flux["capabilities"]["outputs_image"] is True
+
+    def test_wan_model_has_canonical_constraints_and_cost(self):
+        provider = _make_provider()
+        models = provider._default_models()
+        wan = next(m for m in models if m["id"] == "wan2.2")
+        assert wan["constraints"]["max_duration"] == 5
+        assert wan["constraints"]["supported_aspect_ratios"] == ["16:9"]
+        assert wan["cost_config"]["currency"] == "USD"
+        expected_cost_per_second = 0.69 / 3600.0
+        assert abs(wan["cost_config"]["cost_per_second"] - expected_cost_per_second) < 1e-9
+
+    def test_flux_model_has_canonical_cost(self):
+        provider = _make_provider()
+        models = provider._default_models()
+        flux = next(m for m in models if m["id"] == "flux1-schnell")
+        assert flux["cost_config"]["currency"] == "USD"
+        expected_cost_per_image = (0.69 / 3600.0) * RunPodProvider._EST_IMAGE_GPU_SECONDS
+        assert abs(flux["cost_config"]["cost_per_image"] - expected_cost_per_image) < 1e-9
 
 
 class TestCostTracking:
@@ -525,6 +545,25 @@ class TestModelSync:
         models = await provider.sync_models()
         for m in models:
             assert m["endpoint_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_sync_models_preserves_canonical_metadata(self):
+        provider = _make_provider({"cost_per_gpu_hour": 1.50})
+        provider.get_endpoint_info = AsyncMock(return_value={})
+        models = await provider.sync_models()
+        by_id = {m["id"]: m for m in models}
+
+        wan = by_id["wan2.2"]
+        assert wan["constraints"]["max_duration"] == 5
+        assert wan["constraints"]["supported_aspect_ratios"] == ["16:9"]
+        assert wan["cost_config"]["currency"] == "USD"
+        expected_per_second = 1.50 / 3600.0
+        assert abs(wan["cost_config"]["cost_per_second"] - expected_per_second) < 1e-9
+
+        flux = by_id["flux1-schnell"]
+        assert flux["cost_config"]["currency"] == "USD"
+        expected_per_image = (1.50 / 3600.0) * RunPodProvider._EST_IMAGE_GPU_SECONDS
+        assert abs(flux["cost_config"]["cost_per_image"] - expected_per_image) < 1e-9
 
 
 class TestImageResolution:

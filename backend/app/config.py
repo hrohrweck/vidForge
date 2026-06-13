@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     worker_name: str = "Local GPU Worker"
     worker_heartbeat_interval: int = 30
 
+    ws_heartbeat_interval_seconds: float = 20.0
+    ws_heartbeat_timeout_seconds: float = 60.0
+
     default_provider_preference: Literal["comfyui_direct", "runpod", "auto"] = "auto"
 
     runpod_api_key: str = ""

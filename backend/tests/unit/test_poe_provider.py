@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 from collections.abc import AsyncIterator
@@ -250,7 +249,7 @@ async def test_sync_models_normalizes_poe_models_and_updates_cache() -> None:
     assert first["modality"] == "text"
     assert first["endpoint_type"] == "chat_completions"
     assert first["capabilities"]["supports_tools"] is True
-    assert first["constraints"]["context_length"] == 200000
+    assert first["constraints"]["max_prompt_length"] == 200000
     assert first["cost_config"]["compute_points"] == 15
 
     second = normalized[1]
@@ -412,8 +411,44 @@ class TestPoeNormalization:
         })
         assert result["modality"] == "text"
         assert result["endpoint_type"] == "chat_completions"
-        assert "cost_config" not in result
-        assert "constraints" not in result
+        assert result["cost_config"] == {"currency": "compute_points"}
+        assert result["constraints"] is None
+
+    def test_compute_points_maps_to_cost_per_image_for_image_models(self) -> None:
+        result = PoeProvider._normalize_poe_model({
+            "id": "gpt-image-1",
+            "architecture": {
+                "input_modalities": ["text"],
+                "output_modalities": ["image"],
+            },
+            "supported_features": [],
+            "supported_endpoints": [],
+            "pricing": {"currency": "compute_points", "compute_points": 50},
+            "context_window": {},
+            "metadata": {},
+        })
+        assert result["modality"] == "image"
+        assert result["cost_config"]["currency"] == "compute_points"
+        assert result["cost_config"]["cost_per_image"] == 50
+        assert "cost_per_second" not in result["cost_config"]
+
+    def test_compute_points_maps_to_cost_per_second_for_video_models(self) -> None:
+        result = PoeProvider._normalize_poe_model({
+            "id": "veo-3",
+            "architecture": {
+                "input_modalities": ["text"],
+                "output_modalities": ["video"],
+            },
+            "supported_features": [],
+            "supported_endpoints": [],
+            "pricing": {"currency": "compute_points", "compute_points": 100},
+            "context_window": {},
+            "metadata": {},
+        })
+        assert result["modality"] == "video"
+        assert result["cost_config"]["currency"] == "compute_points"
+        assert result["cost_config"]["cost_per_second"] == 20.0
+        assert "cost_per_image" not in result["cost_config"]
 
 
 # ── Poe img2img / I2V verification tests ─────────────────────────

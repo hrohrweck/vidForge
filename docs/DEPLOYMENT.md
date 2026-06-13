@@ -188,7 +188,10 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
-        proxy_read_timeout 86400;
+        # Backend sends a heartbeat every 20s. 120s is safely above the
+        # heartbeat timeout (60s) while pruning dead connections quickly.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 
     # Uploaded media (direct file access)

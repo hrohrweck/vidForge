@@ -9,6 +9,9 @@ from app.services.model_capabilities import (
     GenerationType,
     ModelCapabilities,
     ModelCapability,
+    build_model_capabilities_context,
+    build_reference_capacity_context,
+    build_scene_constraints_context,
     normalize_capabilities,
 )
 
@@ -193,13 +196,8 @@ class TestNormalizeCapabilities:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# build_model_capabilities_context
+# build_model_capabilities_context helpers
 # ────────────────────────────────────────────────────────────────────────────
-
-from app.services.model_capabilities import (
-    build_model_capabilities_context,
-    build_reference_capacity_context,
-)
 
 
 def _video_cfg(
@@ -589,3 +587,80 @@ class TestBuildReferenceCapacityContext:
         )
         assert "WARNING: More characters than reference slots" in result
         assert "Only 1 total slot available" in result
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# build_scene_constraints_context
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestBuildSceneConstraintsContext:
+    """build_scene_constraints_context generates planning constraint text."""
+
+    def test_all_none_shows_target_only(self):
+        result = build_scene_constraints_context(
+            video_model_config=None,
+            image_model_config=None,
+            text_model_config=None,
+            target_duration=30.0,
+        )
+        assert result.startswith("PLANNING CONSTRAINTS:")
+        assert "Target total duration: 30.0 seconds" in result
+        assert "Video model max clip duration" not in result
+        assert "Image model" not in result
+        assert "Text model" not in result
+
+    def test_video_model_constraints(self):
+        result = build_scene_constraints_context(
+            video_model_config={
+                "constraints": {"max_duration": 5, "supported_aspect_ratios": ["16:9", "9:16"]},
+            },
+            image_model_config=None,
+            text_model_config=None,
+            target_duration=15.0,
+        )
+        assert "Target total duration: 15.0 seconds" in result
+        assert "Video model max clip duration: 5s" in result
+        assert "Video model supported aspect ratios: 16:9, 9:16" in result
+
+    def test_video_model_max_duration_default(self):
+        result = build_scene_constraints_context(
+            video_model_config={"constraints": {}},
+            image_model_config=None,
+            text_model_config=None,
+            target_duration=10.0,
+        )
+        assert "Video model max clip duration: 5s" in result
+
+    def test_image_model_constraints(self):
+        result = build_scene_constraints_context(
+            video_model_config=None,
+            image_model_config={
+                "constraints": {
+                    "max_prompt_length": 1000,
+                    "supported_aspect_ratios": ["1:1"],
+                }
+            },
+            text_model_config=None,
+            target_duration=20.0,
+        )
+        assert "Image model max prompt length: 1000 characters" in result
+        assert "Image model supported aspect ratios: 1:1" in result
+
+    def test_text_model_constraints(self):
+        result = build_scene_constraints_context(
+            video_model_config=None,
+            image_model_config=None,
+            text_model_config={"constraints": {"max_prompt_length": 2000}},
+            target_duration=25.0,
+        )
+        assert "Text model max prompt length: 2000 characters" in result
+
+    def test_constraints_read_from_flat_config(self):
+        result = build_scene_constraints_context(
+            video_model_config=None,
+            image_model_config={"max_prompt_length": 512},
+            text_model_config=None,
+            target_duration=5.0,
+        )
+        assert "Image model max prompt length: 512 characters" in result

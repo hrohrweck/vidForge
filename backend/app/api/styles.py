@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user, get_current_user_from_bearer_or_cookie, require_admin
+from app.api.auth import get_current_user_from_bearer_or_cookie, require_admin
 from app.database import Style, User, get_db
 
 router = APIRouter()

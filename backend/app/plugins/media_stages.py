@@ -55,6 +55,11 @@ class MediaStagesMixin:
         input_data = job.input_data or {}
         image_model = input_data.get("image_model")
 
+        from app.services.model_config_service import ModelConfigService
+        image_model_config = None
+        if image_model:
+            image_model_config = await ModelConfigService.resolve_model_config(db, image_model)
+
         # Extract avatar reference images from context
         avatars = context.get("avatars", [])
         avatar_ref_path: str | None = None
@@ -109,7 +114,7 @@ class MediaStagesMixin:
                             prompt = f"{prompt} [Object reference: {props_str}]"
 
             try:
-                image_path, _media_id, _provider_id = await cast(Any, self)._retry(
+                image_path, _media_id, _provider_id, image_cost = await cast(Any, self)._retry(
                     generate_image,
                     db=db,
                     job=job,
@@ -121,6 +126,17 @@ class MediaStagesMixin:
                     reference_image_strength=0.75,
                     label=f"image-s{scene.scene_number}",
                 )
+                if image_cost:
+                    from app.services.cost_estimator import record_media_generation_cost
+                    try:
+                        await record_media_generation_cost(
+                            db, job, image_model_config, "image"
+                        )
+                    except Exception as cost_exc:
+                        logger.warning(
+                            "[image-s%s] Failed to record generation cost: %s",
+                            scene.scene_number, cost_exc,
+                        )
                 scene.reference_image_path = image_path
                 scene.status = "image_ready"
                 # Auto-import to media library
@@ -142,7 +158,7 @@ class MediaStagesMixin:
                         scene.scene_number, exc,
                     )
                     try:
-                        image_path, _media_id, _provider_id = await cast(Any, self)._retry(
+                        image_path, _media_id, _provider_id, image_cost = await cast(Any, self)._retry(
                             generate_image,
                             db=db,
                             job=job,
@@ -152,6 +168,17 @@ class MediaStagesMixin:
                             provider_id=job.image_provider_id,
                             label=f"image-s{scene.scene_number}-t2i",
                         )
+                        if image_cost:
+                            from app.services.cost_estimator import record_media_generation_cost
+                            try:
+                                await record_media_generation_cost(
+                                    db, job, image_model_config, "image"
+                                )
+                            except Exception as cost_exc:
+                                logger.warning(
+                                    "[image-s%s] Failed to record generation cost: %s",
+                                    scene.scene_number, cost_exc,
+                                )
                         scene.reference_image_path = image_path
                         scene.status = "image_ready"
                         # Auto-import to media library
@@ -207,6 +234,11 @@ class MediaStagesMixin:
         aspect_ratio = input_data.get("aspect_ratio", "16:9")
         video_model = input_data.get("video_model")
 
+        from app.services.model_config_service import ModelConfigService
+        video_model_config = None
+        if video_model:
+            video_model_config = await ModelConfigService.resolve_model_config(db, video_model)
+
         # Extract avatar context for sub-scene prompt hardening
         avatars = context.get("avatars", [])
 
@@ -244,7 +276,7 @@ class MediaStagesMixin:
                 if scene_duration <= max_clip_s + 0.5:
                     # ── Short scene: single clip ──────────────────────
                     duration = max(2, int(scene_duration))
-                    video_path, _, _, actual_duration, warning = await cast(Any, self)._retry(
+                    video_path, _, _, actual_duration, warning, video_cost = await cast(Any, self)._retry(
                         generate_video,
                         db=db, job=job, prompt=prompt,
                         scene_number=scene.scene_number,
@@ -254,6 +286,17 @@ class MediaStagesMixin:
                         duration=duration, aspect_ratio=aspect_ratio,
                         label=f"video-s{scene.scene_number}",
                     )
+                    if video_cost:
+                        from app.services.cost_estimator import record_media_generation_cost
+                        try:
+                            await record_media_generation_cost(
+                                db, job, video_model_config, "video", duration=duration
+                            )
+                        except Exception as cost_exc:
+                            logger.warning(
+                                "[video-s%s] Failed to record generation cost: %s",
+                                scene.scene_number, cost_exc,
+                            )
                     scene.generated_video_path = video_path
                     scene.duration = actual_duration
                     if warning:
@@ -271,6 +314,7 @@ class MediaStagesMixin:
                             aspect_ratio=aspect_ratio,
                             avatars=avatars,
                             objects=context.get("objects", []),
+                            video_model_config=video_model_config,
                         )
                     )
 
@@ -318,6 +362,7 @@ class MediaStagesMixin:
         aspect_ratio: str,
         avatars: list[dict[str, Any]] | None = None,
         objects: list[dict[str, Any]] | None = None,
+        video_model_config: Any | None = None,
     ) -> tuple[str, float]:
         """Split a long scene into chained sub-clips.
 
@@ -366,7 +411,7 @@ class MediaStagesMixin:
             )
             clip_duration = max(2, int(clip_duration))
 
-            sub_path, _, _, actual, warning = await cast(Any, self)._retry(
+            sub_path, _, _, actual, warning, sub_cost = await cast(Any, self)._retry(
                 generate_video,
                 db=db, job=job,
                 prompt=prompts[i],
@@ -378,6 +423,17 @@ class MediaStagesMixin:
                 aspect_ratio=aspect_ratio,
                 label=f"video-s{scene.scene_number}.{i+1}/{num_clips}",
             )
+            if sub_cost:
+                from app.services.cost_estimator import record_media_generation_cost
+                try:
+                    await record_media_generation_cost(
+                        db, job, video_model_config, "video", duration=clip_duration
+                    )
+                except Exception as cost_exc:
+                    logger.warning(
+                        "[video-s%s.%s] Failed to record generation cost: %s",
+                        scene.scene_number, i + 1, cost_exc,
+                    )
             sub_clip_paths.append(str(storage / sub_path))
             total_actual_duration += actual
             if warning:
@@ -512,8 +568,11 @@ class MediaStagesMixin:
             prompts = json.loads(response)
             if isinstance(prompts, list) and len(prompts) == num_clips:
                 return [str(p) for p in prompts]
-        except Exception:
-            pass
+        except Exception as llm_exc:
+            logger.warning(
+                "[scene-%s] Failed to generate sub-scene prompts via LLM: %s",
+                scene.scene_number, llm_exc,
+            )
 
         # Fallback: reuse original prompt with continuation markers
         prompts = []

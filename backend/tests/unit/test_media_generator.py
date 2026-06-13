@@ -6,15 +6,15 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.database import ErrorOrigin, ErrorSeverity, Job, ModelConfig, Provider
+from app.database import Job, ModelConfig, Provider
 from app.services.media_generator import (
     _map_media_error_to_friendly_message,
     _resolve_image_provider,
     _resolve_video_provider,
     generate_image,
     generate_video,
-    get_provider_instance,
     get_provider_for_job,
+    get_provider_instance,
 )
 from app.services.providers.base import (
     ImageProvider,
@@ -26,7 +26,6 @@ from app.services.providers.base import (
     ProviderTimeoutError,
     VideoProvider,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -376,7 +375,7 @@ class TestGenerateImage:
                 return_value=mock_instance,
             ),
         ):
-            rel_path, model_desc, pid = await generate_image(
+            rel_path, model_desc, pid, _cost = await generate_image(
                 db=db_session,
                 job=job,
                 prompt="A cat",
@@ -474,7 +473,7 @@ class TestGenerateImage:
                 return_value=mock_instance,
             ),
         ):
-            rel_path, model_desc, pid = await generate_image(
+            rel_path, model_desc, pid, _cost = await generate_image(
                 db=db_session,
                 job=job,
                 prompt="A cat",
@@ -513,7 +512,7 @@ class TestGenerateVideo:
                 return_value=MagicMock(valid=True),
             ),
         ):
-            rel_path, model_desc, pid, dur, warning = await generate_video(
+            rel_path, model_desc, pid, dur, warning, _cost = await generate_video(
                 db=db_session,
                 job=job,
                 prompt="A sunset",
@@ -616,7 +615,7 @@ class TestGenerateVideo:
                 return_value=MagicMock(valid=True),
             ),
         ):
-            rel_path, model_desc, pid, dur, warning = await generate_video(
+            rel_path, model_desc, pid, dur, warning, _cost = await generate_video(
                 db=db_session,
                 job=job,
                 prompt="A sunset",
@@ -667,7 +666,7 @@ class TestGenerateVideo:
             mock_result.scalars.return_value = mock_scalars
             mock_execute.return_value = mock_result
 
-            _rel_path, _desc, _pid, _dur, warning = await generate_video(
+            _rel_path, _desc, _pid, _dur, warning, _cost = await generate_video(
                 db=db_session,
                 job=job,
                 prompt="A sunset",
@@ -685,7 +684,6 @@ class TestGenerateVideo:
 class TestNoProviderSpecificImports:
     def test_no_specific_provider_classes_in_top_level(self):
         """Verify generate_image / generate_video use no provider classes."""
-        import inspect
         import ast
         from pathlib import Path
 

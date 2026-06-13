@@ -83,8 +83,20 @@ export default function Layout() {
   const navEntries = getNavEntries(user?.is_superuser || false)
   const { isSidebarOpen, toggleSidebar } = useUiStore()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [openGroup, setOpenGroup] = useState<string | null>(null)
+  const [temporarilyOpen, setTemporarilyOpen] = useState(false)
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false)
+
+  const openSubmenu = (label: string) => {
+    setOpenGroup(label)
+    setTemporarilyOpen(true)
+  }
+
+  const closeSubmenu = () => {
+    setOpenGroup(null)
+    setTemporarilyOpen(false)
+  }
 
   // Track which groups are expanded — keyed by group label
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
@@ -95,6 +107,10 @@ export default function Layout() {
 
   const isGroupActive = (group: NavGroup) =>
     group.children.some((child) => location.pathname === child.to || location.pathname.startsWith(child.to + '/'))
+
+  const activeGroup = openGroup
+    ? (navEntries.find((e) => isGroup(e) && e.label === openGroup) as NavGroup | undefined)
+    : undefined
 
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-col">
@@ -157,7 +173,7 @@ export default function Layout() {
           className={cn(
             "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar-bg text-sidebar-foreground shadow-[4px_0_15px_-3px_rgba(0,0,0,0.1)] dark:shadow-[4px_0_15px_-3px_rgba(0,0,0,0.5)] transition-all duration-300 ease-in-out md:relative md:translate-x-0",
             isMobileMenuOpen ? "w-64 translate-x-0" : "-translate-x-full md:translate-x-0",
-            isSidebarOpen ? "md:w-64" : "md:w-16"
+            (isSidebarOpen || temporarilyOpen) ? "md:w-64" : "md:w-16"
           )}
         >
           <div className="flex items-center justify-end p-2 md:hidden">
@@ -166,68 +182,113 @@ export default function Layout() {
             </Button>
           </div>
           <nav className="flex-1 overflow-y-auto py-4">
-            <ul className="space-y-1 px-2">
-              {navEntries.map((entry) =>
-                isGroup(entry) ? (
-                  /* ── Collapsible group ─────────────────────────── */
-                  <NavGroupItem
-                    key={entry.label}
-                    group={entry}
-                    expanded={expandedGroups[entry.label] ?? isGroupActive(entry)}
-                    active={isGroupActive(entry)}
-                    collapsed={!isSidebarOpen}
-                    onToggle={() => toggleGroup(entry.label)}
-                    onNavClick={closeMobileMenu}
-                  />
-                ) : (
-                  /* ── Flat link ─────────────────────────────────── */
-                  <li key={entry.to}>
-                    <NavLink
-                      to={entry.to}
-                      end={entry.to === '/'}
-                      onClick={closeMobileMenu}
-                      className={({ isActive }) =>
-                        cn(
-                          'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
-                          isActive
-                            ? 'bg-primary/10 text-primary'
-                            : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
-                          !isSidebarOpen && 'md:justify-center md:px-0'
-                        )
-                      }
-                      title={!isSidebarOpen ? entry.label : undefined}
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <div className={cn(
-                            "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
-                            isActive ? "opacity-100" : "opacity-0"
-                          )} />
-                          <entry.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
-                          <span className={cn(
-                            "transition-all duration-300",
-                            !isSidebarOpen && "md:hidden"
-                          )}>
-                            {entry.label}
-                          </span>
-                        </>
-                      )}
-                    </NavLink>
-                  </li>
-                )
-              )}
-            </ul>
+            {activeGroup ? (
+              /* ── Expanded submenu view (desktop collapsed sidebar) ── */
+              <div className="px-2 space-y-1">
+                <Button
+                  variant="ghost"
+                  onClick={closeSubmenu}
+                  className="w-full justify-start gap-2 mb-2 text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground"
+                >
+                  <ChevronLeft className="h-5 w-5 shrink-0" />
+                  <span className="text-sm font-medium">Back</span>
+                </Button>
+                <div className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground">
+                  <activeGroup.icon className="h-5 w-5 shrink-0" />
+                  <span>{activeGroup.label}</span>
+                </div>
+                <ul className="mt-1 space-y-0.5 pl-3 border-l-2 border-border ml-2.5">
+                  {activeGroup.children.map((child) => (
+                    <li key={child.to}>
+                      <NavLink
+                        to={child.to}
+                        end={child.to === '/admin'}
+                        onClick={closeMobileMenu}
+                        className={({ isActive }) =>
+                          cn(
+                            'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',
+                            isActive
+                              ? 'bg-primary/10 text-primary font-medium'
+                              : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground'
+                          )
+                        }
+                      >
+                        {({ isActive }) => (
+                          <>
+                            <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
+                            <span className="text-[0.8125rem]">{child.label}</span>
+                          </>
+                        )}
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <ul className="space-y-1 px-2">
+                {navEntries.map((entry) =>
+                  isGroup(entry) ? (
+                    /* ── Collapsible group ─────────────────────────── */
+                    <NavGroupItem
+                      key={entry.label}
+                      group={entry}
+                      expanded={expandedGroups[entry.label] ?? isGroupActive(entry)}
+                      active={isGroupActive(entry)}
+                      collapsed={!(isSidebarOpen || temporarilyOpen)}
+                      onToggle={() => toggleGroup(entry.label)}
+                      onOpenSubmenu={() => openSubmenu(entry.label)}
+                      onNavClick={closeMobileMenu}
+                    />
+                  ) : (
+                    /* ── Flat link ─────────────────────────────────── */
+                    <li key={entry.to}>
+                      <NavLink
+                        to={entry.to}
+                        end={entry.to === '/'}
+                        onClick={closeMobileMenu}
+                        className={({ isActive }) =>
+                          cn(
+                            'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
+                            isActive
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
+                            !(isSidebarOpen || temporarilyOpen) && 'md:justify-center md:px-0'
+                          )
+                        }
+                        title={!(isSidebarOpen || temporarilyOpen) ? entry.label : undefined}
+                      >
+                        {({ isActive }) => (
+                          <>
+                            <div className={cn(
+                              "absolute left-0 h-8 w-1 rounded-r-full bg-primary transition-all",
+                              isActive ? "opacity-100" : "opacity-0"
+                            )} />
+                            <entry.icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
+                            <span className={cn(
+                              "transition-all duration-300",
+                              !(isSidebarOpen || temporarilyOpen) && "md:hidden"
+                            )}>
+                              {entry.label}
+                            </span>
+                          </>
+                        )}
+                      </NavLink>
+                    </li>
+                  )
+                )}
+              </ul>
+            )}
           </nav>
 
           <div className="p-4 border-t border-sidebar-border hidden md:flex justify-center">
             <Button
               variant="ghost"
               size="icon"
-              onClick={toggleSidebar}
-              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+              onClick={activeGroup ? closeSubmenu : toggleSidebar}
+              aria-label={activeGroup ? "Close submenu" : isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground"
             >
-              <ChevronLeft className={cn("h-5 w-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
+              <ChevronLeft className={cn("h-5 w-5 transition-transform duration-300", !activeGroup && !isSidebarOpen && "rotate-180")} />
             </Button>
           </div>
         </aside>
@@ -250,15 +311,24 @@ interface NavGroupItemProps {
   active: boolean
   collapsed: boolean
   onToggle: () => void
+  onOpenSubmenu?: () => void
   onNavClick: () => void
 }
 
-function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick }: NavGroupItemProps) {
+function NavGroupItem({ group, expanded, active, collapsed, onToggle, onOpenSubmenu, onNavClick }: NavGroupItemProps) {
+  const handleClick = () => {
+    if (collapsed && onOpenSubmenu) {
+      onOpenSubmenu()
+    } else {
+      onToggle()
+    }
+  }
+
   return (
     <li>
       {/* Group header — clickable to expand/collapse */}
       <button
-        onClick={onToggle}
+        onClick={handleClick}
         className={cn(
           'group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
           active
@@ -283,39 +353,41 @@ function NavGroupItem({ group, expanded, active, collapsed, onToggle, onNavClick
         )}
       </button>
 
-      {/* Sub-items */}
-      <div className={cn(
-        "overflow-hidden transition-all duration-200",
-        expanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
-      )}>
-        <ul className="mt-1 space-y-0.5 pl-3 border-l-2 border-border ml-2.5">
-          {group.children.map((child) => (
-            <li key={child.to}>
-              <NavLink
-                to={child.to}
-                end={child.to === '/admin'}
-                onClick={onNavClick}
-                className={({ isActive }) =>
-                  cn(
-                    'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',
-                    isActive
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
-                    collapsed && 'md:hidden'
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
-                    <span className="text-[0.8125rem]">{child.label}</span>
-                  </>
-                )}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </div>
+      {/* Sub-items — hidden in collapsed state; the submenu view handles them */}
+      {!collapsed && (
+        <div className={cn(
+          "overflow-hidden transition-all duration-200",
+          expanded ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
+        )}>
+          <ul className="mt-1 space-y-0.5 pl-3 border-l-2 border-border ml-2.5">
+            {group.children.map((child) => (
+              <li key={child.to}>
+                <NavLink
+                  to={child.to}
+                  end={child.to === '/admin'}
+                  onClick={onNavClick}
+                  className={({ isActive }) =>
+                    cn(
+                      'group flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-all',
+                      isActive
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-foreground',
+                      collapsed && 'md:hidden'
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <child.icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground")} />
+                      <span className="text-[0.8125rem]">{child.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </li>
   )
 }

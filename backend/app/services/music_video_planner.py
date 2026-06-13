@@ -16,9 +16,9 @@ Output ONLY valid JSON:
 {"scenes": [{"scene_number": 1, "start_time": 0.0, "end_time": 10.0, "lyrics_segment": "lyrics", "visual_description": "desc", "image_prompt": "prompt", "mood": "neutral", "camera_movement": "static"}], "total_scenes": 1, "summary": "summary"}
 
 Guidelines:
-- Scene duration: 5-15 seconds each
+- Respect the PLANNING CONSTRAINTS block provided in the user prompt for max scene duration and prompt length.
 - Match mood to lyrics emotion
-- Image prompts: 10-30 words
+- Image prompts: concise, highly visual, and within the model's max prompt length
 - CRITICAL: Every image_prompt MUST begin with the requested visual style (e.g. "anime style: ...", "cinematic style: ...", "photorealistic: ..."). This ensures visual consistency across all scenes.
 - First scene sets mood, last provides closure
 
@@ -46,13 +46,24 @@ Only use avatars that are provided — do NOT invent new characters."""
         lyrics: dict[str, Any],
         duration: float,
         style: str = "realistic",
+        model_capabilities_context: str | None = None,
+        constraints_context: str | None = None,
+        max_clip_duration: float = 5.0,
+        image_max_prompt_length: int | None = None,
     ) -> dict[str, Any]:
         lyrics_text = lyrics.get("full_text", "")
         lines = lyrics.get("lines", [])
 
         line_info = self._build_line_info(lines)
 
-        prompt = self._build_planning_prompt(lyrics_text, line_info, duration, style)
+        prompt = self._build_planning_prompt(
+            lyrics_text,
+            line_info,
+            duration,
+            style,
+            model_capabilities_context=model_capabilities_context,
+            constraints_context=constraints_context,
+        )
 
         response = await self.llm.generate(
             prompt=prompt,
@@ -65,7 +76,21 @@ Only use avatars that are provided — do NOT invent new characters."""
         if not response:
             raise MusicVideoPlannerError("Empty response from LLM - check Ollama logs")
 
-        return self._parse_response(response, duration)
+        parsed = self._parse_response(response, duration)
+        scenes = self._enforce_max_scene_duration(
+            parsed.get("scenes", []), duration, max_clip_duration
+        )
+
+        if image_max_prompt_length:
+            for scene in scenes:
+                for key in ("image_prompt", "visual_description"):
+                    value = scene.get(key, "")
+                    if value and len(value) > image_max_prompt_length:
+                        scene[key] = value[:image_max_prompt_length].rsplit(" ", 1)[0]
+
+        parsed["scenes"] = scenes
+        parsed["total_scenes"] = len(scenes)
+        return parsed
 
     def _parse_response(self, response: str, duration: float) -> dict[str, Any]:
         try:
@@ -270,9 +295,15 @@ Only use avatars that are provided — do NOT invent new characters."""
         return "\n".join(line_info_parts)
 
     def _build_planning_prompt(
-        self, lyrics_text: str, line_info: str, duration: float, style: str
+        self,
+        lyrics_text: str,
+        line_info: str,
+        duration: float,
+        style: str,
+        model_capabilities_context: str | None = None,
+        constraints_context: str | None = None,
     ) -> str:
-        return f"""Create a scene-by-scene plan for a music video.
+        prompt = f"""Create a scene-by-scene plan for a music video.
 
 Song duration: {duration} seconds
 Visual style: {style}
@@ -281,9 +312,13 @@ Lyrics:
 {lyrics_text}
 
 Timestamped lyrics (for reference):
-{line_info}
-
-Create a detailed scene plan in JSON format."""
+{line_info}"""
+        if model_capabilities_context:
+            prompt += f"\n\n{model_capabilities_context}"
+        if constraints_context:
+            prompt += f"\n\n{constraints_context}"
+        prompt += "\n\nCreate a detailed scene plan in JSON format."
+        return prompt
 
     def _validate_and_fix_scenes(self, parsed: dict[str, Any], duration: float) -> dict[str, Any]:
         if "scenes" not in parsed:
@@ -334,3 +369,40 @@ Create a detailed scene plan in JSON format."""
         parsed["total_scenes"] = len(fixed_scenes)
 
         return parsed
+
+    def _enforce_max_scene_duration(
+        self,
+        scenes: list[dict[str, Any]],
+        duration: float,
+        max_clip_duration: float,
+    ) -> list[dict[str, Any]]:
+        """Split any scene longer than max_clip_duration into chained sub-scenes."""
+        if max_clip_duration <= 0:
+            max_clip_duration = 5.0
+        result: list[dict[str, Any]] = []
+        for scene in scenes:
+            scene_duration = scene.get("end_time", duration) - scene.get("start_time", 0)
+            if scene_duration <= max_clip_duration:
+                result.append(scene)
+                continue
+            start = scene.get("start_time", 0)
+            end = scene.get("end_time", duration)
+            sub_index = 0
+            while start < end:
+                sub_end = min(end, start + max_clip_duration)
+                sub_scene = dict(scene)
+                sub_scene["start_time"] = round(start, 2)
+                sub_scene["end_time"] = round(sub_end, 2)
+                if sub_index > 0:
+                    sub_scene["visual_description"] = (
+                        f"{scene.get('visual_description', '')} (continuation {sub_index + 1})"
+                    )
+                    sub_scene["image_prompt"] = (
+                        f"{scene.get('image_prompt', '')} (continuation {sub_index + 1})"
+                    )
+                result.append(sub_scene)
+                start = sub_end
+                sub_index += 1
+        for i, s in enumerate(result):
+            s["scene_number"] = i + 1
+        return result
