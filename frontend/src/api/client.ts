@@ -233,6 +233,8 @@ export interface CreateJobRequest {
   auto_start?: boolean
   provider_preference?: string
   model_preference?: string
+  chat_conversation_id?: string
+  chat_message_id?: string
 }
 
 export interface BatchJobRequest {

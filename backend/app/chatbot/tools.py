@@ -70,6 +70,24 @@ class ToolRegistry:
         ]
 
 
+async def _resolve_template_id(template: str, db: AsyncSession | None) -> str:
+    """Return a valid template UUID, resolving a name to an ID when possible."""
+    try:
+        UUID(template)
+        return template
+    except ValueError:
+        # The LLM sometimes passes a template name instead of a UUID.
+        # Resolve it to the matching builtin template ID.
+        if db is not None:
+            result = await db.execute(
+                select(Template.id).where(Template.name.ilike(template)).limit(1)
+            )
+            template_id = result.scalar_one_or_none()
+            if template_id is not None:
+                return str(template_id)
+        return template
+
+
 async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Create a new video generation job."""
     template = args.get("template")
@@ -82,25 +100,8 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     payload: dict[str, Any] = {
         "title": prompt[:50] if prompt else "Untitled Video",
         "input_data": {"prompt": prompt},
+        "template_id": await _resolve_template_id(template, ctx.db),
     }
-
-    try:
-        UUID(template)
-        payload["template_id"] = template
-    except ValueError:
-        # The LLM sometimes passes a template name instead of a UUID.
-        # Resolve it to the matching builtin template ID.
-        if ctx.db is not None:
-            result = await ctx.db.execute(
-                select(Template.id).where(Template.name.ilike(template)).limit(1)
-            )
-            template_id = result.scalar_one_or_none()
-            if template_id is not None:
-                payload["template_id"] = str(template_id)
-            else:
-                payload["template_id"] = template
-        else:
-            payload["template_id"] = template
 
     # Map API-supported fields only. The jobs API validates input_data against
     # the plugin's Pydantic schema and rejects unknown extra fields, so we must
@@ -174,7 +175,7 @@ async def _handle_present_job_draft(ctx: ToolContext, args: dict[str, Any]) -> d
         return {"error": "missing_argument", "message": "'prompt' is required"}
 
     draft: dict[str, Any] = {
-        "template": template,
+        "template": await _resolve_template_id(template, ctx.db),
         "prompt": prompt,
         "duration": args.get("duration", 30),
         "style": args.get("style", "realistic"),
@@ -1140,7 +1141,7 @@ def create_builtin_registry() -> ToolRegistry:
     registry.register(
         ToolDefinition(
             name="create_job",
-            description="Create a new video generation job. If the user has auto_create_jobs disabled, returns a draft payload instead.",
+            description="Create a new video generation job. In confirm mode the assistant should first call present_job_draft and wait for approval; in autonomous mode this tool creates the job directly.",
             input_schema={
                 "type": "object",
                 "properties": {

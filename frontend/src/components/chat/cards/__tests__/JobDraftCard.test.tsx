@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { MessageBubble } from '../../MessageBubble'
 import { ChatMessageList } from '../../ChatMessageList'
 import type { Message } from '../../../../stores/chat'
@@ -34,10 +34,15 @@ function makeMsg(overrides: Partial<Message> = {}): Message {
   }
 }
 
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+afterEach(() => {
+  cleanup()
+})
+
 describe('MessageBubble with job_card attachment', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
 
   it('renders a JobDraftCard when attachment kind is job_card and card_type is job_draft', () => {
     const msg = makeMsg({
@@ -107,6 +112,43 @@ describe('MessageBubble with job_card attachment', () => {
       })
     )
   })
+
+  it('links the created job to the originating chat conversation and message', async () => {
+    const msg = makeMsg({
+      id: 'msg-42',
+      attachments: [
+        {
+          kind: 'job_card',
+          card_type: 'job_draft',
+          job_id: null,
+          title: 'Job draft',
+          data: {
+            template: 'template-uuid',
+            prompt: 'A cat riding a bicycle through a neon city',
+            duration: 15,
+            style: 'cyberpunk',
+            aspect_ratio: '16:9',
+          },
+          actions: ['create'],
+        },
+      ],
+    })
+
+    render(<MessageBubble message={msg} conversationId="conv-7" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => {
+      expect(jobsApi.create).toHaveBeenCalledTimes(1)
+    })
+
+    expect(jobsApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chat_conversation_id: 'conv-7',
+        chat_message_id: 'msg-42',
+      })
+    )
+  })
 })
 
 describe('ChatMessageList with job_card attachment', () => {
@@ -135,5 +177,43 @@ describe('ChatMessageList with job_card attachment', () => {
 
     expect(screen.getByDisplayValue('A cat riding a bicycle through a neon city')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /create/i })).toBeInTheDocument()
+  })
+
+  it('links the created job to the originating chat conversation and message', async () => {
+    const msg = makeMsg({
+      id: 'msg-99',
+      role: 'assistant',
+      attachments: [
+        {
+          kind: 'job_card',
+          card_type: 'job_draft',
+          job_id: null,
+          title: 'Job draft',
+          data: {
+            template: 'template-uuid',
+            prompt: 'A cat riding a bicycle through a neon city',
+            duration: 15,
+            style: 'cyberpunk',
+            aspect_ratio: '16:9',
+          },
+          actions: ['create'],
+        },
+      ],
+    })
+
+    render(<ChatMessageList messages={[msg]} conversationId="conv-5" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /create/i }))
+
+    await waitFor(() => {
+      expect(jobsApi.create).toHaveBeenCalledTimes(1)
+    })
+
+    expect(jobsApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chat_conversation_id: 'conv-5',
+        chat_message_id: 'msg-99',
+      })
+    )
   })
 })

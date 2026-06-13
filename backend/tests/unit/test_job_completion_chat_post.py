@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.database import Conversation, Job, Message
-from app.workers.tasks import _post_completion_message
+from app.workers.tasks import _maybe_notify_job_failed, _post_completion_message
 
 
 @pytest.fixture
@@ -261,3 +261,48 @@ async def test_completion_guard_ignores_intermediate_cards(
         for msg in messages
         for attachment in (msg.attachments or [])
     )
+
+
+@pytest.mark.asyncio
+async def test_failure_posts_job_error_card(db_session, chat_job, conversation):
+    with patch(
+        "app.services.job_chat_notifier.ws_manager.broadcast_chat_message",
+        new_callable=AsyncMock,
+    ) as mock_ws:
+        await _maybe_notify_job_failed(chat_job, "Budget exceeded", db=db_session)
+
+    mock_ws.assert_awaited_once()
+    assert mock_ws.call_args[0][0] == str(conversation.id)
+
+    result = await db_session.execute(
+        select(Message).where(
+            Message.conversation_id == conversation.id,
+            Message.job_id == chat_job.id,
+        )
+    )
+    message = result.scalar_one()
+    attachment = message.attachments[0]
+    assert attachment["kind"] == "job_card"
+    assert attachment["card_type"] == "job_error"
+    assert attachment["data"]["error_message"] == "Budget exceeded"
+
+
+@pytest.mark.asyncio
+async def test_failure_skips_when_no_chat_link(db_session, regular_user, template):
+    job = Job(
+        id=uuid4(),
+        user_id=regular_user.id,
+        template_id=template.id,
+        status="processing",
+        input_data={"prompt": "test"},
+    )
+    db_session.add(job)
+    await db_session.commit()
+
+    with patch(
+        "app.services.job_chat_notifier.ws_manager.broadcast_chat_message",
+        new_callable=AsyncMock,
+    ) as mock_ws:
+        await _maybe_notify_job_failed(job, "Budget exceeded", db=db_session)
+
+    mock_ws.assert_not_awaited()

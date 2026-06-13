@@ -15,6 +15,7 @@ import {
 interface ChatMessageListProps {
   messages: Message[]
   streaming?: boolean
+  conversationId?: string
 }
 
 function TypingIndicator() {
@@ -210,7 +211,7 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
   )
 }
 
-function AttachmentList({ attachments }: { attachments: Message['attachments'] }) {
+function AttachmentList({ attachments, conversationId, messageId }: { attachments: Message['attachments']; conversationId?: string; messageId?: string }) {
   if (!attachments || attachments.length === 0) return null
 
   return (
@@ -218,18 +219,22 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
       {attachments.map((att, i) => {
         if (att.kind === 'job_card') {
           const card = att as JobCardAttachment
+          const cardComponent = {
+            job_draft: <JobDraftCard data={card.data} jobId={card.job_id} conversationId={conversationId} messageId={messageId} />,
+            scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
+            image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
+            video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
+            job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
+            job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
+          }[card.card_type]
+
           return (
             <div key={i} className="w-full text-foreground">
-              {
-                {
-                  job_draft: <JobDraftCard data={card.data} jobId={card.job_id} />,
-                  scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
-                  image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
-                  video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
-                  job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
-                  job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
-                }[card.card_type]
-              }
+              {cardComponent ?? (
+                <div className="rounded border bg-muted p-2 text-xs text-muted-foreground">
+                  Unknown card type: {card.card_type}
+                </div>
+              )}
             </div>
           )
         }
@@ -277,7 +282,7 @@ function AttachmentList({ attachments }: { attachments: Message['attachments'] }
   )
 }
 
-export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
+export function ChatMessageList({ messages, streaming, conversationId }: ChatMessageListProps) {
   const visibleMessages = messages.filter((msg) => msg.role !== 'tool' && msg.role !== 'system')
 
   const showTypingIndicator =
@@ -324,12 +329,12 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
             >
               {isUser ? (
                 <>
-                  <AttachmentList attachments={msg.attachments} />
+                  <AttachmentList attachments={msg.attachments} conversationId={conversationId} messageId={msg.id} />
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                 </>
               ) : (
                 <>
-                  <AttachmentList attachments={msg.attachments} />
+                  <AttachmentList attachments={msg.attachments} conversationId={conversationId} messageId={msg.id} />
                   <AssistantMessage content={msg.content} streaming={streaming} />
                   {msg.mediaResult && (
                     <div className="mt-2">

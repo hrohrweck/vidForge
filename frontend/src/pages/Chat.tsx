@@ -197,7 +197,7 @@ export default function Chat() {
 
             {/* Chat messages — fills remaining space */}
             <div className="flex-1 rounded-[10px] border bg-card overflow-hidden min-h-0">
-              <ChatMessageList messages={messages} streaming={streaming} />
+              <ChatMessageList messages={messages} streaming={streaming} conversationId={selectedConversationId ?? undefined} />
             </div>
 
             {/* Input area — 50px height */}

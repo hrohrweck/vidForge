@@ -93,6 +93,28 @@ class TestPresentJobDraft:
         assert result["error"] == "missing_argument"
         assert "prompt" in result["message"]
 
+    @pytest.mark.asyncio
+    async def test_resolves_template_name_to_uuid(self, ctx_with_conversation):
+        from unittest.mock import MagicMock
+
+        template_id = uuid4()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = template_id
+        ctx_with_conversation.db.execute.return_value = mock_result
+        ctx_with_conversation.db.add = MagicMock(return_value=None)
+
+        with patch(
+            "app.api.websocket.manager.broadcast_chat_message",
+            new_callable=AsyncMock,
+        ):
+            result = await _handle_present_job_draft(
+                ctx_with_conversation,
+                {"template": "Prompt to Video", "prompt": "a cinematic dragon"},
+            )
+
+        ctx_with_conversation.db.execute.assert_awaited_once()
+        assert result["draft"]["template"] == str(template_id)
+
 
 class TestSetChatAutonomy:
     @pytest.mark.asyncio

@@ -164,18 +164,22 @@ export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
             {message.attachments.map((att, i) => {
               if (att.kind === 'job_card') {
                 const card = att as JobCardAttachment
+                const cardComponent = {
+                  job_draft: <JobDraftCard data={card.data} jobId={card.job_id} conversationId={conversationId} messageId={message.id} />,
+                  scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
+                  image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
+                  video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
+                  job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
+                  job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
+                }[card.card_type]
+
                 return (
                   <div key={i} className="w-full">
-                    {
-                      {
-                        job_draft: <JobDraftCard data={card.data} jobId={card.job_id} />,
-                        scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
-                        image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
-                        video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
-                        job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
-                        job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
-                      }[card.card_type]
-                    }
+                    {cardComponent ?? (
+                      <div className="rounded border bg-muted p-2 text-xs text-muted-foreground">
+                        Unknown card type: {card.card_type}
+                      </div>
+                    )}
                   </div>
                 )
               }

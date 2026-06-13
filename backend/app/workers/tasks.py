@@ -136,6 +136,19 @@ async def _post_completion_message(job_id: UUID, db: AsyncSession | None = None)
     await JobChatNotifier.notify_completed(db, job)
 
 
+async def _maybe_notify_job_failed(
+    job: Job, error_message: str, db: AsyncSession | None = None
+) -> None:
+    """If the job was triggered from chat, post a failure card."""
+    if not job.chat_conversation_id:
+        return
+    if db is None:
+        async with ctx.session_factory() as db:
+            return await _maybe_notify_job_failed(job, error_message, db=db)
+
+    await JobChatNotifier.notify_failed(db, job, error_message)
+
+
 async def get_template_name(db, template_id: UUID | None) -> str:
     """Look up a template name by ID (uses the caller's session)."""
     if template_id is None:
@@ -308,12 +321,14 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                 )
                 acquired = await semaphore.acquire(job_id)
                 if not acquired:
+                    error_message = "Provider queue is full. Job will be retried."
                     await update_job_status(
                         job_uuid,
                         "failed",
                         0,
-                        error_message="Provider queue is full. Job will be retried.",
+                        error_message=error_message,
                     )
+                    await _maybe_notify_job_failed(job, error_message, db=db)
                     return {"status": "failed", "error": "Queue full", "job_id": job_id}
 
             from sqlalchemy import delete as sa_delete
@@ -373,6 +388,7 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                             0,
                             error_message=budget_message,
                         )
+                        await _maybe_notify_job_failed(job, budget_message, db=db)
                         return {"status": "failed", "error": budget_message, "job_id": job_id}
 
                     await update_job_status(
@@ -407,6 +423,7 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
         except Exception as exc:
             error_message = str(exc)
             await update_job_status(job_uuid, "failed", 0, error_message=error_message)
+            await _maybe_notify_job_failed(job, error_message, db=db)
 
             # Capture error for notification system
             try:

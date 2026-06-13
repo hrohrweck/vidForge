@@ -4,9 +4,11 @@ import { jobsApi } from '../../../api/client'
 export interface JobDraftCardProps {
   data: Record<string, unknown>
   jobId: string | null
+  conversationId?: string
+  messageId?: string
 }
 
-export function JobDraftCard({ data, jobId }: JobDraftCardProps) {
+export function JobDraftCard({ data, jobId, conversationId, messageId }: JobDraftCardProps) {
   const draft = data as {
     template: string
     prompt: string
@@ -45,6 +47,8 @@ export function JobDraftCard({ data, jobId }: JobDraftCardProps) {
           video_model: draft.video_model,
         },
         auto_start: true,
+        chat_conversation_id: conversationId,
+        chat_message_id: messageId,
       })
       setCreated(true)
     } catch (err) {
