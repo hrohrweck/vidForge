@@ -921,22 +921,11 @@ async def _sync_provider_models(provider_type: str) -> dict:
             discovered_ids = {m["model_id"] for m in discovered}
 
             for model_data in discovered:
-                existing = await service.get_by_id(db, model_data["model_id"], provider.id)
-                if existing:
-                    update_data = {
-                        k: v for k, v in model_data.items() if k not in ("model_id", "provider_id")
-                    }
-                    update_data["is_deprecated"] = False
-                    update_data["is_active"] = True
-                    update_data["last_synced_at"] = datetime.utcnow()
-                    await service.update(db, model_data["model_id"], provider.id, update_data)
-                else:
-                    create_data = {
-                        **model_data,
-                        "provider_id": provider.id,
-                        "last_synced_at": datetime.utcnow(),
-                    }
-                    await service.create(db, create_data)
+                model_id = model_data.get("model_id") or model_data.get("id")
+                if not model_id:
+                    continue
+                model_data.setdefault("last_synced_at", datetime.utcnow())
+                await service.upsert(db, provider.id, model_id, model_data)
                 total_synced += 1
 
             # Mark models not in discovered set as deprecated
