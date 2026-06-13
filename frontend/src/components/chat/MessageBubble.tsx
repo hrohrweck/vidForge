@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Message } from '../../stores/chat'
 import JobProgress from './JobProgress'
 import { useChatStore } from '../../stores/chat'
@@ -21,6 +23,101 @@ function formatTime(iso: string): string {
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+function parseThinking(content: string): { thinking: string; answer: string } {
+  // <think>...</think> (DeepSeek / Ollama / instructed format)
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/)
+  if (thinkMatch) {
+    const before = content.slice(0, thinkMatch.index).trim()
+    const after = content.slice(thinkMatch.index! + thinkMatch[0].length).trim()
+    const thinking = [before, thinkMatch[1]].filter(Boolean).join('\n').trim()
+    return { thinking, answer: after }
+  }
+
+  // Qwen / CJK thinking markers
+  const cjkMatch = content.match(/【thinking】([\s\S]*?)【\/thinking】/)
+  if (cjkMatch) {
+    const before = content.slice(0, cjkMatch.index).trim()
+    const after = content.slice(cjkMatch.index! + cjkMatch[0].length).trim()
+    const thinking = [before, cjkMatch[1]].filter(Boolean).join('\n').trim()
+    return { thinking, answer: after }
+  }
+
+  // Streaming partial: hide everything from an unclosed <think> tag
+  const openIdx = content.indexOf('<think>')
+  if (openIdx !== -1) {
+    return {
+      thinking: content.slice(openIdx + 7).trim(),
+      answer: content.slice(0, openIdx).trim(),
+    }
+  }
+
+  // Common inline reasoning markers
+  const markers = [
+    'Generate Response. (Proceed to output)',
+    'Generate Response (Proceed to output)',
+    'Generate Final Response.',
+    'Generate Response.',
+    '\nFinal Answer',
+    '\nActual Answer',
+    '\nAnswer:',
+  ]
+  for (const marker of markers) {
+    const idx = content.indexOf(marker)
+    if (idx > 20 && idx + marker.length < content.length * 0.95) {
+      return {
+        thinking: content.slice(0, idx).trim(),
+        answer: content.slice(idx + marker.length).trim(),
+      }
+    }
+  }
+
+  return { thinking: '', answer: content }
+}
+
+function AssistantContent({ content }: { content: string }) {
+  const { thinking, answer } = parseThinking(content)
+  const [showThinking, setShowThinking] = useState(false)
+  const hasThinking = thinking.length > 0
+
+  return (
+    <div className="text-sm space-y-2">
+      {hasThinking && (
+        <div className="rounded border border-border/50 overflow-hidden">
+          <button
+            onClick={() => setShowThinking(!showThinking)}
+            className="flex w-full items-center gap-1.5 bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors"
+          >
+            {showThinking ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            <span>Thinking</span>
+          </button>
+          {showThinking && (
+            <div className="px-3 py-2 text-xs text-muted-foreground/70 italic border-t border-border/30 max-h-60 overflow-y-auto">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {thinking}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+      {answer ? (
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {answer}
+          </ReactMarkdown>
+        </div>
+      ) : !hasThinking ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {content}
+        </ReactMarkdown>
+      ) : null}
+    </div>
+  )
 }
 
 export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
@@ -92,9 +189,7 @@ export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
         {isUser ? (
           <p className="text-sm">{message.content}</p>
         ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.content}
-          </ReactMarkdown>
+          <AssistantContent content={message.content} />
         )}
       </div>
       {!isUser && message.jobId && !message.mediaResult && conversationId && (
