@@ -156,9 +156,10 @@ async def template(db_session: AsyncSession):
 
 
 @pytest.fixture
-async def conversation(db_session: AsyncSession):
+async def conversation(db_session: AsyncSession, regular_user: User):
     conversation = Conversation(
         id=uuid4(),
+        user_id=regular_user.id,
         title="Test Conversation",
         model_id="test-model",
     )

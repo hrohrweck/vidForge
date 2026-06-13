@@ -227,7 +227,7 @@ class TestChatAPICrud:
         assert response.status_code == 201
         data = response.json()
         assert data["title"] == "Test"
-        
+
         # Verify the conversation was created with the specified model
         conv_id = data["id"]
         response = await client.get(
@@ -244,7 +244,7 @@ class TestChatAPICrud:
     ):
         """Test that create_conversation uses fallback when model_id not provided."""
         from app.database import UserSettings
-        
+
         # Set user's default chat model
         settings = UserSettings(
             user_id=regular_user.id,
@@ -252,7 +252,7 @@ class TestChatAPICrud:
         )
         db_session.add(settings)
         await db_session.commit()
-        
+
         response = await client.post(
             "/api/chat/conversations",
             json={"title": "Test"},
@@ -368,3 +368,93 @@ class TestChatUploads:
             files={"file": ("big.txt", big, "text/plain")},
         )
         assert response.status_code == 413
+
+
+class TestChatAutonomy:
+    @pytest.fixture
+    async def conversation(self, db_session, regular_user):
+        conv = Conversation(
+            id=uuid4(),
+            user_id=regular_user.id,
+            title="Autonomy Test Chat",
+            model_id="default",
+        )
+        db_session.add(conv)
+        await db_session.commit()
+        await db_session.refresh(conv)
+        return conv
+
+    @pytest.mark.asyncio
+    async def test_get_autonomy_returns_default_confirm(
+        self, client: AsyncClient, regular_user_token: str, conversation
+    ):
+        response = await client.get(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {regular_user_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "confirm"
+
+    @pytest.mark.asyncio
+    async def test_post_autonomy_sets_override_and_get_returns_it(
+        self, client: AsyncClient, regular_user_token: str, conversation
+    ):
+        response = await client.post(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {regular_user_token}"},
+            json={"mode": "autonomous"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "autonomous"
+
+        response = await client.get(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {regular_user_token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "autonomous"
+
+    @pytest.mark.asyncio
+    async def test_post_autonomy_invalid_mode_returns_422(
+        self, client: AsyncClient, regular_user_token: str, conversation
+    ):
+        response = await client.post(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {regular_user_token}"},
+            json={"mode": "invalid"},
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_get_autonomy_other_user_returns_404(
+        self, client: AsyncClient, superuser_token: str, conversation
+    ):
+        response = await client.get(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {superuser_token}"},
+        )
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_post_autonomy_other_user_returns_404(
+        self, client: AsyncClient, superuser_token: str, conversation
+    ):
+        response = await client.post(
+            f"/api/chat/conversations/{conversation.id}/autonomy",
+            headers={"Authorization": f"Bearer {superuser_token}"},
+            json={"mode": "autonomous"},
+        )
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_cannot_get_autonomy(self, client: AsyncClient):
+        response = await client.get(f"/api/chat/conversations/{uuid4()}/autonomy")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_cannot_post_autonomy(self, client: AsyncClient):
+        response = await client.post(f"/api/chat/conversations/{uuid4()}/autonomy", json={"mode": "autonomous"})
+        assert response.status_code == 401
