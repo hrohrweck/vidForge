@@ -503,6 +503,14 @@ export interface SidebarPreferenceUpdate {
   sidebar_open: boolean
 }
 
+export interface ChatAutonomyResponse {
+  chat_autonomy: 'confirm' | 'autonomous' | null
+}
+
+export interface ChatAutonomyUpdate {
+  chat_autonomy: 'confirm' | 'autonomous'
+}
+
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
@@ -524,6 +532,14 @@ export const usersApi = {
     const response = await api.put<SidebarPreferenceResponse>('/users/settings/sidebar', {
       sidebar_open: sidebarOpen,
     })
+    return response.data
+  },
+  getChatAutonomy: async () => {
+    const response = await api.get<ChatAutonomyResponse>('/users/settings/chat-autonomy')
+    return response.data
+  },
+  setChatAutonomy: async (mode: 'confirm' | 'autonomous') => {
+    const response = await api.put<ChatAutonomyResponse>('/users/settings/chat-autonomy', { chat_autonomy: mode })
     return response.data
   },
 }

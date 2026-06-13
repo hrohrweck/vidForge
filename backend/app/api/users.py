@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
@@ -76,7 +76,9 @@ async def update_user_settings(
     if settings_data.storage_config is not None:
         settings.storage_config = settings_data.storage_config
     if settings_data.preferences is not None:
-        settings.preferences = settings_data.preferences
+        merged = dict(settings.preferences or {})
+        merged.update(settings_data.preferences)
+        settings.preferences = merged
 
     await db.commit()
     await db.refresh(settings)
@@ -195,3 +197,46 @@ async def update_sidebar_settings(
 
     await db.commit()
     return SidebarSettingsResponse(sidebar_open=data.sidebar_open)
+
+
+class ChatAutonomyRequest(BaseModel):
+    chat_autonomy: Literal["confirm", "autonomous"]
+
+
+class ChatAutonomyResponse(BaseModel):
+    chat_autonomy: Literal["confirm", "autonomous"] | None = None
+
+
+@router.get("/settings/chat-autonomy", response_model=ChatAutonomyResponse)
+async def get_chat_autonomy(
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+) -> ChatAutonomyResponse:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+
+    if not settings or not settings.preferences:
+        return ChatAutonomyResponse(chat_autonomy=None)
+
+    return ChatAutonomyResponse(chat_autonomy=settings.preferences.get("chat_autonomy"))
+
+
+@router.put("/settings/chat-autonomy", response_model=ChatAutonomyResponse)
+async def update_chat_autonomy(
+    data: ChatAutonomyRequest,
+    current_user: User = Depends(get_current_user_from_bearer_or_cookie),
+    db: AsyncSession = Depends(get_db),
+) -> ChatAutonomyResponse:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == current_user.id))
+    settings = result.scalar_one_or_none()
+    if not settings:
+        settings = UserSettings(user_id=current_user.id)
+        db.add(settings)
+
+    current_prefs = dict(settings.preferences) if settings.preferences else {}
+    current_prefs["chat_autonomy"] = data.chat_autonomy
+    settings.preferences = current_prefs
+
+    await db.commit()
+    await db.refresh(settings)
+    return ChatAutonomyResponse(chat_autonomy=data.chat_autonomy)
