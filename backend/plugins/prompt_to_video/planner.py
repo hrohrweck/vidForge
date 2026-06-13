@@ -111,6 +111,7 @@ async def plan_scenes_from_prompt(
     model: str | None = None,
     max_clip_duration: float = 5.0,
     image_max_prompt_length: int | None = None,
+    original_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Plan scenes from a single text prompt.
 
@@ -154,13 +155,14 @@ async def plan_scenes_from_prompt(
                 prompt=user_prompt,
                 system=SYSTEM_PROMPT,
                 max_tokens=4096,
-                temperature=0.7,
+                temperature=0.3,
                 provider=provider,
+                json_mode=True,
             )
             result = _parse_response(
                 response,
                 duration,
-                original_prompt=prompt,
+                original_prompt=original_prompt or prompt,
                 style=style,
                 max_clip_duration=max_clip_duration,
             )
@@ -170,6 +172,7 @@ async def plan_scenes_from_prompt(
                 "Scene planning produced fallback on attempt %s, retrying...",
                 attempt + 1,
             )
+            logger.debug("Unparseable planner response:\n%s", response)
             user_prompt += (
                 "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, "
                 "markdown, or explanations."

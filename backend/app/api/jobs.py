@@ -86,7 +86,9 @@ def _normalize_provider_preference(value: str) -> str:
     return "auto"
 
 
-def _validate_job_input(template: Template | None, input_data: dict[str, Any] | None) -> dict[str, Any]:
+def _validate_job_input(
+    template: Template | None, input_data: dict[str, Any] | None
+) -> dict[str, Any]:
     if template is None:
         return input_data or {}
 
@@ -104,7 +106,9 @@ def _validate_job_input(template: Template | None, input_data: dict[str, Any] | 
 
     try:
         data = input_data if input_data is not None else {}
-        return schema_cls.model_validate(data).model_dump()
+        # Dump in JSON mode so UUIDs and other non-JSON types become strings
+        # before the dict is stored in the JSONB input_data column.
+        return schema_cls.model_validate(data).model_dump(mode="json")
     except ValidationError as exc:
         errors = []
         for err in exc.errors():
@@ -589,6 +593,7 @@ async def download_job_output(
         raise HTTPException(status_code=404, detail="Job has no output file")
 
     from app.config import get_settings
+
     settings = get_settings()
     file_path = Path(settings.storage_path) / job.output_path
     if not file_path.exists():

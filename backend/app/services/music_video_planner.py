@@ -76,8 +76,9 @@ Only use avatars that are provided — do NOT invent new characters."""
             prompt=prompt,
             system=self.SYSTEM_PROMPT,
             max_tokens=4096,
-            temperature=0.7,
+            temperature=0.3,
             provider=self.provider,
+            json_mode=True,
         )
 
         if not response:

@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class PromptToVideoPlugin(PluginBase):
-
     # ------------------------------------------------------------------
     # Identity
     # ------------------------------------------------------------------
@@ -63,7 +62,10 @@ class PromptToVideoPlugin(PluginBase):
     # ------------------------------------------------------------------
 
     async def enrich_inputs(
-        self, db: AsyncSession, job: Job, context: dict[str, Any],
+        self,
+        db: AsyncSession,
+        job: Job,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
         input_data = job.input_data or {}
         style = input_data.get("style", "realistic")
@@ -72,6 +74,7 @@ class PromptToVideoPlugin(PluginBase):
         provider = None
         if text_model:
             from app.services.llm_service import resolve_llm
+
             provider = await resolve_llm(text_model, db)
 
         # Optionally enhance the prompt via LLM
@@ -79,6 +82,7 @@ class PromptToVideoPlugin(PluginBase):
         enhance = input_data.get("enhance_prompt", True)
         if enhance and prompt:
             from app.services.llm_service import PromptEnhancer
+
             enhancer = PromptEnhancer(provider=provider, model=text_model)
             try:
                 enhanced = await enhancer.enhance(prompt, style)
@@ -133,7 +137,10 @@ class PromptToVideoPlugin(PluginBase):
     # ------------------------------------------------------------------
 
     async def plan_scenes(
-        self, db: AsyncSession, job: Job, context: dict[str, Any],
+        self,
+        db: AsyncSession,
+        job: Job,
+        context: dict[str, Any],
     ) -> dict[str, Any]:
         from app.api.models import get_model
         from app.services.avatar_prompt_builder import (
@@ -151,7 +158,8 @@ class PromptToVideoPlugin(PluginBase):
         from .planner import plan_scenes_from_prompt
 
         input_data = job.input_data or {}
-        prompt = input_data.get("enhanced_prompt") or input_data.get("prompt", "")
+        original_prompt = input_data.get("prompt", "")
+        prompt = input_data.get("enhanced_prompt") or original_prompt
         style = input_data.get("style", "realistic")
         duration = input_data.get("duration", 30)
         text_model = input_data.get("text_model")
@@ -211,6 +219,7 @@ class PromptToVideoPlugin(PluginBase):
             model=text_model,
             max_clip_duration=max_clip_duration,
             image_max_prompt_length=image_max_prompt_length,
+            original_prompt=original_prompt,
         )
 
         scenes = result["scenes"]

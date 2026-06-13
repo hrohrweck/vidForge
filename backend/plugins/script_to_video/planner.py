@@ -158,8 +158,9 @@ async def plan_scenes_from_script(
                 prompt=user_prompt,
                 system=SYSTEM_PROMPT,
                 max_tokens=4096,
-                temperature=0.7,
+                temperature=0.3,
                 provider=provider,
+                json_mode=True,
             )
 
             result = _parse_response(
@@ -173,6 +174,7 @@ async def plan_scenes_from_script(
             logger.warning(
                 "Scene planning produced fallback on attempt %s, retrying...", attempt + 1
             )
+            logger.debug("Unparseable planner response:\n%s", response)
             user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
 
         max_prompt_chars = image_max_prompt_length or 400

@@ -61,9 +61,7 @@ async def resolve_llm(model_id: str, db=None) -> "LLMClient | Any":
         config = result.scalar_one_or_none()
         if config and config.provider:
             provider = config.provider
-            instance = await registry.create(
-                provider.provider_type, provider.id, provider.config
-            )
+            instance = await registry.create(provider.provider_type, provider.id, provider.config)
             if not isinstance(instance, LLMProvider):
                 raise LLMError(
                     f"Provider '{provider.provider_type}' does not support LLM operations"
@@ -243,6 +241,7 @@ class LLMClient:
         temperature: float = 0.7,
         retries: int = 3,
         provider: Any | None = None,
+        json_mode: bool = False,
     ) -> str:
         messages = []
         if system:
@@ -256,17 +255,20 @@ class LLMClient:
 
         for attempt in range(retries):
             try:
+                payload: dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "num_predict": max_tokens,
+                        "temperature": temperature,
+                    },
+                }
+                if json_mode:
+                    payload["format"] = "json"
                 response = await self.client.post(
                     f"{self.base_url}/api/chat",
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "stream": False,
-                        "options": {
-                            "num_predict": max_tokens,
-                            "temperature": temperature,
-                        },
-                    },
+                    json=payload,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -412,6 +414,8 @@ Rules:
 - Keep the enhanced prompt concise (2-3 sentences max)
 - Don't add dialogue or text overlays unless specifically requested
 - Focus on what can be visually shown
+- Output a single paragraph of plain text
+- Do NOT use bullet points, numbered lists, headings, or labels
 
 Output only the enhanced prompt, nothing else."""
 
@@ -421,7 +425,12 @@ Output only the enhanced prompt, nothing else."""
         "manga": "manga style, black and white with dramatic shading, strong contrasts, stylized",
     }
 
-    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None, model: str | None = None):
+    def __init__(
+        self,
+        llm_client: LLMClient | None = None,
+        provider: Any | None = None,
+        model: str | None = None,
+    ):
         self.llm = llm_client or LLMClient(model=model)
         self.provider = provider
 
@@ -446,7 +455,7 @@ Output only the enhanced prompt, nothing else."""
             prompt=user_prompt,
             system=self.SYSTEM_PROMPT,
             max_tokens=256,
-            temperature=0.7,
+            temperature=0.3,
             provider=self.provider,
         )
 
@@ -510,6 +519,13 @@ Output only the enhanced prompt, nothing else."""
             "summary",
             "final prompt",
             "enhanced prompt",
+            "identify key elements to enhance",
+            "brainstorm visual details",
+            "visual details",
+            "key elements",
+            "enhancement notes",
+            "step",
+            "steps",
         }
 
         lines = text.splitlines()
