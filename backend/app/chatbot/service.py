@@ -40,8 +40,9 @@ SYSTEM_PROMPT = (
     "You have access to tools for: jobs, scenes, media, projects, styles, "
     "avatars, audio, settings, templates, and dashboard. Use them to help "
     "users manage video generation workflows.\n\n"
-    "When a user refers to an attached image and you need to pass it to a tool, "
-    "include the image URL in the reference_image_url parameter.\n\n"
+    "When a user wants a character in a video, ask them to select or create an "
+    "avatar and pass its ID in the avatars parameter of create_job. "
+    "Do not pass image URLs to create_job; they are ignored by the video pipeline.\n\n"
     "IMPORTANT: When triggering a media-generation job (image or video), "
     "the bot must announce the action (e.g., \"I'm starting a video generation. "
     "I'll post the result here when it's ready.\") and rely on the platform "
@@ -545,7 +546,13 @@ class ChatOrchestrator:
                             pass
                     should_pause = self._should_pause_after_tool(tool_name, result)
                     is_draft = isinstance(result, dict) and result.get("action") == "draft"
-                    kind = "job_draft" if is_draft else "job_created" if should_pause else "tool_result"
+                    kind = (
+                        "job_draft"
+                        if is_draft
+                        else "job_created"
+                        if should_pause
+                        else "tool_result"
+                    )
                     yield (
                         SSEEventType.TOOL_CALL_RESULT.value,
                         {
@@ -727,9 +734,7 @@ class ChatOrchestrator:
         # Assistant messages are stored with reasoning tags intact so the UI can
         # show them; the LLM must only see the stripped answer.
         content = (
-            _strip_thinking(message.content)
-            if message.role == "assistant"
-            else message.content
+            _strip_thinking(message.content) if message.role == "assistant" else message.content
         )
         data: dict[str, Any] = {"role": message.role, "content": content}
         if message.tool_calls:
@@ -934,15 +939,21 @@ class ChatOrchestrator:
 
     def _error_event(self, reason: str) -> StreamEvent:
         if reason == "wall_clock_limit_exceeded":
-            return (SSEEventType.ERROR.value, {
-                "reason": reason,
-                "message": "The conversation timed out (15 minutes). Please try a shorter message or split your request into smaller parts.",
-            })
+            return (
+                SSEEventType.ERROR.value,
+                {
+                    "reason": reason,
+                    "message": "The conversation timed out (15 minutes). Please try a shorter message or split your request into smaller parts.",
+                },
+            )
         if reason == "iteration_limit_exceeded":
-            return (SSEEventType.ERROR.value, {
-                "reason": reason,
-                "message": "The assistant reached the maximum number of steps for this turn. Please try again or split your request into smaller parts.",
-            })
+            return (
+                SSEEventType.ERROR.value,
+                {
+                    "reason": reason,
+                    "message": "The assistant reached the maximum number of steps for this turn. Please try again or split your request into smaller parts.",
+                },
+            )
         return (SSEEventType.ERROR.value, {"reason": reason})
 
     def _done_event(self) -> StreamEvent:

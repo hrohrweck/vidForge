@@ -20,14 +20,17 @@ from ..prompt_to_video.planner import (
     _ensure_concise_prompts,
     _ensure_style_prefix,
     _extract_json_with_scenes,
+    _scene_contains_placeholders,
 )
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a video director. Convert script segments into visual scenes for AI video generation.
 
-Output ONLY valid JSON:
-{"scenes": [{"start_time": 0.0, "end_time": 5.0, "narration": "text", "visual_description": "desc", "image_prompt": "prompt", "mood": "mood", "camera_movement": "movement", "seed_image_prompt": "image prompt for seed image generation"}]}
+Output ONLY valid JSON. Do not include markdown fences, explanations, or reasoning outside the JSON. Do NOT copy placeholder text from the example — fill every field with specific content derived from the user's script.
+
+Example shape (fill with your own content, not these placeholders):
+{"scenes": [{"start_time": 0.0, "end_time": 5.0, "narration": "the spoken narration for this scene", "visual_description": "a specific description of what happens visually", "image_prompt": "photorealistic cinematic style: a vivid, detailed description of the scene", "mood": "energetic", "camera_movement": "dynamic tracking shot", "seed_image_prompt": "photorealistic cinematic style: close-up of the subject in the same scene"}], "object_selections": []}
 
 Guidelines:
 - Scene duration: respect the max clip duration in the PLANNING CONSTRAINTS. If the total video requires more time, split the story into multiple scenes rather than exceeding the per-clip limit.
@@ -136,10 +139,7 @@ async def plan_scenes_from_script(
             if visual:
                 seg_text += f"\n   Visual direction: {visual}"
 
-        user_prompt = (
-            f"Create a scene plan for a {duration:.0f}-second video.\n"
-            f"Style: {style}\n"
-        )
+        user_prompt = f"Create a scene plan for a {duration:.0f}-second video.\nStyle: {style}\n"
         if avatars_context:
             user_prompt += f"\n{avatars_context}\n"
         if objects_context:
@@ -170,14 +170,14 @@ async def plan_scenes_from_script(
             )
             if not result.get("_is_fallback"):
                 break
-            logger.warning("Scene planning produced fallback on attempt %s, retrying...", attempt + 1)
+            logger.warning(
+                "Scene planning produced fallback on attempt %s, retrying...", attempt + 1
+            )
             user_prompt += "\n\nIMPORTANT: Output ONLY valid JSON with no extra text, markdown, or explanations."
 
         max_prompt_chars = image_max_prompt_length or 400
         _ensure_style_prefix(result["scenes"], style)
-        await _ensure_concise_prompts(
-            result["scenes"], style, llm, max_chars=max_prompt_chars
-        )
+        await _ensure_concise_prompts(result["scenes"], style, llm, max_chars=max_prompt_chars)
 
         return result
     finally:
@@ -212,7 +212,11 @@ def _parse_response(
 
     if not parsed:
         logger.warning("Could not parse LLM scene plan, using fallback")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        segments_count = (
+            len(original_segments)
+            if original_segments
+            else max(1, int(target_duration / max_clip_duration))
+        )
         return _fallback_result(
             segments_count,
             original_segments,
@@ -223,7 +227,11 @@ def _parse_response(
     scenes = parsed.get("scenes", [])
     if not scenes or not isinstance(scenes, list):
         logger.warning("LLM response has invalid scenes list, falling back")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        segments_count = (
+            len(original_segments)
+            if original_segments
+            else max(1, int(target_duration / max_clip_duration))
+        )
         return _fallback_result(
             segments_count,
             original_segments,
@@ -234,7 +242,25 @@ def _parse_response(
     # Validate each scene is a dictionary
     if not all(isinstance(scene, dict) for scene in scenes):
         logger.warning("LLM response contains non-dict scenes, falling back")
-        segments_count = len(original_segments) if original_segments else max(1, int(target_duration / max_clip_duration))
+        segments_count = (
+            len(original_segments)
+            if original_segments
+            else max(1, int(target_duration / max_clip_duration))
+        )
+        return _fallback_result(
+            segments_count,
+            original_segments,
+            max_clip_duration,
+            target_duration=target_duration,
+        )
+
+    if any(_scene_contains_placeholders(scene) for scene in scenes):
+        logger.warning("LLM response contains placeholder text, falling back")
+        segments_count = (
+            len(original_segments)
+            if original_segments
+            else max(1, int(target_duration / max_clip_duration))
+        )
         return _fallback_result(
             segments_count,
             original_segments,
@@ -295,7 +321,9 @@ def _fallback_scenes(
         {
             "start_time": i * max_clip_duration,
             "end_time": (i + 1) * max_clip_duration,
-            "narration": original_segments[i].get("narration", "") if original_segments and i < len(original_segments) else "",
+            "narration": original_segments[i].get("narration", "")
+            if original_segments and i < len(original_segments)
+            else "",
             "visual_description": _seg_desc(i),
             "image_prompt": f"Visual scene {i + 1}: {_seg_desc(i)}",
             "mood": "neutral",

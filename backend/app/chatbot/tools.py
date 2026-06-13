@@ -69,26 +69,6 @@ class ToolRegistry:
         ]
 
 
-async def _resolve_attachment_image_url(ctx: ToolContext) -> str:
-    from app.database import Message
-
-    if not (ctx.conversation_id and ctx.db is not None):
-        return ""
-    result = await ctx.db.execute(
-        select(Message.attachments)
-        .where(Message.conversation_id == UUID(ctx.conversation_id))
-        .where(Message.role == "user")
-        .order_by(Message.created_at.desc())
-        .limit(1)
-    )
-    attachments = result.scalar()
-    if attachments:
-        for att in attachments:
-            if att.get("kind") == "image":
-                return att.get("url", "")
-    return ""
-
-
 async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Create a new video generation job."""
     template = args.get("template")
@@ -111,9 +91,7 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
         # Resolve it to the matching builtin template ID.
         if ctx.db is not None:
             result = await ctx.db.execute(
-                select(Template.id)
-                .where(Template.name.ilike(template))
-                .limit(1)
+                select(Template.id).where(Template.name.ilike(template)).limit(1)
             )
             template_id = result.scalar_one_or_none()
             if template_id is not None:
@@ -123,23 +101,46 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
         else:
             payload["template_id"] = template
 
-    if "reference_image_url" not in args:
-        url = await _resolve_attachment_image_url(ctx)
-        if url:
-            args["reference_image_url"] = url
-
-    for key in ("style", "image_model", "video_model", "aspect_ratio", "reference_image_id", "reference_image_url"):
+    # Map API-supported fields only. The jobs API validates input_data against
+    # the plugin's Pydantic schema and rejects unknown extra fields, so we must
+    # NOT forward legacy names like reference_image_url/reference_image_id.
+    for key in ("style", "image_model", "video_model", "aspect_ratio"):
         if key in args:
             payload["input_data"][key] = args[key]
-    if "duration_seconds" in args:
-        payload["input_data"]["duration_seconds"] = args["duration_seconds"]
+
+    duration = args.get("duration")
+    if duration is None:
+        # Backward compatibility for older LLM calls that still use duration_seconds.
+        duration = args.get("duration_seconds")
+    if duration is not None:
+        payload["input_data"]["duration"] = duration
+
+    if "avatars" in args:
+        # Normalise plain UUID strings into the avatar assignment shape the
+        # jobs API expects.
+        raw = args["avatars"]
+        payload["input_data"]["avatars"] = [
+            {"avatar_id": str(item)} if isinstance(item, str) else item for item in raw
+        ]
+    elif "reference_image_id" in args:
+        # Legacy one-off reference image IDs are not supported by the jobs API;
+        # treat them as a single avatar assignment when possible.
+        try:
+            payload["input_data"]["avatars"] = [
+                {"avatar_id": str(UUID(args["reference_image_id"]))}
+            ]
+        except (ValueError, TypeError):
+            pass
 
     # Resolve provider_id for explicitly chosen models so the pipeline
     # can route unambiguously even when the model_id is not globally unique.
     if ctx.db is not None:
         from app.services.model_config_service import ModelConfigService
 
-        for model_key, provider_key in (("image_model", "image_provider_id"), ("video_model", "video_provider_id")):
+        for model_key, provider_key in (
+            ("image_model", "image_provider_id"),
+            ("video_model", "video_provider_id"),
+        ):
             model_id = payload["input_data"].get(model_key)
             if model_id and provider_key not in payload["input_data"]:
                 config = await ModelConfigService.resolve_model_config(ctx.db, model_id)
@@ -767,7 +768,10 @@ async def _handle_tag_asset(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
     if not tag_id:
         return {"error": "missing_argument", "message": "'tag_id' is required"}
     return await call_user_api(
-        ctx, "POST", "/media/assets/bulk/tag", json_data={"asset_ids": [asset_id], "tag_ids": [tag_id]}
+        ctx,
+        "POST",
+        "/media/assets/bulk/tag",
+        json_data={"asset_ids": [asset_id], "tag_ids": [tag_id]},
     )
 
 
@@ -818,10 +822,10 @@ async def _handle_estimate_job_cost(ctx: ToolContext, args: dict[str, Any]) -> d
     template = args.get("template")
     image_model = args.get("image_model")
     video_model = args.get("video_model")
-    duration_seconds = args.get("duration_seconds")
+    duration_seconds = args.get("duration") or args.get("duration_seconds")
 
     if duration_seconds is None:
-        return {"error": "missing_argument", "message": "'duration_seconds' is required"}
+        return {"error": "missing_argument", "message": "'duration' is required"}
 
     num_clips = max(1, int(duration_seconds / 5))
     image_cost = 0.5 * num_clips
@@ -834,6 +838,7 @@ async def _handle_estimate_job_cost(ctx: ToolContext, args: dict[str, Any]) -> d
         "template": template,
         "image_model": image_model,
         "video_model": video_model,
+        "duration": duration_seconds,
         "duration_seconds": duration_seconds,
         "estimated_clips": num_clips,
         "estimated_cost": estimated_cost,
@@ -897,13 +902,15 @@ async def _handle_list_projects(ctx: ToolContext, args: dict[str, Any]) -> dict[
     )
     projects = []
     for project in result.scalars().all():
-        projects.append({
-            "id": str(project.id),
-            "title": project.title,
-            "description": project.description,
-            "created_at": project.created_at.isoformat() if project.created_at else None,
-            "updated_at": project.updated_at.isoformat() if project.updated_at else None,
-        })
+        projects.append(
+            {
+                "id": str(project.id),
+                "title": project.title,
+                "description": project.description,
+                "created_at": project.created_at.isoformat() if project.created_at else None,
+                "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+            }
+        )
     return {"projects": projects, "count": len(projects)}
 
 
@@ -1013,7 +1020,9 @@ async def _handle_get_chat_token_usage(ctx: ToolContext, args: dict[str, Any]) -
     return await call_user_api(ctx, "GET", "/token-usage", params=params)
 
 
-async def _handle_get_dashboard_token_usage(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+async def _handle_get_dashboard_token_usage(
+    ctx: ToolContext, args: dict[str, Any]
+) -> dict[str, Any]:
     """Get token usage aggregated by date bucket from the dashboard."""
     from app.chatbot.api_tools import call_user_api
 
@@ -1055,10 +1064,13 @@ def create_builtin_registry() -> ToolRegistry:
                     "style": {"type": "string", "description": "Visual style name"},
                     "image_model": {"type": "string", "description": "Image generation model ID"},
                     "video_model": {"type": "string", "description": "Video generation model ID"},
-                    "duration_seconds": {"type": "number", "description": "Target duration in seconds"},
+                    "duration": {"type": "number", "description": "Target duration in seconds"},
                     "aspect_ratio": {"type": "string", "description": "Aspect ratio (e.g. 16:9)"},
-                    "reference_image_id": {"type": "string", "description": "Optional reference image asset ID"},
-                    "reference_image_url": {"type": "string", "description": "URL of the user's attached image. When the user mentions an attached image, pass its URL here."},
+                    "avatars": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of avatar IDs to include in the video",
+                    },
                 },
                 "required": ["template", "prompt"],
             },
@@ -1097,7 +1109,10 @@ def create_builtin_registry() -> ToolRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "modality": {"type": "string", "description": "Filter by modality: image, video, or text"},
+                    "modality": {
+                        "type": "string",
+                        "description": "Filter by modality: image, video, or text",
+                    },
                 },
             },
             handler=_handle_list_models,
@@ -1126,8 +1141,15 @@ def create_builtin_registry() -> ToolRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "Maximum number of jobs to return", "default": 10},
-                    "status": {"type": "string", "description": "Filter by job status (pending, processing, completed, failed)"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of jobs to return",
+                        "default": 10,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by job status (pending, processing, completed, failed)",
+                    },
                 },
             },
             handler=_handle_list_user_jobs,
@@ -1220,9 +1242,20 @@ def create_builtin_registry() -> ToolRegistry:
                     "template_id": {"type": "string", "description": "Template ID (UUID)"},
                     "jobs": {"type": "array", "description": "List of job input data objects"},
                     "project_id": {"type": "string", "description": "Optional project ID"},
-                    "auto_start": {"type": "boolean", "description": "Auto-start jobs after creation", "default": True},
-                    "provider_preference": {"type": "string", "description": "Provider preference", "default": "auto"},
-                    "model_preference": {"type": "string", "description": "Optional model preference"},
+                    "auto_start": {
+                        "type": "boolean",
+                        "description": "Auto-start jobs after creation",
+                        "default": True,
+                    },
+                    "provider_preference": {
+                        "type": "string",
+                        "description": "Provider preference",
+                        "default": "auto",
+                    },
+                    "model_preference": {
+                        "type": "string",
+                        "description": "Optional model preference",
+                    },
                 },
                 "required": ["template_id", "jobs"],
             },
@@ -1238,7 +1271,10 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search term"},
-                    "file_type": {"type": "string", "description": "Optional file type filter (image, video, audio, markdown)"},
+                    "file_type": {
+                        "type": "string",
+                        "description": "Optional file type filter (image, video, audio, markdown)",
+                    },
                 },
                 "required": ["query"],
             },
@@ -1254,7 +1290,11 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "The prompt to enhance"},
-                    "target": {"type": "string", "description": "Target type: video or image", "default": "video"},
+                    "target": {
+                        "type": "string",
+                        "description": "Target type: video or image",
+                        "default": "video",
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -1272,9 +1312,9 @@ def create_builtin_registry() -> ToolRegistry:
                     "template": {"type": "string", "description": "Template ID or name"},
                     "image_model": {"type": "string", "description": "Image model ID"},
                     "video_model": {"type": "string", "description": "Video model ID"},
-                    "duration_seconds": {"type": "number", "description": "Target duration in seconds"},
+                    "duration": {"type": "number", "description": "Target duration in seconds"},
                 },
-                "required": ["duration_seconds"],
+                "required": ["duration"],
             },
             handler=_handle_estimate_job_cost,
         )
@@ -1288,9 +1328,20 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "model_id": {"type": "string", "description": "Model to use for generation"},
-                    "prompt": {"type": "string", "description": "Text description of what to generate"},
-                    "aspect_ratio": {"type": "string", "description": "e.g. 1:1, 16:9", "default": "1:1"},
-                    "duration": {"type": "integer", "description": "Video duration in seconds", "default": 5},
+                    "prompt": {
+                        "type": "string",
+                        "description": "Text description of what to generate",
+                    },
+                    "aspect_ratio": {
+                        "type": "string",
+                        "description": "e.g. 1:1, 16:9",
+                        "default": "1:1",
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "description": "Video duration in seconds",
+                        "default": 5,
+                    },
                 },
                 "required": ["model_id", "prompt"],
             },
@@ -1305,7 +1356,11 @@ def create_builtin_registry() -> ToolRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "Maximum number of projects to return", "default": 50},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of projects to return",
+                        "default": 50,
+                    },
                 },
             },
             handler=_handle_list_projects,
@@ -1320,7 +1375,10 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "Project title"},
-                    "description": {"type": "string", "description": "Optional project description"},
+                    "description": {
+                        "type": "string",
+                        "description": "Optional project description",
+                    },
                 },
                 "required": ["title"],
             },
@@ -1368,7 +1426,11 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "id": {"type": "string", "description": "Project ID (UUID)"},
-                    "confirm": {"type": "boolean", "description": "Set to true to delete a project that has associated jobs", "default": False},
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Set to true to delete a project that has associated jobs",
+                        "default": False,
+                    },
                 },
                 "required": ["id"],
             },
@@ -1563,8 +1625,16 @@ def create_builtin_registry() -> ToolRegistry:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "skip": {"type": "integer", "description": "Number of items to skip", "default": 0},
-                    "limit": {"type": "integer", "description": "Maximum number of avatars to return", "default": 50},
+                    "skip": {
+                        "type": "integer",
+                        "description": "Number of items to skip",
+                        "default": 0,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of avatars to return",
+                        "default": 50,
+                    },
                 },
             },
             handler=_handle_list_avatars,
@@ -1594,9 +1664,16 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Avatar name"},
-                    "gender": {"type": "string", "description": "Gender: Male, Female, Non-binary, or Other"},
+                    "gender": {
+                        "type": "string",
+                        "description": "Gender: Male, Female, Non-binary, or Other",
+                    },
                     "bio": {"type": "string", "description": "Optional bio"},
-                    "consistency_strategy": {"type": "string", "description": "ip_adapter, face_swap, lora, or prompt_only", "default": "ip_adapter"},
+                    "consistency_strategy": {
+                        "type": "string",
+                        "description": "ip_adapter, face_swap, lora, or prompt_only",
+                        "default": "ip_adapter",
+                    },
                 },
                 "required": ["name"],
             },
@@ -1657,8 +1734,16 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "Music description prompt"},
-                    "duration": {"type": "number", "description": "Duration in seconds (1-120)", "default": 15.0},
-                    "output_format": {"type": "string", "description": "wav or mp3", "default": "mp3"},
+                    "duration": {
+                        "type": "number",
+                        "description": "Duration in seconds (1-120)",
+                        "default": 15.0,
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "wav or mp3",
+                        "default": "mp3",
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -1791,11 +1876,26 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "folder_id": {"type": "string", "description": "Filter by folder ID"},
-                    "file_type": {"type": "string", "description": "Filter by file type (image, video, audio, markdown)"},
+                    "file_type": {
+                        "type": "string",
+                        "description": "Filter by file type (image, video, audio, markdown)",
+                    },
                     "search": {"type": "string", "description": "Search by name"},
-                    "tag_ids": {"type": "array", "items": {"type": "string"}, "description": "Filter by tag IDs"},
-                    "limit": {"type": "integer", "description": "Maximum items to return", "default": 20},
-                    "offset": {"type": "integer", "description": "Offset for pagination", "default": 0},
+                    "tag_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by tag IDs",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum items to return",
+                        "default": 20,
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "default": 0,
+                    },
                 },
             },
             handler=_handle_list_assets,
@@ -1828,7 +1928,11 @@ def create_builtin_registry() -> ToolRegistry:
                     "name": {"type": "string", "description": "New asset name"},
                     "folder_id": {"type": "string", "description": "New folder ID"},
                     "project_id": {"type": "string", "description": "New project ID"},
-                    "tag_ids": {"type": "array", "items": {"type": "string"}, "description": "Tag IDs to set"},
+                    "tag_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tag IDs to set",
+                    },
                 },
                 "required": ["id"],
             },
@@ -1993,8 +2097,16 @@ def create_builtin_registry() -> ToolRegistry:
                     "job_id": {"type": "string", "description": "Job UUID"},
                     "lyrics": {"type": "string", "description": "Full lyrics text"},
                     "duration": {"type": "number", "description": "Audio duration in seconds"},
-                    "replan": {"type": "boolean", "description": "Replan scenes after update", "default": False},
-                    "style": {"type": "string", "description": "Visual style", "default": "realistic"},
+                    "replan": {
+                        "type": "boolean",
+                        "description": "Replan scenes after update",
+                        "default": False,
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "Visual style",
+                        "default": "realistic",
+                    },
                 },
                 "required": ["job_id", "lyrics", "duration"],
             },
@@ -2012,7 +2124,11 @@ def create_builtin_registry() -> ToolRegistry:
                     "job_id": {"type": "string", "description": "Job UUID"},
                     "lyrics_data": {"type": "object", "description": "Parsed lyrics data"},
                     "duration": {"type": "number", "description": "Audio duration in seconds"},
-                    "style": {"type": "string", "description": "Visual style", "default": "realistic"},
+                    "style": {
+                        "type": "string",
+                        "description": "Visual style",
+                        "default": "realistic",
+                    },
                 },
                 "required": ["job_id", "duration"],
             },
@@ -2094,7 +2210,11 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "job_id": {"type": "string", "description": "Job UUID"},
-                    "order": {"type": "array", "items": {"type": "string"}, "description": "Ordered list of scene UUIDs"},
+                    "order": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Ordered list of scene UUIDs",
+                    },
                 },
                 "required": ["job_id", "order"],
             },
@@ -2110,7 +2230,10 @@ def create_builtin_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "job_id": {"type": "string", "description": "Job UUID"},
-                    "stage": {"type": "string", "description": "Stage: planning, planned, generating_images, images_ready, generating_videos, videos_ready, rendering, completed"},
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage: planning, planned, generating_images, images_ready, generating_videos, videos_ready, rendering, completed",
+                    },
                 },
                 "required": ["job_id", "stage"],
             },
@@ -2446,9 +2569,7 @@ async def _handle_update_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[s
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "PATCH", f"/jobs/{job_id}/scenes/{scene_id}", json_data=patch
-    )
+    return await call_user_api(ctx, "PATCH", f"/jobs/{job_id}/scenes/{scene_id}", json_data=patch)
 
 
 async def _handle_delete_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2474,9 +2595,7 @@ async def _handle_reorder_scenes(ctx: ToolContext, args: dict[str, Any]) -> dict
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "POST", f"/jobs/{job_id}/scenes/reorder", json_data=order
-    )
+    return await call_user_api(ctx, "POST", f"/jobs/{job_id}/scenes/reorder", json_data=order)
 
 
 async def _handle_set_job_stage(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2489,9 +2608,7 @@ async def _handle_set_job_stage(ctx: ToolContext, args: dict[str, Any]) -> dict[
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "PATCH", f"/jobs/{job_id}/stage", json_data={"stage": stage}
-    )
+    return await call_user_api(ctx, "PATCH", f"/jobs/{job_id}/stage", json_data={"stage": stage})
 
 
 async def _handle_regenerate_prompts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2514,9 +2631,7 @@ async def _handle_generate_scene_image(ctx: ToolContext, args: dict[str, Any]) -
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "POST", f"/jobs/{job_id}/scenes/generate-image/{scene_id}"
-    )
+    return await call_user_api(ctx, "POST", f"/jobs/{job_id}/scenes/generate-image/{scene_id}")
 
 
 async def _handle_generate_scene_video(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2529,9 +2644,7 @@ async def _handle_generate_scene_video(ctx: ToolContext, args: dict[str, Any]) -
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "POST", f"/jobs/{job_id}/scenes/generate-video/{scene_id}"
-    )
+    return await call_user_api(ctx, "POST", f"/jobs/{job_id}/scenes/generate-video/{scene_id}")
 
 
 async def _handle_regenerate_all_scenes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -2582,9 +2695,7 @@ async def _handle_export_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
 
     from app.chatbot.api_tools import call_user_api
 
-    return await call_user_api(
-        ctx, "POST", f"/jobs/{job_id}/export", json_data=options
-    )
+    return await call_user_api(ctx, "POST", f"/jobs/{job_id}/export", json_data=options)
 
 
 async def _handle_get_export_options(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:

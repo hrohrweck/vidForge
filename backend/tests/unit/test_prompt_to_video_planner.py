@@ -41,6 +41,13 @@ def test_extract_json_with_scenes_ignores_unrelated_braces() -> None:
     assert len(parsed["scenes"]) == 1
 
 
+def test_extract_json_with_scenes_finds_scenes_when_not_first_key() -> None:
+    response = '{"summary": "summary text", "scenes": [{"start_time": 0.0, "end_time": 5.0, "visual_description": "A young man sits alone.", "image_prompt": "cinematic style: a young man", "mood": "melancholic", "camera_movement": "static"}]}'
+    parsed = _extract_json_with_scenes(response)
+    assert parsed is not None
+    assert len(parsed["scenes"]) == 1
+
+
 def test_parse_response_valid_json() -> None:
     response = """{"scenes": [{"start_time": 0.0, "end_time": 5.0, "visual_description": "A young man sits alone.", "image_prompt": "cinematic style: a young man with long hair sitting alone, photorealistic", "mood": "melancholic", "camera_movement": "static"}]}"""
     result = _parse_response(response, 30, original_prompt="A young man...", style="realistic")
@@ -72,6 +79,28 @@ def test_parse_response_fallback_distributes_sentences() -> None:
     # All prompts should start with the realistic style prefix.
     prefix = _style_prefix("realistic")
     assert all(p.startswith(prefix) for p in prompts)
+
+
+def test_parse_response_falls_back_on_placeholder_text() -> None:
+    """Copied example JSON must be detected and replaced with a real fallback."""
+    response = (
+        '{"scenes": [{"start_time": 0.0, "end_time": 30.0, '
+        '"visual_description": "description", '
+        '"image_prompt": "photorealistic cinematic style: detailed image prompt", '
+        '"mood": "mood", "camera_movement": "movement", '
+        '"seed_image_prompt": "image prompt for seed image generation"}]}'
+    )
+    result = _parse_response(
+        response,
+        target_duration=30,
+        original_prompt="A robot explores a neon city at night.",
+        style="realistic",
+    )
+    assert result.get("_is_fallback")
+    for scene in result["scenes"]:
+        assert scene["visual_description"] != "description"
+        assert "detailed image prompt" not in scene["image_prompt"]
+        assert scene["image_prompt"].startswith(_style_prefix("realistic"))
 
 
 def test_fallback_scenes_even_split() -> None:

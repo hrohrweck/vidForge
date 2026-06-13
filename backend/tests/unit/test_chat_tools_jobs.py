@@ -81,6 +81,72 @@ class TestCreateJob:
             payload = mock.call_args[1]["json_data"]
             assert payload["template_id"] == str(template_id)
 
+    @pytest.mark.asyncio
+    async def test_maps_duration_and_avatars_to_api_schema(self, ctx):
+        from uuid import uuid4
+
+        avatar_id = uuid4()
+        with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
+            mock.return_value = {"job_id": "abc", "status": "pending"}
+            result = await _handle_create_job(
+                ctx,
+                {
+                    "template": "tmpl-1",
+                    "prompt": "hello",
+                    "duration": 60,
+                    "avatars": [str(avatar_id)],
+                },
+            )
+            assert result["job_id"] == "abc"
+            payload = mock.call_args[1]["json_data"]
+            assert payload["input_data"]["duration"] == 60
+            assert payload["input_data"]["avatars"] == [{"avatar_id": str(avatar_id)}]
+
+    @pytest.mark.asyncio
+    async def test_legacy_duration_seconds_still_works(self, ctx):
+        with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
+            mock.return_value = {"job_id": "abc", "status": "pending"}
+            await _handle_create_job(
+                ctx,
+                {"template": "tmpl-1", "prompt": "hello", "duration_seconds": 45},
+            )
+            payload = mock.call_args[1]["json_data"]
+            assert payload["input_data"]["duration"] == 45
+
+    @pytest.mark.asyncio
+    async def test_reference_image_url_is_not_forwarded(self, ctx):
+        """reference_image_url is not part of the jobs API input schema."""
+        with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
+            mock.return_value = {"job_id": "abc", "status": "pending"}
+            await _handle_create_job(
+                ctx,
+                {
+                    "template": "tmpl-1",
+                    "prompt": "hello",
+                    "reference_image_url": "http://example.com/image.png",
+                },
+            )
+            payload = mock.call_args[1]["json_data"]
+            assert "reference_image_url" not in payload["input_data"]
+
+    @pytest.mark.asyncio
+    async def test_legacy_reference_image_id_converted_to_avatar(self, ctx):
+        from uuid import uuid4
+
+        avatar_id = uuid4()
+        with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
+            mock.return_value = {"job_id": "abc", "status": "pending"}
+            await _handle_create_job(
+                ctx,
+                {
+                    "template": "tmpl-1",
+                    "prompt": "hello",
+                    "reference_image_id": str(avatar_id),
+                },
+            )
+            payload = mock.call_args[1]["json_data"]
+            assert payload["input_data"]["avatars"] == [{"avatar_id": str(avatar_id)}]
+
 
 class TestGetJobStatus:
     @pytest.mark.asyncio
@@ -112,7 +178,9 @@ class TestListUserJobs:
             mock.return_value = {"jobs": [], "count": 0}
             result = await _handle_list_user_jobs(ctx, {"status": "pending", "limit": 5})
             assert result == {"jobs": [], "count": 0}
-            mock.assert_awaited_once_with(ctx, "GET", "/jobs", params={"status": "pending", "limit": 5})
+            mock.assert_awaited_once_with(
+                ctx, "GET", "/jobs", params={"status": "pending", "limit": 5}
+            )
 
 
 class TestStartJob:
@@ -165,7 +233,9 @@ class TestUpdateJob:
     async def test_happy_path(self, ctx):
         with patch("app.chatbot.api_tools.call_user_api", new_callable=AsyncMock) as mock:
             mock.return_value = {"status": "pending"}
-            result = await _handle_update_job(ctx, {"job_id": "j1", "input_data": {"style": "cinematic"}})
+            result = await _handle_update_job(
+                ctx, {"job_id": "j1", "input_data": {"style": "cinematic"}}
+            )
             assert result == {"status": "pending"}
             mock.assert_awaited_once()
             assert mock.call_args[0][1] == "PATCH"

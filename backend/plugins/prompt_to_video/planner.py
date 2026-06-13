@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a video director. Break the user's prompt into a series of short visual scenes for AI video generation.
 
-Each scene should be 3-15 seconds long. Output ONLY valid JSON:
-{"scenes": [{"start_time": 0.0, "end_time": 5.0, "visual_description": "description", "image_prompt": "detailed image prompt", "mood": "mood", "camera_movement": "movement", "seed_image_prompt": "image prompt for seed image generation"}]}
+Output ONLY valid JSON. Do not include markdown fences, explanations, or reasoning outside the JSON. Do NOT copy placeholder text from the example — fill every field with specific content derived from the user's prompt.
+
+Example shape (fill with your own content, not these placeholders):
+{"scenes": [{"start_time": 0.0, "end_time": 5.0, "visual_description": "a specific description of what happens in this scene", "image_prompt": "photorealistic cinematic style: a vivid, detailed description of the scene", "mood": "energetic", "camera_movement": "dynamic tracking shot", "seed_image_prompt": "photorealistic cinematic style: close-up of the subject in the same scene"}], "object_selections": []}
 
 Guidelines:
 - Scene duration: respect the max clip duration in the PLANNING CONSTRAINTS. If the total video requires more time, split the story into multiple scenes rather than exceeding the per-clip limit.
@@ -133,10 +135,7 @@ async def plan_scenes_from_prompt(
     """
     llm = LLMClient(model=model)
     try:
-        user_prompt = (
-            f"Create a scene plan for a {duration}-second video.\n"
-            f"Style: {style}\n"
-        )
+        user_prompt = f"Create a scene plan for a {duration}-second video.\nStyle: {style}\n"
         if avatars_context:
             user_prompt += f"\n{avatars_context}\n\n"
         if objects_context:
@@ -177,16 +176,12 @@ async def plan_scenes_from_prompt(
             )
 
         if result.get("_is_fallback"):
-            logger.warning(
-                "Scene planning failed after retries; using fallback scenes."
-            )
+            logger.warning("Scene planning failed after retries; using fallback scenes.")
 
         # Ensure prompts are concise and style-prefixed regardless of parse success.
         max_prompt_chars = image_max_prompt_length or 400
         _ensure_style_prefix(result["scenes"], style)
-        await _ensure_concise_prompts(
-            result["scenes"], style, llm, max_chars=max_prompt_chars
-        )
+        await _ensure_concise_prompts(result["scenes"], style, llm, max_chars=max_prompt_chars)
 
         return result
     finally:
@@ -222,23 +217,21 @@ def _parse_response(
 
     if not parsed or "scenes" not in parsed:
         logger.warning("LLM response could not be parsed, falling back to single scene")
-        return _fallback_result(
-            target_duration, original_prompt, style, max_clip_duration
-        )
+        return _fallback_result(target_duration, original_prompt, style, max_clip_duration)
 
     scenes = parsed["scenes"]
     if not scenes or not isinstance(scenes, list):
         logger.warning("LLM response has invalid scenes list, falling back")
-        return _fallback_result(
-            target_duration, original_prompt, style, max_clip_duration
-        )
+        return _fallback_result(target_duration, original_prompt, style, max_clip_duration)
 
     # Validate each scene is a dictionary
     if not all(isinstance(scene, dict) for scene in scenes):
         logger.warning("LLM response contains non-dict scenes, falling back")
-        return _fallback_result(
-            target_duration, original_prompt, style, max_clip_duration
-        )
+        return _fallback_result(target_duration, original_prompt, style, max_clip_duration)
+
+    if any(_scene_contains_placeholders(scene) for scene in scenes):
+        logger.warning("LLM response contains placeholder text, falling back")
+        return _fallback_result(target_duration, original_prompt, style, max_clip_duration)
 
     # Extract object selections if present
     object_selections = parsed.get("object_selections", [])
@@ -247,6 +240,35 @@ def _parse_response(
     scenes = _fix_scene_timing(scenes, target_duration)
 
     return {"scenes": scenes, "object_selections": object_selections}
+
+
+def _scene_contains_placeholders(scene: dict[str, Any]) -> bool:
+    """Return True when a scene echoes example placeholder text."""
+    visual = str(scene.get("visual_description", "")).strip().lower()
+    image = str(scene.get("image_prompt", "")).strip().lower()
+    seed = str(scene.get("seed_image_prompt", "")).strip().lower()
+    narration = str(scene.get("narration", "")).strip().lower()
+
+    if visual in {"description", "desc"}:
+        return True
+    if image in {"prompt"} or "detailed image prompt" in image:
+        return True
+    if narration in {"text", "narration"}:
+        return True
+    if "image prompt for seed image generation" in seed:
+        return True
+
+    # Example placeholders from the system prompt must not be copied verbatim.
+    if visual == "a specific description of what happens in this scene":
+        return True
+    if image == "photorealistic cinematic style: a vivid, detailed description of the scene":
+        return True
+    if seed == "photorealistic cinematic style: close-up of the subject in the same scene":
+        return True
+    if narration == "the spoken narration for this scene":
+        return True
+
+    return False
 
 
 def _clean_llm_response(response: str) -> str:
@@ -284,7 +306,8 @@ def _clean_llm_response(response: str) -> str:
 def _extract_json_with_scenes(text: str) -> dict | None:
     """Extract a balanced JSON object containing ``scenes`` from arbitrary text."""
     decoder = json.JSONDecoder()
-    for match in re.finditer(r'\{\s*"scenes"\s*:', text):
+    # First try objects where "scenes" appears at the top level.
+    for match in re.finditer(r"\{", text):
         try:
             parsed, _ = decoder.raw_decode(text, match.start())
             if isinstance(parsed, dict) and "scenes" in parsed:
@@ -321,11 +344,7 @@ def _fallback_scenes(
     prefix = _style_prefix(style)
 
     base_description = (original_prompt or "Scene").strip()
-    sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", base_description)
-        if s.strip()
-    ]
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", base_description) if s.strip()]
     if not sentences:
         sentences = [base_description]
 
@@ -355,9 +374,7 @@ def _fallback_scenes(
     return scenes
 
 
-def _fix_scene_timing(
-    scenes: list[dict], duration: float
-) -> list[dict[str, Any]]:
+def _fix_scene_timing(scenes: list[dict], duration: float) -> list[dict[str, Any]]:
     """Ensure scenes cover the full duration without gaps."""
     scenes.sort(key=lambda s: s.get("start_time", 0))
 

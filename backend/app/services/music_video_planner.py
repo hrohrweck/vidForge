@@ -12,8 +12,10 @@ class MusicVideoPlannerError(Exception):
 class MusicVideoPlanner:
     SYSTEM_PROMPT = """You are a music video director. Analyze lyrics and create a visual story with distinct scenes.
 
-Output ONLY valid JSON:
-{"scenes": [{"scene_number": 1, "start_time": 0.0, "end_time": 10.0, "lyrics_segment": "lyrics", "visual_description": "desc", "image_prompt": "prompt", "mood": "neutral", "camera_movement": "static"}], "total_scenes": 1, "summary": "summary"}
+Output ONLY valid JSON. Do not include markdown fences, explanations, or reasoning outside the JSON. Do NOT copy placeholder text from the example — fill every field with specific content derived from the lyrics.
+
+Example shape (fill with your own content, not these placeholders):
+{"scenes": [{"scene_number": 1, "start_time": 0.0, "end_time": 10.0, "lyrics_segment": "the lyrics for this segment", "visual_description": "a specific description of what happens visually", "image_prompt": "photorealistic cinematic style: a vivid, detailed description of the scene", "mood": "energetic", "camera_movement": "dynamic tracking shot"}], "total_scenes": 1, "summary": "a brief summary of the visual narrative"}
 
 Guidelines:
 - Respect the PLANNING CONSTRAINTS block provided in the user prompt for max scene duration and prompt length.
@@ -32,7 +34,12 @@ When a scene includes an avatar:
 Example image_prompt with avatar: "cinematic style: Alice (a red-haired detective in a trench coat) examining evidence on a dimly lit desk, dramatic lighting, photorealistic"
 Only use avatars that are provided — do NOT invent new characters."""
 
-    def __init__(self, llm_client: LLMClient | None = None, provider: Any | None = None, model: str | None = None):
+    def __init__(
+        self,
+        llm_client: LLMClient | None = None,
+        provider: Any | None = None,
+        model: str | None = None,
+    ):
         self.llm = llm_client or LLMClient(model=model)
         self.provider = provider
 
@@ -97,7 +104,9 @@ Only use avatars that are provided — do NOT invent new characters."""
             response = response.strip()
 
             if not response or response == "null":
-                raise MusicVideoPlannerError(f"Response is null/empty after strip: {repr(response[:100])}")
+                raise MusicVideoPlannerError(
+                    f"Response is null/empty after strip: {repr(response[:100])}"
+                )
 
             if response.startswith("```"):
                 parts = response.split("```")
@@ -109,7 +118,9 @@ Only use avatars that are provided — do NOT invent new characters."""
                 response = response.strip()
 
             if not response or response == "null":
-                raise MusicVideoPlannerError(f"Response is null/empty after cleanup: {repr(response[:100])}")
+                raise MusicVideoPlannerError(
+                    f"Response is null/empty after cleanup: {repr(response[:100])}"
+                )
 
             parsed = None
 
@@ -150,7 +161,9 @@ Only use avatars that are provided — do NOT invent new characters."""
                         pass
 
             if not parsed:
-                raise MusicVideoPlannerError(f"Failed to parse LLM response: {repr(response[:300])}")
+                raise MusicVideoPlannerError(
+                    f"Failed to parse LLM response: {repr(response[:300])}"
+                )
 
             return self._validate_and_fix_scenes(parsed, duration)
         except json.JSONDecodeError:
@@ -185,13 +198,13 @@ Only use avatars that are provided — do NOT invent new characters."""
             start_idx = match.start()
             brace_count = 1
             for i in range(start_idx + 1, len(response)):
-                if response[i] == '{':
+                if response[i] == "{":
                     brace_count += 1
-                elif response[i] == '}':
+                elif response[i] == "}":
                     brace_count -= 1
                     if brace_count == 0:
                         try:
-                            scene = json.loads(response[start_idx:i+1])
+                            scene = json.loads(response[start_idx : i + 1])
                             scenes.append(scene)
                         except json.JSONDecodeError:
                             pass
@@ -227,7 +240,7 @@ Only use avatars that are provided — do NOT invent new characters."""
                 escape_next = False
                 continue
 
-            if char == '\\':
+            if char == "\\":
                 repaired_chars.append(char)
                 escape_next = True
                 continue
@@ -238,22 +251,22 @@ Only use avatars that are provided — do NOT invent new characters."""
             elif char == '"' and in_string:
                 in_string = False
                 repaired_chars.append(char)
-            elif char == '\n' and in_string:
-                repaired_chars.append('\\')
-                repaired_chars.append('n')
-            elif char == '\n' and not in_string:
-                repaired_chars.append(' ')
+            elif char == "\n" and in_string:
+                repaired_chars.append("\\")
+                repaired_chars.append("n")
+            elif char == "\n" and not in_string:
+                repaired_chars.append(" ")
             elif not in_string:
-                if char == '{':
+                if char == "{":
                     open_braces += 1
                     repaired_chars.append(char)
-                elif char == '}':
+                elif char == "}":
                     open_braces -= 1
                     repaired_chars.append(char)
-                elif char == '[':
+                elif char == "[":
                     open_brackets += 1
                     repaired_chars.append(char)
-                elif char == ']':
+                elif char == "]":
                     open_brackets -= 1
                     repaired_chars.append(char)
                 else:
@@ -268,12 +281,12 @@ Only use avatars that are provided — do NOT invent new characters."""
         # Close any open objects/arrays
         if open_braces > 0:
             if open_braces >= 2:
-                repaired_chars.append('}')
+                repaired_chars.append("}")
             if open_brackets > 0:
-                repaired_chars.append(']')
-            repaired_chars.append('}')
+                repaired_chars.append("]")
+            repaired_chars.append("}")
 
-        repaired = ''.join(repaired_chars)
+        repaired = "".join(repaired_chars)
 
         # Validate the repaired JSON
         try:
@@ -363,6 +376,7 @@ Timestamped lyrics (for reference):
 
         # Enforce minimum scene duration
         from app.services.media_generator import enforce_min_scene_duration
+
         fixed_scenes = enforce_min_scene_duration(fixed_scenes)
 
         parsed["scenes"] = fixed_scenes
