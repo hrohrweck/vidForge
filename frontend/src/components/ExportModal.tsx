@@ -76,7 +76,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
             <Download className="h-5 w-5" />
             Export Video
           </h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close modal" title="Close modal">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -123,7 +123,7 @@ export function ExportModal({ jobId, exportOptions, onClose, onExported }: Expor
                   className="flex-grow"
                 />
                 {backgroundMusic && !backgroundMusicPath && (
-                  <Button size="sm" onClick={handleBackgroundMusicUpload}>
+                  <Button size="sm" onClick={handleBackgroundMusicUpload} aria-label="Upload background music" title="Upload background music">
                     <Upload className="h-4 w-4" />
                   </Button>
                 )}
