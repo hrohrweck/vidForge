@@ -66,7 +66,7 @@ export function SceneEditModal({ scene, onClose, onSave, onRegenerate }: SceneEd
       <div className="bg-background rounded-lg shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-4 border-b">
           <h2 className="text-lg font-semibold">Edit Scene {scene.scene_number}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close modal" title="Close modal">
             <X className="h-4 w-4" />
           </Button>
         </div>
