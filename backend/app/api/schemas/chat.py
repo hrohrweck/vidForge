@@ -188,3 +188,11 @@ class ChatStreamToolResult(BaseModel):
 class ChatStreamError(BaseModel):
     event: Literal["error"] = "error"
     error: str
+
+
+class AutonomyModeRequest(BaseModel):
+    mode: Literal["confirm", "autonomous"]
+
+
+class AutonomyModeResponse(BaseModel):
+    mode: Literal["confirm", "autonomous"]

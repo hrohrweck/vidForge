@@ -233,6 +233,8 @@ export interface CreateJobRequest {
   auto_start?: boolean
   provider_preference?: string
   model_preference?: string
+  chat_conversation_id?: string
+  chat_message_id?: string
 }
 
 export interface BatchJobRequest {
@@ -361,6 +363,37 @@ export const jobsApi = {
     const response = await api.get<JobObject[]>(`/jobs/${id}/objects`)
     return response.data
   },
+
+  generateAllImages: async (id: string) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/jobs/${id}/scenes/generate-all-images`,
+      {}
+    )
+    return response.data
+  },
+
+  generateAllVideos: async (id: string) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/jobs/${id}/scenes/generate-all-videos`,
+      {}
+    )
+    return response.data
+  },
+
+  export: async (id: string, request: ExportRequest = {}) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/jobs/${id}/export`,
+      request
+    )
+    return response.data
+  },
+
+  cancel: async (id: string) => {
+    const response = await api.post<{ status: string; job_id: string; stage: string }>(
+      `/jobs/${id}/cancel`
+    )
+    return response.data
+  },
 }
 
 export const templatesApi = {
@@ -472,6 +505,14 @@ export interface SidebarPreferenceUpdate {
   sidebar_open: boolean
 }
 
+export interface ChatAutonomyResponse {
+  chat_autonomy: 'confirm' | 'autonomous' | null
+}
+
+export interface ChatAutonomyUpdate {
+  chat_autonomy: 'confirm' | 'autonomous'
+}
+
 export const usersApi = {
   getSettings: () => api.get('/users/settings'),
   updateSettings: (settings: Record<string, unknown>) => api.put('/users/settings', settings),
@@ -493,6 +534,14 @@ export const usersApi = {
     const response = await api.put<SidebarPreferenceResponse>('/users/settings/sidebar', {
       sidebar_open: sidebarOpen,
     })
+    return response.data
+  },
+  getChatAutonomy: async () => {
+    const response = await api.get<ChatAutonomyResponse>('/users/settings/chat-autonomy')
+    return response.data
+  },
+  setChatAutonomy: async (mode: 'confirm' | 'autonomous') => {
+    const response = await api.put<ChatAutonomyResponse>('/users/settings/chat-autonomy', { chat_autonomy: mode })
     return response.data
   },
 }
@@ -965,6 +1014,15 @@ export interface Conversation {
   last_message_at: string | null
 }
 
+export interface JobCardAttachment {
+  kind: 'job_card'
+  card_type: 'job_draft' | 'scene_plan' | 'image_review' | 'video_review' | 'job_completed' | 'job_error'
+  job_id: string | null
+  title: string
+  data: Record<string, unknown>
+  actions: string[]
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -975,7 +1033,7 @@ export interface Message {
   tool_call_id: string | null
   job_id: string | null
   created_at: string
-  attachments?: Array<{url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
+  attachments?: Array<JobCardAttachment | {url: string; type?: string; name?: string; kind?: string; mime_type?: string}>
 }
 
 export type ChatStreamEventType =
@@ -1131,6 +1189,15 @@ export const chatApi = {
       message_count: number
     }> }>('/chat/token-usage')
     return response.data
+  },
+
+  getAutonomy: async (conversationId: string) => {
+    const response = await api.get<{ mode: 'confirm' | 'autonomous' }>(`/chat/conversations/${conversationId}/autonomy`)
+    return response.data
+  },
+
+  setAutonomy: async (conversationId: string, mode: 'confirm' | 'autonomous') => {
+    await api.post(`/chat/conversations/${conversationId}/autonomy`, { mode })
   },
 }
 

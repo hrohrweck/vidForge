@@ -2,9 +2,17 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { Message } from '../../stores/chat'
+import type { Message, JobCardAttachment } from '../../stores/chat'
 import JobProgress from './JobProgress'
 import { useChatStore } from '../../stores/chat'
+import {
+  JobDraftCard,
+  ScenePlanCard,
+  ImageReviewCard,
+  VideoReviewCard,
+  JobCompletedCard,
+  JobErrorCard,
+} from './cards'
 
 interface MessageBubbleProps {
   message: Message
@@ -154,33 +162,56 @@ export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
         {message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {message.attachments.map((att, i) => {
-              const kind = att.type ?? att.kind ?? att.mime_type
-              const isImage = (att.type ?? att.mime_type ?? '').startsWith('image') || att.kind === 'image'
-              const isVideo = (att.type ?? att.mime_type ?? '').startsWith('video') || att.kind === 'video'
+              if (att.kind === 'job_card') {
+                const card = att as JobCardAttachment
+                const cardComponent = {
+                  job_draft: <JobDraftCard data={card.data} jobId={card.job_id} conversationId={conversationId} messageId={message.id} />,
+                  scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
+                  image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
+                  video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
+                  job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
+                  job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
+                }[card.card_type]
+
+                return (
+                  <div key={i} className="w-full">
+                    {cardComponent ?? (
+                      <div className="rounded border bg-muted p-2 text-xs text-muted-foreground">
+                        Unknown card type: {card.card_type}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              const legacyAtt = att as {url: string; type?: string; name?: string; kind?: string; mime_type?: string}
+              const kind = legacyAtt.type ?? legacyAtt.kind ?? legacyAtt.mime_type
+              const isImage = (legacyAtt.type ?? legacyAtt.mime_type ?? '').startsWith('image') || legacyAtt.kind === 'image'
+              const isVideo = (legacyAtt.type ?? legacyAtt.mime_type ?? '').startsWith('video') || legacyAtt.kind === 'video'
               return isImage ? (
                 <img
                   key={i}
-                  src={att.url}
-                  alt={att.name || 'attachment'}
+                  src={legacyAtt.url}
+                  alt={legacyAtt.name || 'attachment'}
                   className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer"
-                  onClick={() => window.open(att.url, '_blank')}
+                  onClick={() => window.open(legacyAtt.url, '_blank')}
                 />
               ) : isVideo ? (
                 <video
                   key={i}
-                  src={att.url}
+                  src={legacyAtt.url}
                   controls
                   className="max-w-[300px] max-h-[200px] rounded-lg"
                 />
               ) : (
                 <a
                   key={i}
-                  href={att.url}
+                  href={legacyAtt.url}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-primary hover:underline"
                 >
-                  {att.name || kind || 'Attachment'}
+                  {legacyAtt.name || kind || 'Attachment'}
                 </a>
               )
             })}

@@ -13,19 +13,18 @@ import shutil
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.websocket import manager as ws_manager
 from app.config import get_settings
 from app.database import ErrorEvent, ErrorOrigin, ErrorSeverity, Job, Message, Provider, Template
 from app.services.budget_tracker import BudgetTracker
 from app.services.error_capture import log_user_error
+from app.services.job_chat_notifier import JobChatNotifier
 from app.services.job_router import JobRouter
 from app.services.worker_registry import WorkerRegistry
-from app.storage import get_storage_backend
 from app.workers.celery_app import celery_app
 from app.workers.context import ctx
 
@@ -110,7 +109,7 @@ async def update_job_status(
 
 
 async def _post_completion_message(job_id: UUID, db: AsyncSession | None = None) -> None:
-    """If the job was triggered from chat, post the result as an assistant message."""
+    """If the job was triggered from chat, post the final completion card."""
     if db is None:
         async with ctx.session_factory() as db:
             return await _post_completion_message(job_id, db=db)
@@ -126,61 +125,28 @@ async def _post_completion_message(job_id: UUID, db: AsyncSession | None = None)
             Message.job_id == job.id,
         )
     )
-    if dup_result.scalar_one_or_none():
+    existing_messages = list(dup_result.scalars().all())
+    if any(
+        attachment.get("card_type") == "job_completed"
+        for message in existing_messages
+        for attachment in (message.attachments or [])
+    ):
         return
 
-    media_path = job.output_path or job.preview_path
-    if not media_path:
+    await JobChatNotifier.notify_completed(db, job)
+
+
+async def _maybe_notify_job_failed(
+    job: Job, error_message: str, db: AsyncSession | None = None
+) -> None:
+    """If the job was triggered from chat, post a failure card."""
+    if not job.chat_conversation_id:
         return
+    if db is None:
+        async with ctx.session_factory() as db:
+            return await _maybe_notify_job_failed(job, error_message, db=db)
 
-    ext = Path(media_path).suffix.lower()
-    kind_map = {
-        ".mp4": "video",
-        ".webm": "video",
-        ".mov": "video",
-        ".png": "image",
-        ".jpg": "image",
-        ".jpeg": "image",
-        ".webp": "image",
-        ".gif": "image",
-        ".mp3": "audio",
-        ".wav": "audio",
-        ".ogg": "audio",
-        ".m4a": "audio",
-    }
-    kind = kind_map.get(ext, "video")
-    mime_map = {
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".mov": "video/quicktime",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-        ".gif": "image/gif",
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".ogg": "audio/ogg",
-        ".m4a": "audio/mp4",
-    }
-    mime_type = mime_map.get(ext, "application/octet-stream")
-
-    storage = get_storage_backend()
-    url = await storage.get_url(media_path)
-
-    message = Message(
-        id=uuid4(),
-        conversation_id=job.chat_conversation_id,
-        role="assistant",
-        content="Here is the result:",
-        attachments=[{"kind": kind, "url": url, "mime_type": mime_type}],
-        job_id=job.id,
-    )
-    db.add(message)
-    await db.commit()
-    await db.refresh(message)
-
-    await ws_manager.broadcast_chat_message(str(job.chat_conversation_id), str(message.id))
+    await JobChatNotifier.notify_failed(db, job, error_message)
 
 
 async def get_template_name(db, template_id: UUID | None) -> str:
@@ -355,12 +321,14 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                 )
                 acquired = await semaphore.acquire(job_id)
                 if not acquired:
+                    error_message = "Provider queue is full. Job will be retried."
                     await update_job_status(
                         job_uuid,
                         "failed",
                         0,
-                        error_message="Provider queue is full. Job will be retried.",
+                        error_message=error_message,
                     )
+                    await _maybe_notify_job_failed(job, error_message, db=db)
                     return {"status": "failed", "error": "Queue full", "job_id": job_id}
 
             from sqlalchemy import delete as sa_delete
@@ -420,6 +388,7 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
                             0,
                             error_message=budget_message,
                         )
+                        await _maybe_notify_job_failed(job, budget_message, db=db)
                         return {"status": "failed", "error": budget_message, "job_id": job_id}
 
                     await update_job_status(
@@ -454,6 +423,7 @@ async def _process_video_job(job_id: str, provider_preference: str = "auto") -> 
         except Exception as exc:
             error_message = str(exc)
             await update_job_status(job_uuid, "failed", 0, error_message=error_message)
+            await _maybe_notify_job_failed(job, error_message, db=db)
 
             # Capture error for notification system
             try:

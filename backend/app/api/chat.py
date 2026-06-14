@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user_from_bearer_or_cookie
 from app.api.schemas.chat import (
+    AutonomyModeRequest,
+    AutonomyModeResponse,
     ChatStreamMessageCreate,
     ConversationCreate,
     ConversationOut,
@@ -24,6 +26,7 @@ from app.chatbot.service import ChatOrchestrator, ConversationService, TokenUsag
 from app.chatbot.streaming import encode_sse_event
 from app.chatbot.tools import ToolContext
 from app.database import Conversation, Message, User, get_db
+from app.services.chat_autonomy_service import ChatAutonomyService
 from app.storage import get_storage_backend
 
 logger = logging.getLogger(__name__)
@@ -290,6 +293,41 @@ async def delete_conversation(
 ) -> None:
     service = ConversationService(db)
     await service.delete(current_user.id, conversation_id)
+
+
+@router.get(
+    "/conversations/{conversation_id}/autonomy",
+    response_model=AutonomyModeResponse,
+)
+async def get_autonomy_mode(
+    conversation_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AutonomyModeResponse:
+    try:
+        mode = await ChatAutonomyService.get_mode(db, conversation_id, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AutonomyModeResponse(mode=mode)
+
+
+@router.post(
+    "/conversations/{conversation_id}/autonomy",
+    response_model=AutonomyModeResponse,
+)
+async def set_autonomy_mode(
+    conversation_id: UUID,
+    data: AutonomyModeRequest,
+    current_user: Annotated[User, Depends(get_current_user_from_bearer_or_cookie)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AutonomyModeResponse:
+    try:
+        mode = await ChatAutonomyService.set_mode(
+            db, conversation_id, current_user.id, data.mode
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AutonomyModeResponse(mode=mode)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=MessageListResponse)

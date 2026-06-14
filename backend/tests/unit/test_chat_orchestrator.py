@@ -2,14 +2,16 @@
 
 from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
-from app.chatbot.service import SYSTEM_PROMPT, ChatOrchestrator
+from app.chatbot.service import SYSTEM_PROMPT_TEMPLATE, ChatOrchestrator
 from app.chatbot.tools import ToolContext, ToolDefinition, ToolRegistry
 from app.database import ChatTokenUsage, Conversation, Message
+from app.services.chat_autonomy_service import ChatAutonomyService
 from app.services.llm_service import LLMChunk
 
 
@@ -45,7 +47,12 @@ class FakeMCPManager:
 
 
 async def collect_events(orchestrator: ChatOrchestrator, conversation, user) -> list[tuple[str, dict]]:
-    ctx = ToolContext(user_id=str(user.id), db=orchestrator.db, request_id="req1")
+    ctx = ToolContext(
+        user_id=str(user.id),
+        db=orchestrator.db,
+        request_id="req1",
+        conversation_id=str(conversation.id),
+    )
     return [
         event
         async for event in orchestrator.run_turn(
@@ -93,7 +100,10 @@ async def test_run_turn_streams_final_answer_and_records_usage(db_session, regul
         ("usage", {"tokens_in": 8, "tokens_out": 2}),
         ("done", {}),
     ]
-    assert llm.calls[0]["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert llm.calls[0]["messages"][0] == {
+        "role": "system",
+        "content": SYSTEM_PROMPT_TEMPLATE.format(autonomy_mode="confirm"),
+    }
     assert llm.calls[0]["model"] == "test-model"
 
     rows = (await db_session.execute(select(Message).order_by(Message.created_at))).scalars().all()
@@ -508,3 +518,48 @@ async def test_run_turn_handles_tool_returning_list(db_session, regular_user, co
         ("usage", {"tokens_in": 5, "tokens_out": 2}),
         ("done", {}),
     ]
+
+
+@pytest.mark.asyncio
+async def test_should_pause_after_present_job_draft():
+    orchestrator = ChatOrchestrator(AsyncMock(), mcp_manager=FakeMCPManager())
+
+    assert (
+        orchestrator._should_pause_after_tool(
+            "present_job_draft", {"kind": "job_draft", "draft": {}}
+        )
+        is True
+    )
+    assert (
+        orchestrator._should_pause_after_tool(
+            "present_job_draft", {"error": "missing_argument"}
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_system_prompt_reflects_autonomy_mode(
+    db_session, regular_user, conversation
+):
+    await ChatAutonomyService.set_mode(
+        db_session, conversation.id, regular_user.id, "autonomous"
+    )
+    llm = FakeLLM(
+        [
+            [
+                LLMChunk(type="text", content="Hello"),
+                LLMChunk(type="usage", tokens_in=5, tokens_out=2),
+                LLMChunk(type="done"),
+            ]
+        ]
+    )
+    orchestrator = ChatOrchestrator(
+        db_session, llm=llm, mcp_manager=FakeMCPManager()
+    )
+
+    await collect_events(orchestrator, conversation, regular_user)
+
+    system_msg = llm.calls[0]["messages"][0]
+    assert system_msg["role"] == "system"
+    assert "Current confirmation mode: autonomous" in system_msg["content"]

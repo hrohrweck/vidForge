@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import Job, Project, Template
+from app.services.chat_autonomy_service import ChatAutonomyService
 from app.services.llm_service import LLMClient
 
 
@@ -69,6 +70,24 @@ class ToolRegistry:
         ]
 
 
+async def _resolve_template_id(template: str, db: AsyncSession | None) -> str:
+    """Return a valid template UUID, resolving a name to an ID when possible."""
+    try:
+        UUID(template)
+        return template
+    except ValueError:
+        # The LLM sometimes passes a template name instead of a UUID.
+        # Resolve it to the matching builtin template ID.
+        if db is not None:
+            result = await db.execute(
+                select(Template.id).where(Template.name.ilike(template)).limit(1)
+            )
+            template_id = result.scalar_one_or_none()
+            if template_id is not None:
+                return str(template_id)
+        return template
+
+
 async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Create a new video generation job."""
     template = args.get("template")
@@ -81,25 +100,8 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     payload: dict[str, Any] = {
         "title": prompt[:50] if prompt else "Untitled Video",
         "input_data": {"prompt": prompt},
+        "template_id": await _resolve_template_id(template, ctx.db),
     }
-
-    try:
-        UUID(template)
-        payload["template_id"] = template
-    except ValueError:
-        # The LLM sometimes passes a template name instead of a UUID.
-        # Resolve it to the matching builtin template ID.
-        if ctx.db is not None:
-            result = await ctx.db.execute(
-                select(Template.id).where(Template.name.ilike(template)).limit(1)
-            )
-            template_id = result.scalar_one_or_none()
-            if template_id is not None:
-                payload["template_id"] = str(template_id)
-            else:
-                payload["template_id"] = template
-        else:
-            payload["template_id"] = template
 
     # Map API-supported fields only. The jobs API validates input_data against
     # the plugin's Pydantic schema and rejects unknown extra fields, so we must
@@ -161,6 +163,90 @@ async def _handle_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str
     if isinstance(result, dict) and "id" in result and "job_id" not in result:
         result["job_id"] = result["id"]
     return result
+
+
+async def _handle_present_job_draft(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Present a job draft to the user for approval."""
+    template = args.get("template")
+    prompt = args.get("prompt")
+    if not template:
+        return {"error": "missing_argument", "message": "'template' is required"}
+    if not prompt:
+        return {"error": "missing_argument", "message": "'prompt' is required"}
+
+    draft: dict[str, Any] = {
+        "template": await _resolve_template_id(template, ctx.db),
+        "prompt": prompt,
+        "duration": args.get("duration", 30),
+        "style": args.get("style", "realistic"),
+        "aspect_ratio": args.get("aspect_ratio", "16:9"),
+    }
+
+    if "avatars" in args:
+        draft["avatars"] = [
+            {"avatar_id": str(item)} if isinstance(item, str) else item
+            for item in args["avatars"]
+        ]
+
+    for key in ("image_model", "video_model"):
+        if key in args:
+            draft[key] = args[key]
+
+    if ctx.conversation_id and ctx.db:
+        from uuid import uuid4
+
+        from app.api.websocket import manager as ws_manager
+        from app.database import Message
+
+        card_message = Message(
+            id=uuid4(),
+            conversation_id=UUID(ctx.conversation_id),
+            role="assistant",
+            content="Here is a draft for your review.",
+            attachments=[{
+                "kind": "job_card",
+                "card_type": "job_draft",
+                "job_id": None,
+                "title": "Job draft",
+                "data": draft,
+                "actions": ["create"],
+            }],
+        )
+        ctx.db.add(card_message)
+        await ctx.db.commit()
+        await ctx.db.refresh(card_message)
+        await ws_manager.broadcast_chat_message(ctx.conversation_id, str(card_message.id))
+
+    return {"kind": "job_draft", "action": "draft", "draft": draft}
+
+
+async def _handle_set_chat_autonomy(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Set the chat autonomy mode for this conversation."""
+    mode = args.get("mode")
+    if mode not in ("confirm", "autonomous"):
+        return {"error": "invalid_mode", "message": "'mode' must be 'confirm' or 'autonomous'"}
+
+    if not ctx.conversation_id or ctx.db is None:
+        return {
+            "error": "missing_context",
+            "message": "Conversation context and database session are required",
+        }
+
+    await ChatAutonomyService.set_mode(
+        ctx.db, UUID(ctx.conversation_id), UUID(ctx.user_id), mode
+    )
+    return {"mode": mode}
+
+
+async def _handle_get_chat_autonomy(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Get the chat autonomy mode for this conversation."""
+    if not ctx.conversation_id or ctx.db is None:
+        return {"mode": "confirm"}
+
+    mode = await ChatAutonomyService.get_mode(
+        ctx.db, UUID(ctx.conversation_id), UUID(ctx.user_id)
+    )
+    return {"mode": mode}
 
 
 async def _handle_list_templates(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -1055,7 +1141,7 @@ def create_builtin_registry() -> ToolRegistry:
     registry.register(
         ToolDefinition(
             name="create_job",
-            description="Create a new video generation job. If the user has auto_create_jobs disabled, returns a draft payload instead.",
+            description="Create a new video generation job. In confirm mode the assistant should first call present_job_draft and wait for approval; in autonomous mode this tool creates the job directly.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -2382,6 +2468,61 @@ def create_builtin_registry() -> ToolRegistry:
                 },
             },
             handler=_handle_update_user_settings,
+        )
+    )
+
+    # Chat autonomy / draft presentation
+    registry.register(
+        ToolDefinition(
+            name="present_job_draft",
+            description="Present a video generation draft to the user for approval before creating a job.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "template": {"type": "string", "description": "Template ID or name"},
+                    "prompt": {"type": "string", "description": "Video generation prompt"},
+                    "duration": {"type": "number", "description": "Target duration in seconds"},
+                    "style": {"type": "string", "description": "Visual style name"},
+                    "aspect_ratio": {"type": "string", "description": "Aspect ratio (e.g. 16:9)"},
+                    "avatars": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of avatar IDs to include in the video",
+                    },
+                    "image_model": {"type": "string", "description": "Image generation model ID"},
+                    "video_model": {"type": "string", "description": "Video generation model ID"},
+                },
+                "required": ["template", "prompt"],
+            },
+            handler=_handle_present_job_draft,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="set_chat_autonomy",
+            description="Set whether the chatbot must confirm before creating jobs.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["confirm", "autonomous"],
+                        "description": "Chat autonomy mode",
+                    },
+                },
+                "required": ["mode"],
+            },
+            handler=_handle_set_chat_autonomy,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="get_chat_autonomy",
+            description="Get the current chat autonomy mode for this conversation.",
+            input_schema={"type": "object", "properties": {}},
+            handler=_handle_get_chat_autonomy,
         )
     )
 

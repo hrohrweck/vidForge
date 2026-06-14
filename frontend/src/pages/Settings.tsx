@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Save, RefreshCw, Trash2, Folder, File, Sun, Moon, Monitor, Cpu } from 'lucide-react'
-import { storageApi, stylesApi, modelsApi, type ModelConfig, type ModelPreferences } from '../api/client'
+import { storageApi, stylesApi, modelsApi, usersApi, type ModelConfig, type ModelPreferences } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { Button } from '../components/ui/button'
@@ -146,6 +146,26 @@ export default function Settings() {
 
   const [autoCreateJobs, setAutoCreateJobs] = useState(false)
 
+  const { data: chatAutonomyData } = useQuery({
+    queryKey: ['chat-autonomy'],
+    queryFn: () => usersApi.getChatAutonomy(),
+  })
+
+  const [chatAutonomy, setChatAutonomy] = useState<'confirm' | 'autonomous'>('confirm')
+
+  useEffect(() => {
+    if (chatAutonomyData?.chat_autonomy) {
+      setChatAutonomy(chatAutonomyData.chat_autonomy)
+    }
+  }, [chatAutonomyData?.chat_autonomy])
+
+  const setChatAutonomyMutation = useMutation({
+    mutationFn: usersApi.setChatAutonomy,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chat-autonomy'] })
+    },
+  })
+
   const handleSaveSettings = () => {
     updateSettingsMutation.mutate({
       ...storageSettings,
@@ -249,6 +269,26 @@ export default function Settings() {
                     When enabled, jobs are created immediately without asking for confirmation
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="chat_autonomy">Default chat autonomy</Label>
+                <p className="text-xs text-muted-foreground">
+                  Choose how the chat assistant creates jobs by default
+                </p>
+                <select
+                  id="chat_autonomy"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={chatAutonomy}
+                  onChange={(e) => {
+                    const mode = e.target.value as 'confirm' | 'autonomous'
+                    setChatAutonomy(mode)
+                    setChatAutonomyMutation.mutate(mode)
+                  }}
+                >
+                  <option value="confirm">Ask before creating jobs</option>
+                  <option value="autonomous">Create jobs automatically</option>
+                </select>
               </div>
             </div>
           </div>

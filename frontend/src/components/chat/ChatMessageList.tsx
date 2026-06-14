@@ -2,11 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import type { Message } from '../../stores/chat'
+import type { Message, JobCardAttachment } from '../../stores/chat'
+import {
+  JobDraftCard,
+  ScenePlanCard,
+  ImageReviewCard,
+  VideoReviewCard,
+  JobCompletedCard,
+  JobErrorCard,
+} from './cards'
 
 interface ChatMessageListProps {
   messages: Message[]
   streaming?: boolean
+  conversationId?: string
 }
 
 function TypingIndicator() {
@@ -202,7 +211,78 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
   )
 }
 
-export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
+function AttachmentList({ attachments, conversationId, messageId }: { attachments: Message['attachments']; conversationId?: string; messageId?: string }) {
+  if (!attachments || attachments.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-2">
+      {attachments.map((att, i) => {
+        if (att.kind === 'job_card') {
+          const card = att as JobCardAttachment
+          const cardComponent = {
+            job_draft: <JobDraftCard data={card.data} jobId={card.job_id} conversationId={conversationId} messageId={messageId} />,
+            scene_plan: <ScenePlanCard data={card.data} jobId={card.job_id} />,
+            image_review: <ImageReviewCard data={card.data} jobId={card.job_id} />,
+            video_review: <VideoReviewCard data={card.data} jobId={card.job_id} />,
+            job_completed: <JobCompletedCard data={card.data} jobId={card.job_id} />,
+            job_error: <JobErrorCard data={card.data} jobId={card.job_id} />,
+          }[card.card_type]
+
+          return (
+            <div key={i} className="w-full text-foreground">
+              {cardComponent ?? (
+                <div className="rounded border bg-muted p-2 text-xs text-muted-foreground">
+                  Unknown card type: {card.card_type}
+                </div>
+              )}
+            </div>
+          )
+        }
+
+        const legacyAtt = att as {url: string; type?: string; name?: string; kind?: string; mime_type?: string}
+        const isImage = (legacyAtt.type ?? legacyAtt.mime_type ?? '').startsWith('image') || legacyAtt.kind === 'image'
+        const isVideo = (legacyAtt.type ?? legacyAtt.mime_type ?? '').startsWith('video') || legacyAtt.kind === 'video'
+        const isAudio = (legacyAtt.type ?? legacyAtt.mime_type ?? '').startsWith('audio') || legacyAtt.kind === 'audio'
+        return isImage ? (
+          <img
+            key={i}
+            src={legacyAtt.url}
+            alt={legacyAtt.name || 'attachment'}
+            className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer"
+            onClick={() => window.open(legacyAtt.url, '_blank')}
+          />
+        ) : isVideo ? (
+          <video
+            key={i}
+            src={legacyAtt.url}
+            controls
+            className="max-w-[200px] max-h-[200px] rounded-lg"
+          />
+        ) : isAudio ? (
+          <audio
+            key={i}
+            src={legacyAtt.url}
+            controls
+            className="w-full"
+          />
+        ) : (
+          <a
+            key={i}
+            href={legacyAtt.url}
+            target="_blank"
+            rel="noreferrer"
+            download
+            className="text-sm underline"
+          >
+            {legacyAtt.name || (legacyAtt.type ?? legacyAtt.kind ?? legacyAtt.mime_type) || 'Attachment'}
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+export function ChatMessageList({ messages, streaming, conversationId }: ChatMessageListProps) {
   const visibleMessages = messages.filter((msg) => msg.role !== 'tool' && msg.role !== 'system')
 
   const showTypingIndicator =
@@ -249,53 +329,12 @@ export function ChatMessageList({ messages, streaming }: ChatMessageListProps) {
             >
               {isUser ? (
                 <>
-                  {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {msg.attachments.map((att, i) => {
-                        const isImage = (att.type ?? att.mime_type ?? '').startsWith('image') || att.kind === 'image'
-                        const isVideo = (att.type ?? att.mime_type ?? '').startsWith('video') || att.kind === 'video'
-                        const isAudio = (att.type ?? att.mime_type ?? '').startsWith('audio') || att.kind === 'audio'
-                        return isImage ? (
-                          <img
-                            key={i}
-                            src={att.url}
-                            alt={att.name || 'attachment'}
-                            className="max-w-[200px] max-h-[200px] rounded-lg object-cover cursor-pointer"
-                            onClick={() => window.open(att.url, '_blank')}
-                          />
-                        ) : isVideo ? (
-                          <video
-                            key={i}
-                            src={att.url}
-                            controls
-                            className="max-w-[200px] max-h-[200px] rounded-lg"
-                          />
-                        ) : isAudio ? (
-                          <audio
-                            key={i}
-                            src={att.url}
-                            controls
-                            className="w-full"
-                          />
-                        ) : (
-                          <a
-                            key={i}
-                            href={att.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            download
-                            className="text-sm underline"
-                          >
-                            {att.name || (att.type ?? att.kind ?? att.mime_type) || 'Attachment'}
-                          </a>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <AttachmentList attachments={msg.attachments} conversationId={conversationId} messageId={msg.id} />
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                 </>
               ) : (
                 <>
+                  <AttachmentList attachments={msg.attachments} conversationId={conversationId} messageId={msg.id} />
                   <AssistantMessage content={msg.content} streaming={streaming} />
                   {msg.mediaResult && (
                     <div className="mt-2">

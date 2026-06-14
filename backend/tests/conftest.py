@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 import app.models.app_settings  # noqa: F401
 import app.models.media  # noqa: F401
 from app.api.auth import create_access_token
-from app.database import Base, Job, Template, User, get_db
+from app.database import Base, Conversation, Job, Template, User, get_db
 from app.main import app
 
 # Ensure a valid SECRET_KEY is present for tests so config validation passes
@@ -153,6 +153,20 @@ async def template(db_session: AsyncSession):
     await db_session.commit()
     await db_session.refresh(template)
     return template
+
+
+@pytest.fixture
+async def conversation(db_session: AsyncSession, regular_user: User):
+    conversation = Conversation(
+        id=uuid4(),
+        user_id=regular_user.id,
+        title="Test Conversation",
+        model_id="test-model",
+    )
+    db_session.add(conversation)
+    await db_session.commit()
+    await db_session.refresh(conversation)
+    return conversation
 
 
 @pytest.fixture
