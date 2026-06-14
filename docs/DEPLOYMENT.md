@@ -82,11 +82,11 @@ VITE_WS_URL=wss://api.yourdomain.com
 ### Docker (`docker/.env`)
 
 ```bash
-COMFYUI_MODELS_PATH=../models/comfyui
-COMFYUI_OUTPUT_PATH=../models/comfyui-output
 OLLAMA_MODELS_PATH=../models/ollama
 OLLAMA_PORT=11435
 ```
+
+ComfyUI models are stored in the named Docker volume `comfyui-models`, so they persist across container restarts without a host-path bind mount.
 
 ## Deployment Steps
 

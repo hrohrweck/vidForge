@@ -6,8 +6,8 @@ services:
     ports:
       - "8188:8188"
     volumes:
-      - ${COMFYUI_MODELS_PATH}:/workspace/ComfyUI/models
-      - ${COMFYUI_OUTPUT_PATH}:/workspace/ComfyUI/output
+      - comfyui-models:/workspace/ComfyUI/models
+      - comfyui-output:/workspace/ComfyUI/output
     devices:
       - /dev/kfd
       - /dev/dri
